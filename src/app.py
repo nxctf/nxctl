@@ -7,6 +7,12 @@ import argparse
 import os
 from pathlib import Path
 
+# Auto-detect project root (one level up from src/)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+os.chdir(PROJECT_ROOT)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 # Auto-load .env
 try:
     from dotenv import load_dotenv
@@ -53,6 +59,7 @@ from src.scripts.cli.lifecycle import (
     cmd_restart,
     cmd_status,
     cmd_extend,
+    cmd_daemon,
 )
 from src.scripts.cli.exports import (
     cmd_export,
@@ -125,6 +132,10 @@ Examples:
     extend_cmd = subparsers.add_parser("extend", help="Extend challenge runtime")
     extend_cmd.add_argument("name", help="Challenge name")
     extend_cmd.set_defaults(func=cmd_extend)
+
+    daemon_cmd = subparsers.add_parser("daemon", help="Run background monitor daemon")
+    daemon_cmd.add_argument("--interval", type=int, help="Check interval in seconds")
+    daemon_cmd.set_defaults(func=cmd_daemon)
 
     # ======== EXPORT MANAGEMENT ========
     export_cmd = subparsers.add_parser("export", help="Manual tunnel, or auto-pick if provider omitted")

@@ -38,6 +38,7 @@ class Config(BaseModel):
     default_ttl_minutes: int = 15
     extend_time_minutes: int = 10
     extend_threshold_minutes: int = 5
+    daemon_interval: int = 10
 
     class Config:
         extra = "allow"

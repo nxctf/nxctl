@@ -58,7 +58,7 @@ _ctfs_back_completion() {
     cmd="${COMP_WORDS[1]}"
 
     # Updated command list to match app.py
-    local commands="sync list inspect add remove up down restart status extend export unexport exports"
+    local commands="sync list inspect add remove up down restart status extend daemon export unexport exports"
     local provider_names="ngrok localtunnel pinggy"
 
     # Top-level commands

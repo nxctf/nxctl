@@ -1,0 +1,14 @@
+[Unit]
+Description=CTF Orchestrator Daemon
+After=docker.service
+
+[Service]
+Type=simple
+User=root
+# WorkingDirectory no longer needed as ctfc auto-detects project root
+ExecStart=/usr/local/bin/ctfc daemon --interval 30
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

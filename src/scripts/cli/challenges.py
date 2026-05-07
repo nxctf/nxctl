@@ -66,19 +66,54 @@ def cmd_list(args) -> int:
 
 def cmd_inspect(args) -> int:
     try:
-        _, challenge_service, _, _ = get_services()
+        config, challenge_service, runtime_service, export_manager = get_services()
         challenge = challenge_service.get_challenge(args.name)
         if not challenge:
             print(f"\n{red('✗')} Challenge not found: {args.name}\n")
             return 1
 
-        print(f"\n{bold(f'Challenge: {challenge.name}')}\n{'-' * 60}")
-        print(f"Path:      {challenge.path}")
-        print(f"Port:      {challenge.service_port}")
-        print(f"Type:      {challenge.service_type}")
-        print(f"Enabled:   {green('Yes') if challenge.enabled else red('No')}")
-        print(f"Created:   {challenge.created_at}")
-        print()
+        print(f"\n{bold(f'Challenge: {challenge.name}')}\n{'-' * 80}")
+        print(f"{'Path:':12} {challenge.path}")
+        print(f"{'Port:':12} {challenge.service_port}")
+        print(f"{'Type:':12} {challenge.service_type}")
+        print(f"{'Enabled:':12} {green('Yes') if challenge.enabled else red('No')}")
+        print(f"{'Created:':12} {challenge.created_at}")
+
+        # Runtime Info
+        runtime = runtime_service.status(args.name)
+        print(f"\n{bold('Runtime Status')}")
+        print(f"{'-' * 40}")
+        status_col = green(runtime.status) if runtime.status == 'running' else red(runtime.status)
+        print(f"{'Status:':12} {status_col}")
+
+        if runtime.status == 'running':
+            print(f"{'Container:':12} {runtime.container_id or '-'}")
+            print(f"{'Started At:':12} {runtime.started_at or '-'}")
+
+            if runtime.expires_at:
+                from datetime import datetime
+                remaining = runtime.expires_at - datetime.now()
+                rem_seconds = remaining.total_seconds()
+                if rem_seconds > 0:
+                    rem_str = f"{int(rem_seconds // 60)}m {int(rem_seconds % 60)}s"
+                    print(f"{'Expires At:':12} {runtime.expires_at} ({rem_str} left)")
+                else:
+                    print(f"{'Expires At:':12} {runtime.expires_at} ({red('EXPIRED')})")
+
+        # Exports Info
+        exports = export_manager.list_exports(args.name, check_health=True)
+        print(f"\n{bold('Active Exports')}")
+        print(f"{'-' * 40}")
+        if not exports:
+            print("  None")
+        for exp in exports:
+            exp_status = green('✓ active') if exp['status'] == 'active' else red(f"✗ {exp['status']}")
+            print(f"  • {bold(exp['provider']):10} [{exp_status}]")
+            print(f"    Endpoint:  {exp['endpoint']}")
+            print(f"    PID:       {exp['pid']}")
+            print(f"    Created:   {exp['created_at']}")
+
+        print(f"\n{'-' * 80}\n")
         return 0
     except Exception as e:
         print(f"\n{red('✗')} Inspect failed: {str(e)}\n")

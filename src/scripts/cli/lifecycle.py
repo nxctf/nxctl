@@ -269,3 +269,52 @@ def cmd_extend(args) -> int:
     except Exception as e:
         print(f"\n{red('✗')} Extend failed: {str(e)}\n")
         return 1
+
+def cmd_daemon(args) -> int:
+    try:
+        config, challenge_service, runtime_service, export_manager = get_services()
+        # Priority: CLI argument > Config file
+        interval = getattr(args, "interval", None) or config.daemon_interval
+
+        print(f"\n{blue('[daemon]')} Starting CTF Orchestrator Daemon")
+        print(f"{blue('[daemon]')} Interval: {interval}s")
+        print(f"{blue('[daemon]')} Monitoring challenges for auto-shutdown...\n")
+
+        while True:
+            try:
+                # 1. Handle auto-shutdown for expired runtimes
+                import sqlite3
+                from src.core.db import get_db_connection, close_db_connection
+                conn = get_db_connection(config.db_file)
+                cursor = conn.cursor()
+                try:
+                    cursor.execute("""
+                        SELECT c.name
+                        FROM runtime_instances r
+                        JOIN challenges c ON r.challenge_id = c.id
+                        WHERE r.status = 'running'
+                        AND r.expires_at IS NOT NULL
+                        AND r.expires_at < datetime('now', 'localtime')
+                    """)
+                    expired = [row["name"] for row in cursor.fetchall()]
+                finally:
+                    close_db_connection(conn)
+
+                for name in expired:
+                    print(f"{yellow('[daemon]')} Auto-stopping expired challenge: {name}")
+                    _stop_challenge_completely(name, challenge_service, runtime_service, export_manager)
+
+                # 2. Reconcile exports (mark dead PIDs)
+                export_manager.reconcile_exports()
+
+            except Exception as e:
+                print(f"{red('[daemon] Error:')} {e}")
+
+            time.sleep(interval)
+
+    except KeyboardInterrupt:
+        print(f"\n{yellow('[daemon]')} Shutting down daemon...")
+        return 0
+    except Exception as e:
+        print(f"\n{red('[daemon]')} Fatal error: {str(e)}\n")
+        return 1

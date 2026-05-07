@@ -17,6 +17,7 @@ enable_pinggy: true
 default_ttl_minutes: 2
 extend_time_minutes: 1
 extend_threshold_minutes: 1
+daemon_interval: 10
 
 ngrok_tokens:
   - ${NGROK_TOKEN_1}
