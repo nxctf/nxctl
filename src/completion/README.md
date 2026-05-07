@@ -1,31 +1,25 @@
-# CTFS Back Bash Completion
+# ⌨️ Bash Completion for ctfc
 
-Completion script untuk CLI `app.py`.
+Enhance your terminal experience with smart tab-completion for **ctfc**.
 
-## Instalasi
+## ✨ Features
+- **Instant Commands**: Complete all `ctfc` subcommands.
+- **Dynamic Challenge Detection**: Directly queries the SQLite database for lightning-fast results.
+- **Provider Autocomplete**: Complete tunnel providers (`ngrok`, `localtunnel`, `pinggy`).
+- **Flag Support**: Autocomplete for flags like `--watch` and `--type`.
 
+## 🚀 Installation
+The completion is automatically installed when you run `./setup.sh install`.
+
+To install manually:
 ```bash
-chmod +x completion/install.sh completion/uninstall.sh completion/ctfs-back-completion.bash
-./completion/install.sh
+chmod +x install.sh
+./install.sh
+source ~/.bashrc
 ```
 
-## Penggunaan
-
+## 🗑️ Removal
 ```bash
-./app.py <TAB>
-./app.py inspect <TAB>
-./app.py enable <TAB>
-./app.py export <TAB>
-./app.py clean <TAB>
+chmod +x uninstall.sh
+./uninstall.sh
 ```
-
-## Uninstall
-
-```bash
-./completion/uninstall.sh
-```
-
-## Catatan
-
-- Completion ini mengambil daftar challenge dari output `./app.py list`.
-- Nama challenge yang belum ada di database tidak akan muncul sampai kamu jalankan sync/list yang menghasilkan data.

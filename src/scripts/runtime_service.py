@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 import yaml
+from datetime import datetime, timedelta
 
 from src.core.models import Challenge, RuntimeInstance
 from src.core.db import get_db_connection, close_db_connection
@@ -21,8 +22,9 @@ class RuntimeError(Exception):
 class RuntimeService:
     """Service for managing challenge runtimes."""
 
-    def __init__(self, db_path: str, git_cache_dir: str):
+    def __init__(self, config, db_path: str, git_cache_dir: str):
         """Initialize runtime service."""
+        self.config = config
         self.db_path = db_path
         self.git_cache_dir = Path(git_cache_dir)
 
@@ -74,6 +76,14 @@ class RuntimeService:
             if not row:
                 return None
 
+            def parse_date(val):
+                if not val: return None
+                if isinstance(val, datetime): return val
+                try:
+                    return datetime.strptime(val, '%Y-%m-%d %H:%M:%S')
+                except:
+                    return val
+
             return RuntimeInstance(
                 id=row["id"],
                 challenge_id=row["challenge_id"],
@@ -81,13 +91,84 @@ class RuntimeService:
                 container_id=row["container_id"],
                 tunnel_provider=row["tunnel_provider"],
                 public_url=row["public_url"],
-                started_at=row["started_at"],
-                expires_at=row["expires_at"],
-                last_activity=row["last_activity"],
-                last_revert=row["last_revert"],
-                created_at=row["created_at"],
+                started_at=parse_date(row["started_at"]),
+                expires_at=parse_date(row["expires_at"]),
+                last_activity=parse_date(row["last_activity"]),
+                last_revert=parse_date(row["last_revert"]),
+                created_at=parse_date(row["created_at"]),
             )
 
+        finally:
+            close_db_connection(conn)
+
+    def extend_time(self, challenge_name: str) -> RuntimeInstance:
+        """Extend runtime by N minutes."""
+        challenge = self._get_challenge_from_db(challenge_name)
+        if not challenge:
+            raise RuntimeError(f"Challenge not found: {challenge_name}")
+
+        runtime = self._get_runtime_from_db(challenge.id)
+        if not runtime or runtime.status != "running":
+            raise RuntimeError(f"Challenge not running: {challenge_name}")
+
+        if not runtime.expires_at:
+            raise RuntimeError("Challenge has no expiration time")
+
+        # Calculate remaining time
+        expires_at = runtime.expires_at
+        remaining = expires_at - datetime.now()
+        remaining_mins = remaining.total_seconds() / 60
+
+        if remaining_mins > self.config.extend_threshold_minutes:
+            raise RuntimeError(f"Can only extend when remaining time is less than {self.config.extend_threshold_minutes} minutes")
+
+        new_expires_at = expires_at + timedelta(minutes=self.config.extend_time_minutes)
+
+        self._update_runtime_expiry(challenge.id, new_expires_at)
+        logger.info(f"Extended {challenge_name} expiry to {new_expires_at}")
+
+        return self._get_runtime_from_db(challenge.id)
+
+    def stop_expired_runtimes(self) -> list[str]:
+        """Check for and stop all expired runtimes."""
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        stopped = []
+
+        try:
+            cursor.execute("""
+                SELECT c.name
+                FROM runtime_instances r
+                JOIN challenges c ON r.challenge_id = c.id
+                WHERE r.status = 'running'
+                AND r.expires_at IS NOT NULL
+                AND r.expires_at < datetime('now', 'localtime')
+            """)
+
+            expired = [row["name"] for row in cursor.fetchall()]
+            for name in expired:
+                try:
+                    self.stop(name)
+                    stopped.append(name)
+                except Exception as e:
+                    logger.error(f"Failed to stop expired challenge {name}: {e}")
+
+            return stopped
+        finally:
+            close_db_connection(conn)
+
+    def _update_runtime_expiry(self, challenge_id: int, expires_at: datetime) -> None:
+        """Update runtime expiration in database."""
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                UPDATE runtime_instances
+                SET expires_at = ?
+                WHERE challenge_id = ?
+                AND status = 'running'
+            """, (expires_at.strftime('%Y-%m-%d %H:%M:%S'), challenge_id))
+            conn.commit()
         finally:
             close_db_connection(conn)
 
@@ -130,6 +211,11 @@ class RuntimeService:
         runtime = self._get_runtime_from_db(challenge.id)
         if runtime and runtime.status == "running":
             logger.info(f"Challenge already running: {challenge_name}")
+            # Backfill expiry if missing
+            if not runtime.expires_at:
+                expires_at = datetime.now() + timedelta(minutes=self.config.default_ttl_minutes)
+                self._update_runtime_expiry(challenge.id, expires_at)
+                runtime.expires_at = expires_at
             return runtime
 
         # Find challenge directory
@@ -186,6 +272,9 @@ class RuntimeService:
             logger.info(f"Starting challenge: {challenge_name} on port {desired_port}")
             run_docker_compose_up(docker_compose_run, cwd=challenge_dir, detach=True)
 
+            # Set expiry
+            expires_at = datetime.now() + timedelta(minutes=self.config.default_ttl_minutes)
+
             # Save to database
             if challenge.id is None:
                 raise RuntimeError(f"Invalid challenge id for {challenge_name}")
@@ -194,6 +283,7 @@ class RuntimeService:
                 challenge_id=challenge.id,
                 status="running",
                 container_id="",
+                expires_at=expires_at
             )
 
             logger.info(f"Successfully started challenge: {challenge_name}")
@@ -276,9 +366,15 @@ class RuntimeService:
                 container_id=None,
             )
 
+        # Auto-backfill expiry for legacy records that are still running
+        if runtime.status == 'running' and not runtime.expires_at:
+            expires_at = datetime.now() + timedelta(minutes=self.config.default_ttl_minutes)
+            self._update_runtime_expiry(challenge.id, expires_at)
+            runtime.expires_at = expires_at
+
         return runtime
 
-    def _save_runtime_to_db(self, challenge_id: int, status: str, container_id: str = "") -> None:
+    def _save_runtime_to_db(self, challenge_id: int, status: str, container_id: str = "", expires_at: datetime = None) -> None:
         """Save runtime instance to database."""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
@@ -286,9 +382,9 @@ class RuntimeService:
         try:
             cursor.execute("""
                 INSERT INTO runtime_instances
-                (challenge_id, status, container_id)
-                VALUES (?, ?, ?)
-            """, (challenge_id, status, container_id))
+                (challenge_id, status, container_id, started_at, expires_at)
+                VALUES (?, ?, ?, datetime('now', 'localtime'), ?)
+            """, (challenge_id, status, container_id, expires_at.strftime('%Y-%m-%d %H:%M:%S') if expires_at else None))
 
             conn.commit()
             logger.debug(f"Runtime instance saved for challenge_id={challenge_id}")

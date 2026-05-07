@@ -1,6 +1,6 @@
-# CTF Challenge Orchestration Engine Configuration
+# CTF Challenge Orchestration Engine Configuration Template
 
-github_repo: https://github.com/ariafatah0711/b
+github_repo: https://github.com/your-username/your-repo
 branch: main
 access_token: ${GITHUB_TOKEN}
 
@@ -14,16 +14,11 @@ enable_localtunnel: true
 enable_pinggy: true
 
 # TTL settings
-default_ttl_minutes: 2
-extend_time_minutes: 1
-extend_threshold_minutes: 1
+default_ttl_minutes: 15
+extend_time_minutes: 10
+extend_threshold_minutes: 5
 
 ngrok_tokens:
   - ${NGROK_TOKEN_1}
-  - ${NGROK_TOKEN_2}
-  - ${NGROK_TOKEN_3}
-  - ${NGROK_TOKEN_4}
-  - ${NGROK_TOKEN_5}
-  - ${NGROK_TOKEN_6}
 
 pinggy_token: ${PINGGY_TOKEN}

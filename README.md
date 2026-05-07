@@ -1,108 +1,152 @@
-e# CTF Orchestration Engine - Refactoring Summary
+<div align="center">
 
-## New Structure (src)
+# 🚩 ctfc - CTF Challenge Orchestrator
 
-Successfully refactored the codebase to be more modular and maintainable. Here's what changed:
+<p align="center">
+  <strong>A powerful, modular engine for orchestrating CTF challenges with automated tunneling and TTL management</strong>
+</p>
 
-### Directory Structure
+<p align="center">
+  <img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker">
+  <img src="https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/Tunneling-Pinggy|Localtunnel|Ngrok-orange?style=for-the-badge" alt="Tunneling">
+</p>
+
+</div>
+
+---
+
+## 🎯 Overview
+
+**ctfc** (CTF Container) is a comprehensive orchestration platform designed for CTF organizers and players. It simplifies the lifecycle of containerized challenges—from automated builds and dynamic port assignment to public exposure via multiple tunneling providers. Featuring a built-in **TTL (Time-To-Live)** system, it ensures resources are never wasted by automatically shutting down expired challenges.
+
+### ✨ Key Features
+
+- 🐳 **Docker Native** - Seamlessly manages `docker-compose` based challenges.
+- ⏳ **Smart TTL System** - Auto-shutdown challenges after 15 minutes with manual extension.
+- 🌐 **Multi-Tunnel Support** - Instant public URLs via **Pinggy**, **Localtunnel**, or **Ngrok**.
+- 🔌 **Dynamic Port Mapping** - Automatically avoids port conflicts on the host.
+- 💻 **Modular CLI** - Clean, fast, and interactive command-line interface.
+- ⌨️ **Bash Completion** - Instant Tab-completion for commands and challenge names (SQLite powered).
+- 🛠️ **Easy Setup** - Interactive installation script with global command registration.
+
+---
+
+## 📁 Project Structure
 
 ```
-src/
-├── __init__.py
-├── app.py                          # Main CLI entry point (was cli/ commands)
-├── core/                           # Infrastructure & utilities
-│   ├── __init__.py
-│   ├── models.py                   # Domain models (Challenge, RuntimeInstance, etc.)
-│   ├── db.py                       # Database operations (was database.py)
-│   ├── config.py                   # Configuration management
-│   ├── git.py                      # Git repository operations
-│   ├── docker.py                   # Docker/Docker Compose utilities (new)
-│   ├── yaml.py                     # YAML parsing & Docker extraction (new)
-│   ├── utils.py                    # Shared utilities (new - process, port, endpoint helpers)
-│   └── constants.py                # Constants & defaults (new)
-│
-├── scripts/                        # Business logic & CLI commands
-│   ├── __init__.py
-│   ├── challenge_service.py        # Challenge discovery & management
-│   ├── challenges.py               # CLI commands: challenge sync, list, inspect, add, remove, enable, disable
-│   ├── runtime_service.py          # Runtime/container management
-│   ├── runtime.py                  # CLI commands: runtime build, start, stop, status, force-stop
-│   ├── exports.py                  # CLI commands: export ngrok, localtunnel, pinggy, list, stop, prune
-│   └── exports/                    # Tunnel provider implementations (new, modular)
-│       ├── __init__.py
-│       ├── base.py                 # Base ExportProvider class
-│       ├── ngrok.py                # Ngrok provider (http + tcp, http disabled by default)
-│       ├── localtunnel.py          # Localtunnel provider (http only)
-│       ├── pinggy.py               # Pinggy provider (tcp only)
-│       └── manager.py              # Export orchestrator/manager
+📦 CTFS_Back/
+┣ 🚀 setup.sh                   # Interactive installer/uninstaller
+┣ 📂 src/
+┃ ┣ 🎯 app.py                   # Main CLI entry point
+┃ ┣ 📂 core/                    # ⚙️ Core Logic (Docker, Git, DB, Models)
+┃ ┣ 📂 scripts/
+┃ ┃ ┣ 📂 cli/                    # 💻 CLI Handlers (Status, Lifecycle, Exports)
+┃ ┃ ┗ 📂 exports/                # 🌐 Tunneling Providers Logic
+┃ ┗ 📂 completion/               # ⌨️ Bash completion scripts
+┣ 📂 data/                      # 💾 Persistent data (Challenges, DB, Logs)
+┣ 📋 config.yml                 # 🔧 Main Configuration
+┗ 📋 requirements.txt           # Python dependencies
 ```
 
-### Key Improvements
+---
 
-1. **Core Infrastructure** (`core/` directory)
-   - Centralized database operations (`db.py`)
-   - Configuration management with .env support (`config.py`)
-   - Git operations (`git.py`)
-   - Docker/Compose utilities (`docker.py` - new)
-   - YAML parsing & Docker config extraction (`yaml.py` - new)
-   - Shared utilities for processes, ports, endpoints (`utils.py` - new)
-   - Protocol and provider constants (`constants.py` - new)
+## 🚀 Quick Setup
 
-2. **Scripts & Commands** (`scripts/` directory)
-   - Separated services from CLI commands
-   - Each service handles business logic (ChallengeService, RuntimeService)
-   - CLI commands import and use services
-   - Clean separation of concerns
+### 🔧 Installation
 
-3. **Export/Tunnel System** (`scripts/exports/` directory - modular)
-   - **Base provider**: Abstract class for tunnel providers
-   - **Ngrok**: Supports both HTTP and TCP (HTTP disabled by default)
-   - **Localtunnel**: HTTP only
-   - **Pinggy**: TCP only
-   - **Manager**: Orchestrates all providers, manages DB records, lists/prunes exports
+The easiest way to install **ctfc** is using the automated setup script. This will install dependencies, register the global `ctfc` command, and setup bash completion.
 
-4. **Entry Point** (`app_refactored.py`)
-   - Similar to HPone's launcher
-   - Disables input during execution
-   - Handles Ctrl+C gracefully
-   - Runs `src/app.py` as main CLI
+```bash
+# Clone the repository
+git clone https://github.com/ariafatah0711/CTFS_Back ctfs-back
+cd ctfs-back
 
-### Configuration Highlights
+# Run interactive installer
+sudo ./setup.sh install
 
-Provider protocol support:
-```python
-PROVIDER_PROTOCOLS = {
-    'ngrok': ['http', 'tcp'],       # http disabled by default
-    'localtunnel': ['http'],        # http only
-    'pinggy': ['tcp'],              # tcp only
-}
+# 🔄 IMPORTANT: Restart your shell or run
+source ~/.bashrc
 ```
 
-### How to Test
+---
 
-1. Keep the old `src/` intact for now (for safety)
-2. Copy over `config.yml` if needed
-3. Test the new structure:
-   ```bash
-   python app_refactored.py challenge list
-   python app_refactored.py challenge sync
-   python app_refactored.py runtime build <challenge>
-   python app_refactored.py export ngrok <challenge>
-   ```
+## ⏳ TTL & Extension System
 
-### Next Steps (if no issues found)
+**ctfc** includes a built-in safety mechanism to prevent challenges from running indefinitely:
 
-1. ✅ Verify all imports work correctly
-2. ✅ Test all CLI commands
-3. ✅ Verify database operations
-4. ✅ Test export providers (ngrok, localtunnel, pinggy)
-5. ⏳ Once verified, replace old `src/` with `src/`
-6. ⏳ Update `app.py` launcher if needed
+1.  **Default TTL**: Challenges automatically expire after **15 minutes**.
+2.  **Auto-Shutdown**: When a challenge expires, both the container and the tunnel (PID) are killed.
+3.  **Extend**: You can add **+10 minutes** to a running challenge, but only when it has **less than 5 minutes** remaining.
 
-### Benefits
+```bash
+# Extend a challenge
+ctfc extend web/sqli
+```
 
-- **Modular**: Each provider is isolated, easy to add/remove
-- **Maintainable**: Clear separation between infrastructure, services, and CLI
-- **Testable**: Services can be tested independently
-- **Scalable**: Easy to add new providers or commands
-- **Clean**: No monolithic files, focused responsibilities
+---
+
+## 🛠 Command Reference
+
+### 📊 **Monitoring**
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| 📋 `ctfc list` | List all available challenges | `ctfc list` |
+| 📈 `ctfc status` | Show running challenges, endpoints, and TTL | `ctfc status` |
+| 🔎 `ctfc inspect`| Show detailed challenge configuration | `ctfc inspect web/sqli` |
+| 🌐 `ctfc exports`| List all active tunnel exports | `ctfc exports` |
+
+### 🏃 **Lifecycle**
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| 🚀 `ctfc up` | Build, start, and auto-export a challenge | `ctfc up web/sqli` |
+| 📏 `ctfc down` | Stop container and all active tunnels | `ctfc down web/sqli` |
+| 🔄 `ctfc restart` | Restart (Down + Up) | `ctfc restart web/sqli` |
+| ⏳ `ctfc extend` | Add time to a running challenge | `ctfc extend web/sqli` |
+
+### 🌐 **Tunnels**
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| 📤 `ctfc export` | Manually start a tunnel | `ctfc export ngrok web/sqli` |
+| 📥 `ctfc unexport`| Stop tunnels for a challenge | `ctfc unexport web/sqli` |
+
+---
+
+## 🎨 Quick Examples
+
+```bash
+# 🚀 Start a challenge with auto-tunnel
+ctfc up web/sqli
+
+# 📈 Watch status in real-time (with colors!)
+ctfc status --watch
+
+# ⏳ Add time when sisa waktu < 5m
+ctfc extend web/sqli
+
+# 🌐 Export using a specific provider
+ctfc export pinggy web/sqli
+
+# 🧹 Full stop
+ctfc down web/sqli
+```
+
+---
+
+## 🗑️ Uninstall
+
+```bash
+# Remove global command and completion
+sudo ./setup.sh uninstall
+```
+
+---
+
+<div align="center">
+
+**🚩 Made with ❤️ for CTF Players and Organizers**
+
+</div>

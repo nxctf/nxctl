@@ -39,25 +39,25 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Import command handlers
-from src.scripts.lifecycle import (
+# Import command handlers from modular CLI package
+from src.scripts.cli.challenges import (
     cmd_sync,
     cmd_list,
     cmd_inspect,
     cmd_add,
     cmd_remove,
-    cmd_enable,
-    cmd_disable,
+)
+from src.scripts.cli.lifecycle import (
     cmd_up,
     cmd_down,
     cmd_restart,
     cmd_status,
+    cmd_extend,
+)
+from src.scripts.cli.exports import (
     cmd_export,
     cmd_unexport,
     cmd_exports,
-    cmd_clean,
-    cmd_purge,
-    cmd_prune,
 )
 
 
@@ -76,8 +76,6 @@ Examples:
   ctf-orch status                    Show running challenges + exports
   ctf-orch export ngrok web/sqli     Manual ngrok tunnel
   ctf-orch unexport web/sqli         Stop all exports
-  ctf-orch clean web/sqli --data     Remove challenge data
-    ctf-orch purge web/sqli            Stop everything, remove Docker data, delete cached folder
         """.strip()
     )
 
@@ -106,14 +104,6 @@ Examples:
     remove_cmd.add_argument("name", help="Challenge name")
     remove_cmd.set_defaults(func=cmd_remove)
 
-    enable_cmd = subparsers.add_parser("enable", help="Enable challenge")
-    enable_cmd.add_argument("name", nargs="+", help="Challenge name(s)")
-    enable_cmd.set_defaults(func=cmd_enable)
-
-    disable_cmd = subparsers.add_parser("disable", help="Disable challenge")
-    disable_cmd.add_argument("name", nargs="+", help="Challenge name(s)")
-    disable_cmd.set_defaults(func=cmd_disable)
-
     # ======== LIFECYCLE ========
     up_cmd = subparsers.add_parser("up", help="Build + start + auto-export")
     up_cmd.add_argument("name", help="Challenge name")
@@ -132,6 +122,10 @@ Examples:
     status_cmd.add_argument("-w", "--watch", action="store_true", help="Watch status in real-time (every 15s)")
     status_cmd.set_defaults(func=cmd_status)
 
+    extend_cmd = subparsers.add_parser("extend", help="Extend challenge runtime")
+    extend_cmd.add_argument("name", help="Challenge name")
+    extend_cmd.set_defaults(func=cmd_extend)
+
     # ======== EXPORT MANAGEMENT ========
     export_cmd = subparsers.add_parser("export", help="Manual tunnel, or auto-pick if provider omitted")
     export_cmd.add_argument("target", help="Challenge name, or provider name if followed by a challenge name")
@@ -145,23 +139,6 @@ Examples:
     exports_cmd = subparsers.add_parser("exports", help="List active exports/tunnels")
     exports_cmd.add_argument("--all", action="store_true", help="Show all history")
     exports_cmd.set_defaults(func=cmd_exports)
-
-    # ======== CLEANUP ========
-    clean_cmd = subparsers.add_parser("clean", help="Stop + remove docker/ and optionally data/")
-    clean_cmd.add_argument("name", help="Challenge name")
-    clean_cmd.add_argument("--data", action="store_true", help="Also remove data/")
-    clean_cmd.add_argument("--image", action="store_true", help="Also remove image (--rmi local)")
-    clean_cmd.add_argument("--volume", action="store_true", help="Also remove volumes (-v)")
-    clean_cmd.set_defaults(func=cmd_clean)
-
-    purge_cmd = subparsers.add_parser("purge", help="Stop everything, clean Docker data, delete cached challenge folder")
-    purge_cmd.add_argument("name", nargs="?", help="Challenge name")
-    purge_cmd.add_argument("--all", action="store_true", help="Purge all challenges")
-    purge_cmd.set_defaults(func=cmd_purge)
-
-    prune_cmd = subparsers.add_parser("prune", help="Delete inactive export records from DB")
-    prune_cmd.add_argument("--provider", choices=["ngrok", "localtunnel", "pinggy"], help="Filter by provider")
-    prune_cmd.set_defaults(func=cmd_prune)
 
     return parser
 

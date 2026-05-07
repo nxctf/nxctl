@@ -34,6 +34,11 @@ class Config(BaseModel):
     enable_localtunnel: bool = True
     enable_pinggy: bool = True
 
+    # TTL settings
+    default_ttl_minutes: int = 15
+    extend_time_minutes: int = 10
+    extend_threshold_minutes: int = 5
+
     class Config:
         extra = "allow"
 

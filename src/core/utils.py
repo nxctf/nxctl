@@ -7,6 +7,54 @@ import time
 from typing import Optional
 from pathlib import Path
 import json
+from src.core.config import get_config
+
+COLOR_GREEN = "\033[32m"
+COLOR_RED = "\033[31m"
+COLOR_YELLOW = "\033[33m"
+COLOR_BLUE = "\033[34m"
+COLOR_RESET = "\033[0m"
+COLOR_BOLD = "\033[1m"
+
+
+def green(text: str) -> str:
+    return f"{COLOR_GREEN}{text}{COLOR_RESET}"
+
+
+def red(text: str) -> str:
+    return f"{COLOR_RED}{text}{COLOR_RESET}"
+
+
+def yellow(text: str) -> str:
+    return f"{COLOR_YELLOW}{text}{COLOR_RESET}"
+
+
+def blue(text: str) -> str:
+    return f"{COLOR_BLUE}{text}{COLOR_RESET}"
+
+
+def bold(text: str) -> str:
+    return f"{COLOR_BOLD}{text}{COLOR_RESET}"
+
+
+def get_git_cache_path() -> str:
+    """Get the normalized path for git challenge cache."""
+    config = get_config()
+    cache_dir = Path(config.cache_dir)
+    normalized = str(cache_dir).replace("\\", "/").rstrip("/")
+
+    if cache_dir.name == "chall" or normalized.endswith("/chall"):
+        return str(cache_dir)
+
+    if normalized in {"./data", "data", "/data"} or normalized.endswith("/data"):
+        return str(cache_dir / "chall")
+
+    return str(cache_dir)
+
+
+def get_challenge_dir(challenge_path: str) -> Path:
+    """Get the absolute directory for a challenge based on its relative path."""
+    return Path(get_git_cache_path()) / challenge_path
 
 
 def is_pid_alive(pid: int) -> bool:
@@ -136,13 +184,5 @@ def probe_endpoint(url: str, timeout: float = 5.0) -> bool:
                 return False
 
             return resp.status < 500
-    except urllib.error.HTTPError as e:
-        try:
-            body = e.read().decode("utf-8", errors="ignore")
-            if "ERR_NGROK_3200" in body or "is offline" in body.lower():
-                return False
-        except Exception:
-            pass
-        return e.code < 500
     except Exception:
         return False
