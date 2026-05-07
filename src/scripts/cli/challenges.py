@@ -100,6 +100,13 @@ def cmd_inspect(args) -> int:
                 else:
                     print(f"{'Expires At:':12} {runtime.expires_at} ({red('EXPIRED')})")
 
+        # Cooldown Info
+        cooldown = runtime_service.check_restart_cooldown(args.name)
+        if cooldown:
+            print(f"{'Restart CD:':12} {yellow(f'In cooldown ({cooldown}s left)')}")
+        elif runtime.status == 'running':
+            print(f"{'Restart CD:':12} {green('Ready')}")
+
         # Exports Info
         exports = export_manager.list_exports(args.name, check_health=True)
         print(f"\n{bold('Active Exports')}")

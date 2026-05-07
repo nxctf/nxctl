@@ -39,6 +39,7 @@ def init_database(db_path: str) -> None:
             expires_at TIMESTAMP,
             last_activity TIMESTAMP,
             last_revert TIMESTAMP,
+            last_restart DATETIME,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (challenge_id) REFERENCES challenges(id)
         )
@@ -67,7 +68,13 @@ def init_database(db_path: str) -> None:
         cursor.execute("ALTER TABLE challenge_exports ADD COLUMN pid INTEGER")
         conn.commit()
     except sqlite3.OperationalError:
-        # Column already exists
+        pass
+
+    # Migration: Add last_restart column to runtime_instances
+    try:
+        cursor.execute("ALTER TABLE runtime_instances ADD COLUMN last_restart DATETIME")
+        conn.commit()
+    except sqlite3.OperationalError:
         pass
 
     conn.close()

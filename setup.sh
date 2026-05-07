@@ -160,6 +160,50 @@ uninstall_ctfc() {
     echo -e "${GREEN}✅ ctfc uninstalled.${NC}\n"
 }
 
+enable_service() {
+    echo -e "${YELLOW}[*] Enabling ctfc-daemon systemd service...${NC}"
+    SERVICE_FILE="ctfc-daemon.service"
+    SYSTEMD_DIR="/etc/systemd/system"
+    CURRENT_USER=$(whoami)
+    PROJECT_PATH=$(pwd)
+
+    if [ ! -f "$SERVICE_FILE" ]; then
+        echo -e "${RED}❌ Error: $SERVICE_FILE not found in current directory.${NC}"
+        exit 1
+    fi
+
+    # Create a temporary copy to modify
+    TEMP_SERVICE="/tmp/ctfc-daemon.service"
+    cp "$SERVICE_FILE" "$TEMP_SERVICE"
+
+    # Inject current user and working directory
+    sed -i "s/User=root/User=$CURRENT_USER/" "$TEMP_SERVICE"
+    # Add WorkingDirectory after User line
+    sed -i "/User=$CURRENT_USER/a WorkingDirectory=$PROJECT_PATH" "$TEMP_SERVICE"
+
+    echo "  -> Configuring service for user: $CURRENT_USER"
+    echo "  -> Project path: $PROJECT_PATH"
+
+    sudo cp "$TEMP_SERVICE" "$SYSTEMD_DIR/ctfc-daemon.service"
+    sudo systemctl daemon-reload
+    sudo systemctl enable ctfc-daemon
+    sudo systemctl restart ctfc-daemon
+
+    rm -f "$TEMP_SERVICE"
+
+    echo -e "${GREEN}✅ Service enabled and started as user $CURRENT_USER!${NC}"
+    echo -e "Check status with: ${YELLOW}sudo systemctl status ctfc-daemon${NC}\n"
+}
+
+disable_service() {
+    echo -e "${YELLOW}[*] Disabling ctfc-daemon systemd service...${NC}"
+    sudo systemctl stop ctfc-daemon
+    sudo systemctl disable ctfc-daemon
+    sudo rm -f "$SYSTEMD_DIR/ctfc-daemon.service"
+    sudo systemctl daemon-reload
+    echo -e "${GREEN}✅ Service disabled and removed.${NC}\n"
+}
+
 case "$1" in
     install)
         install_ctfc
@@ -167,7 +211,13 @@ case "$1" in
     uninstall)
         uninstall_ctfc
         ;;
+    enable-service)
+        enable_service
+        ;;
+    disable-service)
+        disable_service
+        ;;
     *)
-        echo "Usage: $0 [install|uninstall]"
+        echo "Usage: $0 [install|uninstall|enable-service|disable-service]"
         ;;
 esac

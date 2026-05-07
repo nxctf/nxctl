@@ -1,12 +1,12 @@
 [Unit]
-Description=CTF Orchestrator Daemon
+Description=CTF Orchestrator Daemon & API
 After=docker.service
 
 [Service]
 Type=simple
 User=root
-# WorkingDirectory no longer needed as ctfc auto-detects project root
-ExecStart=/usr/local/bin/ctfc daemon --interval 30
+# We use --with-api to run both monitoring and API in one service
+ExecStart=/usr/local/bin/ctfc daemon --interval 10 --with-api
 Restart=always
 RestartSec=10
 

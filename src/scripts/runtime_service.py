@@ -65,7 +65,7 @@ class RuntimeService:
         try:
             cursor.execute("""
                 SELECT id, challenge_id, status, container_id, tunnel_provider,
-                       public_url, started_at, expires_at, last_activity, last_revert, created_at
+                       public_url, started_at, expires_at, last_activity, last_revert, last_restart, created_at
                 FROM runtime_instances
                 WHERE challenge_id = ?
                 ORDER BY created_at DESC
@@ -95,6 +95,7 @@ class RuntimeService:
                 expires_at=parse_date(row["expires_at"]),
                 last_activity=parse_date(row["last_activity"]),
                 last_revert=parse_date(row["last_revert"]),
+                last_restart=parse_date(row["last_restart"]),
                 created_at=parse_date(row["created_at"]),
             )
 
@@ -128,6 +129,38 @@ class RuntimeService:
         logger.info(f"Extended {challenge_name} expiry to {new_expires_at}")
 
         return self._get_runtime_from_db(challenge.id)
+
+    def check_restart_cooldown(self, challenge_name: str) -> Optional[int]:
+        """Check if challenge can be restarted. Returns remaining seconds or None."""
+        challenge = self._get_challenge_from_db(challenge_name)
+        if not challenge:
+            return None
+
+        runtime = self._get_runtime_from_db(challenge.id)
+        if not runtime or not runtime.last_restart:
+            return None
+
+        elapsed = (datetime.now() - runtime.last_restart).total_seconds()
+        if elapsed < self.config.restart_cooldown_seconds:
+            return int(self.config.restart_cooldown_seconds - elapsed)
+        return None
+
+    def update_restart_time(self, challenge_name: str):
+        """Update last_restart timestamp."""
+        challenge = self._get_challenge_from_db(challenge_name)
+        if not challenge:
+            return
+
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "UPDATE runtime_instances SET last_restart = datetime('now', 'localtime') WHERE challenge_id = ?",
+                (challenge.id,)
+            )
+            conn.commit()
+        finally:
+            close_db_connection(conn)
 
     def stop_expired_runtimes(self) -> list[str]:
         """Check for and stop all expired runtimes."""

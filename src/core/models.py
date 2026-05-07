@@ -30,6 +30,7 @@ class RuntimeInstance:
     expires_at: Optional[datetime] = None
     last_activity: Optional[datetime] = None
     last_revert: Optional[datetime] = None
+    last_restart: Optional[datetime] = None
     created_at: Optional[datetime] = None
 
 

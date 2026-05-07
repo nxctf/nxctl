@@ -60,6 +60,7 @@ from src.scripts.cli.lifecycle import (
     cmd_status,
     cmd_extend,
     cmd_daemon,
+    cmd_api,
 )
 from src.scripts.cli.exports import (
     cmd_export,
@@ -122,6 +123,8 @@ Examples:
 
     restart_cmd = subparsers.add_parser("restart", help="Restart (down + up)")
     restart_cmd.add_argument("name", help="Challenge name")
+    restart_cmd.add_argument("--container", action="store_true", help="Restart only the docker container")
+    restart_cmd.add_argument("--provider", action="store_true", help="Restart only the tunnel provider")
     restart_cmd.set_defaults(func=cmd_restart)
 
     status_cmd = subparsers.add_parser("status", help="Show running challenges + exports")
@@ -135,7 +138,15 @@ Examples:
 
     daemon_cmd = subparsers.add_parser("daemon", help="Run background monitor daemon")
     daemon_cmd.add_argument("--interval", type=int, help="Check interval in seconds")
+    daemon_cmd.add_argument("--with-api", action="store_true", help="Also start the Web API server")
+    daemon_cmd.add_argument("--host", default="0.0.0.0", help="API listen host")
+    daemon_cmd.add_argument("--port", type=int, default=8000, help="API listen port")
     daemon_cmd.set_defaults(func=cmd_daemon)
+
+    api_cmd = subparsers.add_parser("api", help="Run Web API server")
+    api_cmd.add_argument("--host", default="0.0.0.0", help="Listen host")
+    api_cmd.add_argument("--port", type=int, default=8000, help="Listen port")
+    api_cmd.set_defaults(func=cmd_api)
 
     # ======== EXPORT MANAGEMENT ========
     export_cmd = subparsers.add_parser("export", help="Manual tunnel, or auto-pick if provider omitted")

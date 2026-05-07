@@ -113,6 +113,36 @@ ctfc extend web/sqli
 | 📤 `ctfc export` | Manually start a tunnel | `ctfc export ngrok web/sqli` |
 | 📥 `ctfc unexport`| Stop tunnels for a challenge | `ctfc unexport web/sqli` |
 
+### 🌐 **Web API**
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| 🔌 `ctfc api` | Run the FastAPI web server | `ctfc api --port 8000` |
+
+---
+
+### 🌐 Web API Reference
+The API is secured via `X-CTFC-Token` header.
+
+| Endpoint | Method | Description |
+| :--- | :--- | :--- |
+| `/status` | GET | Comprehensive status of all challenges (JSON) |
+| `/up/{name}` | POST | Start a challenge |
+| `/down/{name}` | POST | Stop a challenge |
+| `/restart/{name}` | POST | Restart (supports `?container=true`) |
+| `/extend/{name}` | POST | Add more time to a running challenge |
+
+---
+
+### 🛠️ Configuration (`config.yml`)
+Key settings for orchestration:
+```yaml
+default_ttl_minutes: 15       # Initial time for challenges
+restart_cooldown_seconds: 300 # Anti-spam restart protection
+daemon_interval: 10           # How often daemon checks status
+auto_heal_exports: true       # Auto-restart dead tunnels
+```
+
 ---
 
 ## 🎨 Quick Examples

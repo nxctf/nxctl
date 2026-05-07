@@ -22,8 +22,7 @@ celery>=5.3.0
 redis>=4.5.0
 
 # Utilities
+# API
+fastapi>=0.100.0
+uvicorn>=0.22.0
 python-dotenv>=1.0.0
-requests>=2.31.0
-
-# Optional: programmatic ngrok control
-pyngrok>=6.0.0

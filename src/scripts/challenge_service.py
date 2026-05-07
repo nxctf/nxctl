@@ -267,35 +267,3 @@ class ChallengeService:
             raise ChallengeDiscoveryError(f"Failed to remove challenge: {str(e)}")
         finally:
             close_db_connection(conn)
-
-    def enable_challenge(self, name: str) -> bool:
-        """Enable a challenge."""
-        conn = get_db_connection(self.db_path)
-        cursor = conn.cursor()
-
-        try:
-            cursor.execute("UPDATE challenges SET enabled = 1 WHERE name = ?", (name,))
-            conn.commit()
-            return cursor.rowcount > 0
-
-        except Exception as e:
-            conn.rollback()
-            raise ChallengeDiscoveryError(f"Failed to enable challenge: {str(e)}")
-        finally:
-            close_db_connection(conn)
-
-    def disable_challenge(self, name: str) -> bool:
-        """Disable a challenge."""
-        conn = get_db_connection(self.db_path)
-        cursor = conn.cursor()
-
-        try:
-            cursor.execute("UPDATE challenges SET enabled = 0 WHERE name = ?", (name,))
-            conn.commit()
-            return cursor.rowcount > 0
-
-        except Exception as e:
-            conn.rollback()
-            raise ChallengeDiscoveryError(f"Failed to disable challenge: {str(e)}")
-        finally:
-            close_db_connection(conn)

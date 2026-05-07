@@ -36,7 +36,7 @@ _ctfs_back_get_challenges() {
     # Try getting from SQLite directly for speed
     local db_path="${app_root}/data/ctf-orch.db"
     if [[ -f "${db_path}" ]] && command -v sqlite3 >/dev/null 2>&1; then
-        sqlite3 "${db_path}" "SELECT name FROM challenges WHERE enabled = 1" 2>/dev/null
+        sqlite3 "${db_path}" "SELECT name FROM challenges" 2>/dev/null
         return 0
     fi
 
@@ -58,7 +58,7 @@ _ctfs_back_completion() {
     cmd="${COMP_WORDS[1]}"
 
     # Updated command list to match app.py
-    local commands="sync list inspect add remove up down restart status extend daemon export unexport exports"
+    local commands="sync list inspect add remove up down restart status extend daemon api export unexport exports"
     local provider_names="ngrok localtunnel pinggy"
 
     # Top-level commands
@@ -74,7 +74,7 @@ _ctfs_back_completion() {
         list)
             # No common arguments for list usually
             ;;
-        inspect|remove|up|down|restart|status|extend|unexport)
+        inspect|remove|up|down|status|extend|unexport)
             # Commands that take a challenge name as first argument
             if [[ ${COMP_CWORD} -eq 2 ]]; then
                 local challenges
@@ -88,6 +88,23 @@ _ctfs_back_completion() {
             if [[ "${cmd}" == "status" ]] && [[ "${cur}" == -* ]]; then
                 COMPREPLY=( $(compgen -W "-w --watch" -- "${cur}") )
             fi
+            ;;
+        restart)
+            if [[ ${COMP_CWORD} -eq 2 ]]; then
+                local challenges
+                challenges="$(_ctfs_back_get_challenges)"
+                if [[ -n "${challenges}" ]]; then
+                    COMPREPLY=( $(compgen -W "${challenges}" -- "${cur}") )
+                fi
+            else
+                COMPREPLY=( $(compgen -W "--container --provider" -- "${cur}") )
+            fi
+            ;;
+        daemon)
+            COMPREPLY=( $(compgen -W "--interval --with-api --host --port" -- "${cur}") )
+            ;;
+        api)
+            COMPREPLY=( $(compgen -W "--host --port" -- "${cur}") )
             ;;
         add)
             # add <name> <path> <port> [--type {http,tcp}]

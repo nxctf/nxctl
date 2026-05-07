@@ -12,6 +12,33 @@ class DockerError(Exception):
     """Docker operation error."""
     pass
 
+_COMPOSE_CMD_CACHE = None
+
+def _get_compose_cmd() -> list[str]:
+    """Detect whether to use 'docker compose' or 'docker-compose'."""
+    global _COMPOSE_CMD_CACHE
+    if _COMPOSE_CMD_CACHE:
+        return _COMPOSE_CMD_CACHE
+
+    # Try 'docker compose' (v2)
+    try:
+        subprocess.run(["docker", "compose", "version"], capture_output=True, check=True)
+        _COMPOSE_CMD_CACHE = ["docker", "compose"]
+        return _COMPOSE_CMD_CACHE
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+    # Try 'docker-compose' (v1)
+    try:
+        subprocess.run(["docker-compose", "version"], capture_output=True, check=True)
+        _COMPOSE_CMD_CACHE = ["docker-compose"]
+        return _COMPOSE_CMD_CACHE
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+    # Default fallback
+    return ["docker", "compose"]
+
 
 def run_docker_compose_build(compose_path: Path, cwd: Optional[Path] = None, timeout: int = 300) -> str:
     """Build Docker image using docker compose.
@@ -29,33 +56,16 @@ def run_docker_compose_build(compose_path: Path, cwd: Optional[Path] = None, tim
     logger.info(f"Building image from {compose_path}")
 
     try:
-        # Try docker compose v2 first
-        cmd = ["docker", "compose", "-f", str(compose_path), "build"]
-        try:
-            result = subprocess.run(
-                cmd,
-                cwd=str(cwd),
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=True,
-            )
-            logger.info(f"Successfully built image using docker compose v2")
-            return "latest"
-        except FileNotFoundError:
-            # Fall back to docker-compose v1
-            logger.info("docker compose v2 not found, trying docker-compose v1...")
-            cmd = ["docker-compose", "-f", str(compose_path), "build"]
-            result = subprocess.run(
-                cmd,
-                cwd=str(cwd),
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=True,
-            )
-            logger.info(f"Successfully built image using docker-compose v1")
-            return "latest"
+        cmd = _get_compose_cmd() + ["-f", str(compose_path), "build"]
+        result = subprocess.run(
+            cmd,
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=True,
+        )
+        return "latest"
 
     except subprocess.TimeoutExpired:
         raise DockerError("Build operation timed out")
@@ -79,33 +89,18 @@ def run_docker_compose_up(compose_path: Path, cwd: Optional[Path] = None, detach
     logger.info(f"Starting containers from {compose_path}")
 
     try:
-        cmd = ["docker", "compose", "-f", str(compose_path), "up"]
+        cmd = _get_compose_cmd() + ["-f", str(compose_path), "up"]
         if detach:
             cmd.append("-d")
 
-        try:
-            result = subprocess.run(
-                cmd,
-                cwd=str(cwd),
-                capture_output=True,
-                text=True,
-                timeout=180,
-                check=True,
-            )
-        except FileNotFoundError:
-            # Fall back to docker-compose v1
-            cmd = ["docker-compose", "-f", str(compose_path), "up"]
-            if detach:
-                cmd.append("-d")
-
-            result = subprocess.run(
-                cmd,
-                cwd=str(cwd),
-                capture_output=True,
-                text=True,
-                timeout=180,
-                check=True,
-            )
+        result = subprocess.run(
+            cmd,
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=180,
+            check=True,
+        )
 
         logger.info(f"Successfully started containers")
         return {"status": "success"}
@@ -128,28 +123,15 @@ def run_docker_compose_down(compose_path: Path, cwd: Optional[Path] = None) -> d
     logger.info(f"Stopping containers from {compose_path}")
 
     try:
-        cmd = ["docker", "compose", "-f", str(compose_path), "down"]
-
-        try:
-            result = subprocess.run(
-                cmd,
-                cwd=str(cwd),
-                capture_output=True,
-                text=True,
-                timeout=60,
-                check=True,
-            )
-        except FileNotFoundError:
-            # Fall back to docker-compose v1
-            cmd = ["docker-compose", "-f", str(compose_path), "down"]
-            result = subprocess.run(
-                cmd,
-                cwd=str(cwd),
-                capture_output=True,
-                text=True,
-                timeout=60,
-                check=True,
-            )
+        cmd = _get_compose_cmd() + ["-f", str(compose_path), "down"]
+        result = subprocess.run(
+            cmd,
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=True,
+        )
 
         logger.info(f"Successfully stopped containers")
         return {"status": "success"}
@@ -188,27 +170,15 @@ def run_docker_compose_down_with_cleanup(
         return cmd
 
     try:
-        cmd = build_cmd(["docker", "compose", "-f", str(compose_path), "down"])
-
-        try:
-            result = subprocess.run(
-                cmd,
-                cwd=str(cwd),
-                capture_output=True,
-                text=True,
-                timeout=60,
-                check=True,
-            )
-        except FileNotFoundError:
-            cmd = build_cmd(["docker-compose", "-f", str(compose_path), "down"])
-            result = subprocess.run(
-                cmd,
-                cwd=str(cwd),
-                capture_output=True,
-                text=True,
-                timeout=60,
-                check=True,
-            )
+        cmd = build_cmd(_get_compose_cmd() + ["-f", str(compose_path), "down"])
+        result = subprocess.run(
+            cmd,
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=True,
+        )
 
         logger.info(f"Successfully stopped containers")
         return {"status": "success"}

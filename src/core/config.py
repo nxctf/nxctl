@@ -39,6 +39,8 @@ class Config(BaseModel):
     extend_time_minutes: int = 10
     extend_threshold_minutes: int = 5
     daemon_interval: int = 10
+    restart_cooldown_seconds: int = 300
+    auto_heal_exports: bool = True
 
     class Config:
         extra = "allow"

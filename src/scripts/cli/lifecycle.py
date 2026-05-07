@@ -82,10 +82,6 @@ def cmd_up(args) -> int:
             print(f"\n{red('✗')} Challenge not found: {args.name}\n")
             return 1
 
-        if not challenge.enabled:
-            challenge_service.enable_challenge(args.name)
-            challenge = challenge_service.get_challenge(args.name)
-
         print(f"\n{blue('Starting...')}")
         runtime_service.start(args.name)
         challenge = challenge_service.get_challenge(args.name) or challenge
@@ -116,9 +112,56 @@ def cmd_down(args) -> int:
 
 
 def cmd_restart(args) -> int:
-    if cmd_down(args) != 0:
+    try:
+        config, challenge_service, runtime_service, export_manager = get_services()
+
+        # 1. Check Cooldown
+        remaining = runtime_service.check_restart_cooldown(args.name)
+        if remaining:
+            print(f"\n{red('✗')} Restart denied: Cooldown active. Please wait {remaining}s.\n")
+            return 1
+
+        # 2. Determine what to restart
+        restart_all = not (args.container or args.provider)
+        do_container = restart_all or args.container
+        do_provider = restart_all or args.provider
+
+        challenge = challenge_service.get_challenge(args.name)
+        if not challenge:
+            print(f"\n{red('✗')} Challenge not found: {args.name}\n")
+            return 1
+
+        print(f"\n{blue('Restarting...')}")
+
+        # Handle Provider Stop
+        if do_provider:
+            exports = export_manager.list_exports(args.name)
+            for export in exports:
+                export_manager.stop_export(args.name, export["provider"], challenge.service_port)
+                print(f"{blue('  • Stopped export:')} {export['provider']}")
+
+        # Handle Container Restart
+        if do_container:
+            runtime_service.stop(args.name)
+            runtime_service.start(args.name)
+            # Re-fetch challenge for updated data
+            challenge = challenge_service.get_challenge(args.name)
+            print(f"{green('  • Container restarted')}")
+
+        # Re-start provider if needed
+        if do_provider:
+            provider, endpoint = _start_with_fallback(export_manager, args.name, challenge)
+            print(f"{green('  • Export restarted via')} {provider}")
+            print(f"    Endpoint: {endpoint}")
+
+        # 3. Update last_restart time
+        runtime_service.update_restart_time(args.name)
+
+        print(f"\n{green('✓')} Restart complete\n")
+        return 0
+    except Exception as e:
+        print(f"\n{red('✗')} Restart failed: {str(e)}\n")
         return 1
-    return cmd_up(args)
 
 
 def cmd_status(args) -> int:
@@ -275,19 +318,35 @@ def cmd_daemon(args) -> int:
         config, challenge_service, runtime_service, export_manager = get_services()
         # Priority: CLI argument > Config file
         interval = getattr(args, "interval", None) or config.daemon_interval
+        with_api = getattr(args, "with_api", False)
 
         print(f"\n{blue('[daemon]')} Starting CTF Orchestrator Daemon")
         print(f"{blue('[daemon]')} Interval: {interval}s")
-        print(f"{blue('[daemon]')} Monitoring challenges for auto-shutdown...\n")
+
+        if with_api:
+            import threading
+            import uvicorn
+            host = getattr(args, "host", "0.0.0.0")
+            port = getattr(args, "port", 8000)
+
+            def run_api():
+                print(f"{blue('[api]')} Starting Web API on {host}:{port} (background)")
+                uvicorn.run("src.api:app", host=host, port=port, log_level="warning")
+
+            api_thread = threading.Thread(target=run_api, daemon=True)
+            api_thread.start()
+
+        print(f"{blue('[daemon]')} Monitoring challenges for auto-shutdown & auto-heal...\n")
 
         while True:
             try:
-                # 1. Handle auto-shutdown for expired runtimes
+                # 1. Fetch data from DB
                 import sqlite3
                 from src.core.db import get_db_connection, close_db_connection
                 conn = get_db_connection(config.db_file)
                 cursor = conn.cursor()
                 try:
+                    # Get expired runtimes
                     cursor.execute("""
                         SELECT c.name
                         FROM runtime_instances r
@@ -297,15 +356,40 @@ def cmd_daemon(args) -> int:
                         AND r.expires_at < datetime('now', 'localtime')
                     """)
                     expired = [row["name"] for row in cursor.fetchall()]
+
+                    # Get all running runtimes for auto-heal
+                    cursor.execute("""
+                        SELECT c.name
+                        FROM runtime_instances r
+                        JOIN challenges c ON r.challenge_id = c.id
+                        WHERE r.status = 'running'
+                    """)
+                    running_names = [row["name"] for row in cursor.fetchall()]
                 finally:
                     close_db_connection(conn)
 
+                # 2. Handle auto-shutdown for expired runtimes
                 for name in expired:
                     print(f"{yellow('[daemon]')} Auto-stopping expired challenge: {name}")
                     _stop_challenge_completely(name, challenge_service, runtime_service, export_manager)
+                    if name in running_names:
+                        running_names.remove(name)
 
-                # 2. Reconcile exports (mark dead PIDs)
+                # 3. Reconcile exports (mark dead PIDs as 'dead')
                 export_manager.reconcile_exports()
+
+                # 4. Auto-heal missing exports for running challenges
+                if config.auto_heal_exports:
+                    for name in running_names:
+                        active_exports = export_manager.list_exports(name, check_health=False)
+                        # After reconcile, if no active exports exist, it means the tunnel died
+                        if not active_exports:
+                            print(f"{blue('[daemon]')} Healing missing export for: {name}")
+                            try:
+                                challenge = challenge_service.get_challenge(name)
+                                _start_with_fallback(export_manager, name, challenge)
+                            except Exception as heal_err:
+                                print(f"{red('[daemon]')} Heal failed for {name}: {heal_err}")
 
             except Exception as e:
                 print(f"{red('[daemon] Error:')} {e}")
@@ -317,4 +401,21 @@ def cmd_daemon(args) -> int:
         return 0
     except Exception as e:
         print(f"\n{red('[daemon]')} Fatal error: {str(e)}\n")
+        return 1
+
+def cmd_api(args) -> int:
+    try:
+        import uvicorn
+        host = getattr(args, "host", "0.0.0.0")
+        port = getattr(args, "port", 8000)
+
+        print(f"\n{blue('[api]')} Starting ctfc Web API on {host}:{port}")
+        print(f"{blue('[api]')} Swagger UI: http://{host}:{port}/docs")
+
+        uvicorn.run("src.api:app", host=host, port=port, reload=False)
+        return 0
+    except KeyboardInterrupt:
+        return 0
+    except Exception as e:
+        print(f"\n{red('✗')} API failed: {str(e)}\n")
         return 1
