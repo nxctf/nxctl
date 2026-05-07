@@ -117,7 +117,7 @@ class RuntimeService:
             raise RuntimeError(f"Build failed: {str(e)}")
 
     def start(self, challenge_name: str) -> RuntimeInstance:
-        """Start a challenge runtime."""
+        """Start a challenge runtime (includes automatic build)."""
         # Get challenge from DB
         challenge = self._get_challenge_from_db(challenge_name)
         if not challenge:
@@ -140,6 +140,14 @@ class RuntimeService:
         docker_compose = challenge_dir / "docker-compose.yml"
         if not docker_compose.exists():
             raise RuntimeError(f"docker-compose.yml not found in {challenge_dir}")
+
+        # Auto-build before starting
+        try:
+            logger.info(f"Building image for challenge: {challenge_name}")
+            run_docker_compose_build(docker_compose, cwd=challenge_dir)
+            logger.info(f"Successfully built image for {challenge_name}")
+        except DockerError as e:
+            raise RuntimeError(f"Build failed: {str(e)}")
 
         try:
             # Determine port to use
@@ -173,7 +181,7 @@ class RuntimeService:
             # Write modified compose to temporary file
             docker_compose_run = challenge_dir / "docker-compose.run.yml"
             with open(docker_compose_run, 'w') as f:
-                yaml.dump(compose_data, f)
+                yaml.safe_dump(compose_data, f, default_flow_style=False, sort_keys=False)
 
             logger.info(f"Starting challenge: {challenge_name} on port {desired_port}")
             run_docker_compose_up(docker_compose_run, cwd=challenge_dir, detach=True)

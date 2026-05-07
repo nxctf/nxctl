@@ -130,9 +130,9 @@ Examples:
     status_cmd.set_defaults(func=cmd_status)
 
     # ======== EXPORT MANAGEMENT ========
-    export_cmd = subparsers.add_parser("export", help="Manual tunnel (ngrok/localtunnel/pinggy)")
-    export_cmd.add_argument("provider", choices=["ngrok", "localtunnel", "pinggy"], help="Tunnel provider")
-    export_cmd.add_argument("name", help="Challenge name")
+    export_cmd = subparsers.add_parser("export", help="Manual tunnel, or auto-pick if provider omitted")
+    export_cmd.add_argument("target", help="Challenge name, or provider name if followed by a challenge name")
+    export_cmd.add_argument("name", nargs="?", help="Challenge name when provider is specified")
     export_cmd.set_defaults(func=cmd_export)
 
     unexport_cmd = subparsers.add_parser("unexport", help="Stop all exports for a challenge")

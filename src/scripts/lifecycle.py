@@ -6,6 +6,7 @@ import shutil
 
 from src.core.config import get_config
 from src.core.constants import (
+    EXPORT_PROVIDER_LOCALTUNNEL,
     EXPORT_PROVIDER_NGROK,
     EXPORT_PROVIDER_PINGGY,
     PROTOCOL_HTTP,
@@ -61,6 +62,36 @@ def _get_services():
     return config, challenge_service, runtime_service, export_manager
 
 
+def _provider_priority(service_type: str) -> list[str]:
+    if service_type == PROTOCOL_TCP:
+        return [EXPORT_PROVIDER_PINGGY, EXPORT_PROVIDER_NGROK]
+    return [EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_LOCALTUNNEL]
+
+
+def _start_with_fallback(export_manager, challenge_name: str, challenge, provider_name: str | None = None) -> tuple[str, str]:
+    providers = [provider_name] if provider_name else _provider_priority(challenge.service_type)
+    last_error = None
+
+    for provider in providers:
+        if not provider:
+            continue
+        try:
+            endpoint = export_manager.start_export(
+                challenge_name=challenge_name,
+                host_port=challenge.service_port,
+                protocol=challenge.service_type,
+                provider_name=provider,
+            )
+            return provider, endpoint
+        except Exception as exc:
+            last_error = exc
+            logger.warning("Provider %s failed for %s: %s", provider, challenge_name, exc)
+
+    if last_error:
+        raise last_error
+    raise RuntimeError("No export provider available")
+
+
 def cmd_sync(args) -> int:
     try:
         config, challenge_service, _, _ = _get_services()
@@ -97,13 +128,16 @@ def cmd_list(args) -> int:
             print(f"\n{yellow('No challenges found')}\n")
             return 0
 
-        print(f"\n{bold('Challenges')}\n{'-' * 72}")
+        print(f"\n{bold('Challenges')}\n{'-' * 96}")
+        print(f"{'Name':28} {'Type':5} {'Port':6} {'State':8} Path")
+        print(f"{'-' * 96}")
         for challenge in challenges:
             status = green('on') if challenge.enabled else red('off')
             if args.all:
-                print(f"{challenge.name:28} {challenge.service_type:4} {str(challenge.service_port):6} {status:10} {challenge.path}")
+                print(f"{challenge.name:28} {challenge.service_type:5} {str(challenge.service_port):6} {status:8} {challenge.path}")
             else:
-                print(f"{challenge.name}")
+                print(f"{challenge.name:28} {challenge.service_type:5} {str(challenge.service_port):6} {status:8} {challenge.path}")
+        print(f"{'-' * 96}\n")
         print()
         return 0
     except Exception as e:
@@ -194,23 +228,13 @@ def cmd_up(args) -> int:
             challenge_service.enable_challenge(args.name)
             challenge = challenge_service.get_challenge(args.name)
 
-        print(f"\n{blue('Building...')}")
-        runtime_service.build(args.name)
-        print(f"{green('✓')} Built")
-
-        print(f"{blue('Starting...')}")
-        runtime = runtime_service.start(args.name)
+        print(f"\n{blue('Starting...')}")
+        runtime_service.start(args.name)
         challenge = challenge_service.get_challenge(args.name) or challenge
         print(f"{green('✓')} Started")
 
-        provider = EXPORT_PROVIDER_NGROK if challenge.service_type == PROTOCOL_HTTP else EXPORT_PROVIDER_PINGGY
         print(f"{blue('Auto-exporting...')}")
-        endpoint = export_manager.start_export(
-            challenge_name=args.name,
-            host_port=challenge.service_port,
-            protocol=challenge.service_type,
-            provider_name=provider,
-        )
+        provider, endpoint = _start_with_fallback(export_manager, args.name, challenge)
 
         print(f"{green('✓')} Exported via {provider}")
         print(f"  Endpoint: {endpoint}")
@@ -260,9 +284,9 @@ def cmd_status(args) -> int:
             print(f"\n{yellow('No challenges found')}\n")
             return 0
 
-        print(f"\n{bold('Status')}\n{'-' * 96}")
-        print(f"{'Challenge':28} {'Runtime':12} {'Port':6} {'Export':12} Endpoint")
-        print(f"{'-' * 96}")
+        print(f"\n{bold('Status')}\n{'-' * 104}")
+        print(f"{'Challenge':28} {'Runtime':10} {'Port':6} {'Export':12} Endpoint")
+        print(f"{'-' * 104}")
 
         for challenge in challenges:
             runtime = runtime_service.status(challenge.name)
@@ -270,9 +294,10 @@ def cmd_status(args) -> int:
             export_label = exports[0]["provider"] if exports else "-"
             endpoint = exports[0]["endpoint"] if exports else "-"
             runtime_label = green('running') if runtime.status == 'running' else red(runtime.status)
-            print(f"{challenge.name:28} {runtime_label:12} {str(challenge.service_port):6} {export_label:12} {endpoint}")
+            challenge_label = green('✓') if runtime.status == 'running' else red('✗')
+            print(f"{challenge_label} {challenge.name:26} {runtime_label:10} {str(challenge.service_port):6} {export_label:12} {endpoint}")
 
-        print(f"{'-' * 96}\n")
+        print(f"{'-' * 104}\n")
         return 0
     except Exception as e:
         print(f"\n{red('✗')} Status failed: {str(e)}\n")
@@ -282,23 +307,34 @@ def cmd_status(args) -> int:
 def cmd_export(args) -> int:
     try:
         _, challenge_service, runtime_service, export_manager = _get_services()
-        challenge = challenge_service.get_challenge(args.name)
+        provider_names = {EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_LOCALTUNNEL, EXPORT_PROVIDER_PINGGY}
+
+        if getattr(args, "name", None) is None:
+            challenge_name = args.target
+            provider_name = None
+        elif args.target in provider_names:
+            provider_name = args.target
+            challenge_name = args.name
+        else:
+            challenge_name = args.target
+            provider_name = None
+
+        challenge = challenge_service.get_challenge(challenge_name)
         if not challenge:
-            print(f"\n{red('✗')} Challenge not found: {args.name}\n")
+            print(f"\n{red('✗')} Challenge not found: {challenge_name}\n")
             return 1
 
-        runtime = runtime_service.status(args.name)
+        runtime = runtime_service.status(challenge_name)
         if runtime.status != "running":
             print(f"\n{red('✗')} Challenge not running\n")
             return 1
 
-        endpoint = export_manager.start_export(
-            challenge_name=args.name,
-            host_port=challenge.service_port,
-            protocol=challenge.service_type,
-            provider_name=args.provider,
-        )
-        print(f"\n{green('✓')} Exported via {args.provider}")
+        if provider_name:
+            provider_name, endpoint = _start_with_fallback(export_manager, challenge_name, challenge, provider_name)
+        else:
+            provider_name, endpoint = _start_with_fallback(export_manager, challenge_name, challenge)
+
+        print(f"\n{green('✓')} Exported via {provider_name}")
         print(f"  Endpoint: {endpoint}\n")
         return 0
     except Exception as e:
@@ -337,12 +373,12 @@ def cmd_exports(args) -> int:
             print(f"\n{yellow('No active exports')}\n")
             return 0
 
-        print(f"\n{bold('Active Exports')}\n{'-' * 96}")
+        print(f"\n{bold('Active Exports')}\n{'-' * 104}")
         print(f"{'Challenge':28} {'Provider':12} {'Protocol':8} {'Port':6} Endpoint")
-        print(f"{'-' * 96}")
+        print(f"{'-' * 104}")
         for export in exports:
             print(f"{export['challenge']:28} {export['provider']:12} {export['protocol']:8} {str(export['port']):6} {export['endpoint']}")
-        print(f"{'-' * 96}\n")
+        print(f"{'-' * 104}\n")
         return 0
     except Exception as e:
         print(f"\n{red('✗')} Exports list failed: {str(e)}\n")

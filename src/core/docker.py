@@ -89,7 +89,7 @@ def run_docker_compose_up(compose_path: Path, cwd: Optional[Path] = None, detach
                 cwd=str(cwd),
                 capture_output=True,
                 text=True,
-                timeout=60,
+                timeout=180,
                 check=True,
             )
         except FileNotFoundError:
@@ -103,7 +103,7 @@ def run_docker_compose_up(compose_path: Path, cwd: Optional[Path] = None, detach
                 cwd=str(cwd),
                 capture_output=True,
                 text=True,
-                timeout=60,
+                timeout=180,
                 check=True,
             )
 
