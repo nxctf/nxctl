@@ -3,7 +3,7 @@
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import yaml
 
@@ -16,93 +16,59 @@ except Exception:
 from pydantic import BaseModel, Field, root_validator
 
 
-class FRPServer(BaseModel):
-    """FRP server configuration."""
-    name: str
-    server_addr: str
-    server_port: int
-    token: str = Field(default="")
-
-
-class FRPConfig(BaseModel):
-    """FRP tunnel provider configuration."""
-    enabled: bool = False
-    rotation_strategy: str = "round-robin"  # or 'fallback'
-    servers: list[FRPServer] = []
-
-
-class NgrokToken(BaseModel):
-    """ngrok account token."""
-    name: str
-    token: str = Field(default="")
-    region: str = "us"
-
-
-class NgrokConfig(BaseModel):
-    """ngrok tunnel provider configuration."""
-    enabled: bool = False
-    rotation_strategy: str = "round-robin"
-    tokens: list[NgrokToken] = []
-
-
-class RatholeServer(BaseModel):
-    """Rathole server configuration."""
-    name: str
-    server_addr: str
-    server_port: int
-    token: str = Field(default="")
-
-
-class RatholeConfig(BaseModel):
-    """Rathole tunnel provider configuration."""
-    enabled: bool = False
-    rotation_strategy: str = "round-robin"
-    servers: list[RatholeServer] = []
-
-
-class TunnelsConfig(BaseModel):
-    """All tunnel providers configuration."""
-    frp: FRPConfig = FRPConfig()
-    ngrok: NgrokConfig = NgrokConfig()
-    rathole: RatholeConfig = RatholeConfig()
-
-
 class Config(BaseModel):
     """Main application configuration."""
-    # Repository
     github_repo: str
     branch: str = "main"
     access_token: str = ""
 
-    # Paths
     cache_dir: str = "./data/chall"
     build_dir: str = "./data/build"
     db_file: str = "./data/ctf-orch.db"
 
-    # Runtime behavior
-    idle_timeout_minutes: int = 15
-    revert_cooldown_minutes: int = 5
-    max_runtime_hours: int = 2
+    ngrok_tokens: list[str] = Field(default_factory=list)
+    pinggy_token: str = ""
 
-    # Default tunnel
-    default_tunnel: str = "frp"
-
-    # Tunnel providers
-    tunnels: TunnelsConfig = TunnelsConfig()
+    default_tunnel: str = "localtunnel"
+    enable_ngrok: bool = True
+    enable_localtunnel: bool = True
+    enable_pinggy: bool = True
 
     class Config:
-        extra = "allow"  # Allow extra fields
+        extra = "allow"
 
     @root_validator(pre=True)
-    def _normalize_cache_dir(cls, values):
+    def _normalize_values(cls, values):
         cache_dir = values.get("cache_dir")
         if not cache_dir:
             values["cache_dir"] = "./data"
-            return values
+        else:
+            normalized = str(cache_dir).replace("\\", "/").rstrip("/")
+            if normalized in {"./data/chall", "data/chall", "./data/cache", "data/cache"}:
+                values["cache_dir"] = "./data"
 
-        normalized = str(cache_dir).replace("\\", "/").rstrip("/")
-        if normalized in {"./data/chall", "data/chall", "./data/cache", "data/cache"}:
-            values["cache_dir"] = "./data"
+        if not values.get("ngrok_tokens"):
+            legacy_tunnels = values.get("tunnels", {}) or {}
+            legacy_ngrok = legacy_tunnels.get("ngrok", {}) if isinstance(legacy_tunnels, dict) else {}
+            legacy_tokens = legacy_ngrok.get("tokens", []) if isinstance(legacy_ngrok, dict) else []
+            tokens: list[str] = []
+            for token_item in legacy_tokens:
+                if isinstance(token_item, str) and token_item.strip():
+                    tokens.append(token_item.strip())
+                elif isinstance(token_item, dict):
+                    token_value = str(token_item.get("token", "")).strip()
+                    if token_value:
+                        tokens.append(token_value)
+            if tokens:
+                values["ngrok_tokens"] = tokens
+
+        if not values.get("pinggy_token"):
+            legacy_tunnels = values.get("tunnels", {}) or {}
+            legacy_pinggy = legacy_tunnels.get("pinggy", {}) if isinstance(legacy_tunnels, dict) else {}
+            if isinstance(legacy_pinggy, dict):
+                legacy_token = str(legacy_pinggy.get("token", "")).strip()
+                if legacy_token:
+                    values["pinggy_token"] = legacy_token
 
         return values
 

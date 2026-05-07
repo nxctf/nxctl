@@ -1,7 +1,7 @@
 {
-  "pid": 10687,
-  "public_endpoint": "tcp://bgqol-103-154-150-103.run.pinggy-free.link:37633",
+  "pid": 20545,
+  "public_endpoint": "tcp://rbiqs-103-154-150-103.run.pinggy-free.link:42201",
   "log_file": "/tmp/pinggy/baby-stack_9001.log",
   "challenge_name": "baby-stack",
-  "started_at": 1778173128
+  "started_at": 1778176297
 }

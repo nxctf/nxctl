@@ -1,45 +1,24 @@
 # CTF Challenge Orchestration Engine Configuration
 
-# Repository Configuration
 github_repo: https://github.com/ariafatah0711/b
 branch: main
 access_token: ${GITHUB_TOKEN}
 
-# Cache and Build Directories
 cache_dir: ./data/chall
 build_dir: ./data/build
 db_file: ./data/ctf-orch.db
 
-# Default Tunnel Provider
-# Options: ngrok, localtunnel, serveo, pinggy
 default_tunnel: localtunnel
+enable_ngrok: true
+enable_localtunnel: true
+enable_pinggy: true
 
-# Runtime Behavior
-idle_timeout_minutes: 15
-revert_cooldown_minutes: 5
-max_runtime_hours: 2
+ngrok_tokens:
+  - ${NGROK_TOKEN_1}
+  - ${NGROK_TOKEN_2}
+  - ${NGROK_TOKEN_3}
+  - ${NGROK_TOKEN_4}
+  - ${NGROK_TOKEN_5}
+  - ${NGROK_TOKEN_6}
 
-# Tunnel Providers Configuration
-# HOSTED PROVIDERS ONLY - Free, no infrastructure setup required
-tunnels:
-  ngrok:
-    enabled: false
-    rotation_strategy: round-robin
-    tokens:
-      - name: "ngrok-account-1"
-        token: ${NGROK_TOKEN_1}
-        region: us
-
-  localtunnel:
-    enabled: true
-    rotation_strategy: round-robin
-    subdomains:
-      - ""
-
-  serveo:
-    enabled: false
-    rotation_strategy: round-robin
-
-  pinggy:
-    enabled: false
-    rotation_strategy: round-robin
+pinggy_token: ${PINGGY_TOKEN}

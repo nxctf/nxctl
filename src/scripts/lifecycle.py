@@ -75,10 +75,12 @@ def _get_services():
 
 
 def _provider_priority(service_type: str) -> list[str]:
+    # if service_type == PROTOCOL_TCP:
+    #     return [EXPORT_PROVIDER_PINGGY, EXPORT_PROVIDER_NGROK]
+    # return [EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_LOCALTUNNEL]
     if service_type == PROTOCOL_TCP:
-        return [EXPORT_PROVIDER_PINGGY, EXPORT_PROVIDER_NGROK]
-    return [EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_LOCALTUNNEL]
-
+        return [EXPORT_PROVIDER_PINGGY]
+    return [EXPORT_PROVIDER_LOCALTUNNEL]
 
 def _start_with_fallback(export_manager, challenge_name: str, challenge, provider_name: str | None = None) -> tuple[str, str]:
     providers = [provider_name] if provider_name else _provider_priority(challenge.service_type)
