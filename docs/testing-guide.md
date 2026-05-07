@@ -22,32 +22,29 @@ Edit `config.yml` with your GitHub repository:
 # Example config
 github_repo: https://github.com/org/ctf-challenges
 branch: main
-access_token: ${GITHUB_TOKEN}  # Set via environment variable
+access_token: ${GITHUB_TOKEN}  # Optional, only needed for private repos
 
 cache_dir: ./data/cache
 build_dir: ./data/build
 db_file: ./data/ctf-orch.db
 
-default_tunnel: frp
+default_tunnel: localtunnel  # Hosted provider, no setup needed
 
 idle_timeout_minutes: 15
 revert_cooldown_minutes: 5
 max_runtime_hours: 2
 
 tunnels:
-  frp:
+  localtunnel:
     enabled: true
     rotation_strategy: round-robin
-    servers:
-      - name: "frp-primary"
-        server_addr: localhost
-        server_port: 7000
-        token: ${FRP_TOKEN_PRIMARY}
+    subdomains:
+      - ""  # Auto-generate
 ```
 
-## Environment Variables
+## Environment Variables (Optional)
 
-Set your GitHub token:
+GitHub token is only needed for **private repositories**:
 
 ```bash
 # Linux/Mac
@@ -56,6 +53,25 @@ export GITHUB_TOKEN=your-github-token-here
 # Windows PowerShell
 $env:GITHUB_TOKEN="your-github-token-here"
 ```
+
+## How Clone Works
+
+The system uses a **smart fallback strategy**:
+
+1. **First attempt**: Clone without token (for public repositories)
+   - Fast, no credentials needed
+   - Works for all public GitHub repos
+
+2. **If auth fails**: Automatically retry with token (for private repositories)
+   - Detects authentication errors automatically
+   - Uses token if provided in config/env
+
+3. **If both fail**: Reports error with helpful message
+
+**Result:**
+- ✅ Public repos work immediately (no token needed)
+- ✅ Private repos use token automatically when needed
+- ✅ No need to manually specify public vs private
 
 ## Test Challenge Sync
 

@@ -24,33 +24,94 @@ python app.py challenge sync
 python app.py challenge sync
 ```
 Clones/updates the Git repository and discovers all challenges.
-- Creates database tables
-- Clones repository (cached)
+- **Smart Clone**: Tries public clone first, auto-retries with token if needed
+- Creates database tables if needed
+- Clones/updates repository (cached locally)
 - Scans for Dockerfile/docker-compose.yml
-- Extracts port and service type
+- Extracts port and service type from docker-compose.yml
 - Saves to database
+
+✅ Works with public repos (no token needed)
+✅ Works with private repos (auto-uses token if provided)
 
 ### List all challenges
 ```bash
 python app.py challenge list
 ```
-Shows all discovered challenges in a table.
+Shows all discovered challenges in a table with port and type.
 
 ### Inspect specific challenge
 ```bash
+python app.py challenge inspect <name>
+```
+Shows detailed information about a single challenge.
+
+Example:
+```bash
 python app.py challenge inspect web/sqli-basic
 ```
-Shows detailed information about a challenge.
+
+### Add a challenge manually
+```bash
+python app.py challenge add <name> <path> <port> [--type http|tcp]
+```
+Add a challenge without syncing from repo.
+
+Example:
+```bash
+python app.py challenge add web/custom-web web/custom-web 9000 --type http
+```
+
+### Remove a challenge
+```bash
+python app.py challenge remove <name>
+```
+Delete a challenge from database.
+
+### Enable/Disable challenges
+```bash
+python app.py challenge enable <name>
+python app.py challenge disable <name>
+```
+Enable or disable a challenge (soft delete, doesn't remove from DB).
+
+## Git Clone Behavior
+
+The system uses **smart clone strategy** for handling public and private repositories:
+
+### How it works
+1. **First attempt**: Clone without token
+   - No credentials needed
+   - Fast, works for public repos
+
+2. **If authentication fails**: Automatically retry with token
+   - Detects auth errors (permission denied, not found, etc.)
+   - Uses token from config/environment variable
+
+3. **Result**:
+   - Public repos: Work immediately ✅
+   - Private repos: Auto-use token when needed ✅
+   - No manual setup required ✅
+
+### Example
+```bash
+# Works for public repos (no token needed)
+python app.py challenge sync
+
+# Also works for private repos (auto-uses token from config/env)
+export GITHUB_TOKEN=ghp_xxxxxxxxxxxx
+python app.py challenge sync
+```
 
 ## Configuration
 
 ### config.yml structure
 
 ```yaml
-# Repository source
+# Repository source (works with public AND private repos)
 github_repo: https://github.com/org/ctf-challenges
 branch: main
-access_token: ${GITHUB_TOKEN}
+access_token: ${GITHUB_TOKEN}  # Only needed for private repos
 
 # Paths
 cache_dir: ./data/cache
@@ -63,18 +124,15 @@ revert_cooldown_minutes: 5
 max_runtime_hours: 2
 
 # Default tunnel provider
-default_tunnel: frp
+default_tunnel: localtunnel  # Hosted provider, no setup needed
 
 # Tunnel providers (see docs/tunnel-providers-guide.md)
 tunnels:
-  frp:
+  localtunnel:
     enabled: true
     rotation_strategy: round-robin
-    servers:
-      - name: "frp-primary"
-        server_addr: localhost
-        server_port: 7000
-        token: ${FRP_TOKEN_PRIMARY}
+    subdomains:
+      - ""  # Auto-generate
 ```
 
 ## Environment Variables
@@ -82,8 +140,10 @@ tunnels:
 Set in shell or `.env` file:
 
 ```bash
+# GitHub token - only needed for private repos
 export GITHUB_TOKEN=ghp_xxxxxxxxxxxx
-export FRP_TOKEN_PRIMARY=your-token
+
+# Tunnel provider tokens (if using paid plans)
 export NGROK_TOKEN_1=your-ngrok-token
 ```
 
@@ -132,10 +192,10 @@ src/
 
 ## Common Issues
 
-### Git clone fails
-- Verify `github_repo` URL
-- Check `GITHUB_TOKEN` is set for private repos
-- Verify network connectivity
+### Git clone fails with "authentication failed"
+- For public repos: Should work automatically, check network
+- For private repos: Set GITHUB_TOKEN environment variable
+- The system tries public clone first, then auto-retries with token
 
 ### No challenges found
 - Check repository has proper structure: `category/challenge-name/Dockerfile`

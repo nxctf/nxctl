@@ -6,6 +6,13 @@ from pathlib import Path
 from typing import Any, Dict
 
 import yaml
+from pathlib import Path
+
+# Optional .env support
+try:
+    from dotenv import load_dotenv
+except Exception:
+    load_dotenv = None
 from pydantic import BaseModel, Field
 
 
@@ -106,6 +113,32 @@ def substitute_env_vars(value: Any) -> Any:
 def load_config(config_path: str = "config.yml") -> Config:
     """Load configuration from YAML file."""
     config_file = Path(config_path)
+
+    # Auto-load .env into environment if present
+    # Look for .env in the config directory or repo root
+    env_file = config_file.parent / ".env"
+    if not env_file.exists():
+        env_file = Path(".env")
+
+    if env_file.exists():
+        try:
+            if load_dotenv:
+                load_dotenv(dotenv_path=str(env_file))
+            else:
+                # Minimal manual loader: parse KEY=VALUE lines
+                with open(env_file, "r") as ef:
+                    for line in ef:
+                        line = line.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        if "=" in line:
+                            k, v = line.split("=", 1)
+                            k = k.strip()
+                            v = v.strip().strip('"').strip("'")
+                            os.environ.setdefault(k, v)
+        except Exception:
+            # If dotenv loading fails, continue without failing
+            pass
 
     if not config_file.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")

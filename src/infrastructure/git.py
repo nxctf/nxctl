@@ -42,13 +42,64 @@ class GitRepository:
         return url
 
     def clone(self) -> Path:
-        """Clone repository if not already cached."""
+        """Clone repository if not already cached.
+
+        Strategy:
+        1. Try clone without token first (for public repos)
+        2. If authentication fails, try with token (for private repos)
+        3. If both fail, raise error
+        """
         if self.local_path.exists():
             logger.info(f"Repository already cached at {self.local_path}")
             return self.local_path
 
         logger.info(f"Cloning repository: {self.repo_url}")
 
+        # First attempt: without token (public repository)
+        try:
+            result = subprocess.run(
+                [
+                    "git",
+                    "clone",
+                    "--depth=1",
+                    "--branch",
+                    self.branch,
+                    self.repo_url,
+                    str(self.local_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+
+            if result.returncode == 0:
+                logger.info(f"Repository cloned successfully (public)")
+                return self.local_path
+
+            # Check if error is authentication-related
+            stderr = result.stderr.lower()
+            is_auth_error = any(keyword in stderr for keyword in [
+                "authentication failed",
+                "permission denied",
+                "not found",
+                "could not read",
+                "fatal: repository",
+            ])
+
+            # If not auth error, fail immediately
+            if not is_auth_error:
+                raise GitError(f"Clone failed: {result.stderr}")
+
+            # Auth error detected, try with token if available
+            if not self.token:
+                raise GitError(f"Clone failed (authentication required, no token provided): {result.stderr}")
+
+            logger.info(f"Public clone failed, retrying with token...")
+
+        except subprocess.TimeoutExpired:
+            raise GitError("Clone operation timed out")
+
+        # Second attempt: with token (private repository)
         try:
             url_with_token = self._add_token_to_url(self.repo_url)
             result = subprocess.run(
@@ -67,9 +118,9 @@ class GitRepository:
             )
 
             if result.returncode != 0:
-                raise GitError(f"Clone failed: {result.stderr}")
+                raise GitError(f"Clone with token failed: {result.stderr}")
 
-            logger.info(f"Repository cloned successfully")
+            logger.info(f"Repository cloned successfully (private, with token)")
             return self.local_path
 
         except subprocess.TimeoutExpired:

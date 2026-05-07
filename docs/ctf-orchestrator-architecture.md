@@ -84,18 +84,21 @@ Responsibilities:
 - support cleanup of containers, networks, volumes, and tunnels
 
 ### 5. Tunnel and Exposure Layer with Multi-Token Support
-A tunnel provider abstracts public exposure.
+A tunnel provider abstracts public exposure using **hosted services** (no self-hosted infrastructure).
 
-**Supported Providers:**
-- **FRP**: Self-hosted reverse proxy (supports multiple servers)
-- **ngrok**: Simple public tunneling (supports multiple accounts)
-- **Rathole**: Lightweight P2P reverse proxy (supports multiple servers)
+**Supported Providers (All Hosted & Free):**
+- **ngrok**: Professional tunneling service (4 free concurrent, custom domains available)
+- **localtunnel**: Zero-config tunneling (unlimited free tunnels)
+- **serveo**: SSH-based tunneling (free, custom subdomains)
+- **pinggy**: Minimal tunneling service (2 free concurrent)
+
+All providers are managed services with their own relay infrastructure - no setup required.
 
 **Multi-Token Strategy:**
-Each provider can have multiple tokens/servers for:
+Each provider can have multiple tokens/accounts for:
 - **Token Rotation**: When one account hits rate limits or quota
-- **Load Balancing**: Distribute tunnels across multiple servers/accounts
-- **Failover**: Automatic fallback to next token/server on error
+- **Load Balancing**: Distribute tunnels across multiple accounts
+- **Failover**: Automatic fallback to next token on error
 - **Rotation Strategies**:
   - `round-robin`: Distribute tunnels evenly across available tokens
   - `fallback`: Use first token, fallback to next on error
@@ -103,6 +106,7 @@ Each provider can have multiple tokens/servers for:
 **Example Config:**
 ```yaml
 tunnels:
+  # Primary: ngrok (reliable, custom domains)
   ngrok:
     enabled: true
     rotation_strategy: round-robin
@@ -113,22 +117,13 @@ tunnels:
       - name: "ngrok-account-2"
         token: ${NGROK_TOKEN_2}
         region: eu
-      - name: "ngrok-account-3"
-        token: ${NGROK_TOKEN_3}
-        region: ap
 
-  frp:
+  # Fallback: localtunnel (free, unlimited)
+  localtunnel:
     enabled: true
     rotation_strategy: round-robin
-    servers:
-      - name: "frp-primary"
-        server_addr: frp1.example.com
-        server_port: 7000
-        token: ${FRP_TOKEN_1}
-      - name: "frp-secondary"
-        server_addr: frp2.example.com
-        server_port: 7000
-        token: ${FRP_TOKEN_2}
+    subdomains:
+      - ""  # auto-generate
 ```
 
 **Exposure Rules:**

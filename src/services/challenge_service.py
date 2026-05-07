@@ -253,3 +253,83 @@ class ChallengeService:
 
         finally:
             close_db_connection(conn)
+
+    def add_challenge(
+        self,
+        name: str,
+        path: str,
+        service_port: int,
+        service_type: str = "http"
+    ) -> Challenge:
+        """Add a challenge manually to the database."""
+        # Check if challenge already exists
+        if self.get_challenge(name):
+            raise ChallengeDiscoveryError(f"Challenge already exists: {name}")
+
+        # Validate inputs
+        if not name or not path:
+            raise ChallengeDiscoveryError("Challenge name and path cannot be empty")
+
+        if service_type not in ("http", "tcp"):
+            raise ChallengeDiscoveryError(f"Invalid service_type: {service_type}. Must be 'http' or 'tcp'")
+
+        if not isinstance(service_port, int) or service_port < 1 or service_port > 65535:
+            raise ChallengeDiscoveryError(f"Invalid port: {service_port}. Must be between 1 and 65535")
+
+        challenge = Challenge(
+            name=name,
+            path=path,
+            service_port=service_port,
+            service_type=service_type,
+            enabled=True,
+        )
+
+        self._save_challenges_to_db([challenge])
+        logger.info(f"Added challenge: {name}")
+        return challenge
+
+    def remove_challenge(self, name: str) -> bool:
+        """Remove a challenge from the database."""
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute("DELETE FROM challenges WHERE name = ?", (name,))
+            conn.commit()
+
+            if cursor.rowcount == 0:
+                return False
+
+            logger.info(f"Removed challenge: {name}")
+            return True
+
+        except Exception as e:
+            conn.rollback()
+            raise ChallengeDiscoveryError(f"Failed to remove challenge: {str(e)}")
+        finally:
+            close_db_connection(conn)
+
+    def toggle_challenge(self, name: str, enabled: bool) -> bool:
+        """Enable or disable a challenge."""
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute(
+                "UPDATE challenges SET enabled = ? WHERE name = ?",
+                (int(enabled), name)
+            )
+            conn.commit()
+
+            if cursor.rowcount == 0:
+                return False
+
+            action = "enabled" if enabled else "disabled"
+            logger.info(f"Challenge {action}: {name}")
+            return True
+
+        except Exception as e:
+            conn.rollback()
+            raise ChallengeDiscoveryError(f"Failed to toggle challenge: {str(e)}")
+        finally:
+            close_db_connection(conn)

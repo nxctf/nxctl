@@ -7,7 +7,7 @@ A lightweight, CLI-first container orchestration platform for CTF challenges.
 - **Single Repository Source**: All challenges from one Git repo, organized by path
 - **Shared Runtime Instances**: Challenges are shared across users, not one per user
 - **Fast Startup**: Prebuilt images and local caching for instant challenge starts
-- **Multiple Export Providers**: FRP, Cloudflare Tunnel, ngrok on same runtime
+- **Multiple Export Providers**: ngrok, localtunnel, serveo, pinggy (all free, hosted)
 - **Idle Cleanup**: Auto-shutdown after 15 minutes of inactivity
 - **Revert with Cooldown**: Restore challenges to clean state safely
 - **Simple Database**: 3 tables (challenges, runtime_instances, challenge_exports)
@@ -237,3 +237,22 @@ tunnels:
 ## License
 
 To be determined.
+
+
+```
+python3 app.py challenge sync
+python3 app.py challenge add a chall/simplee 80
+python3 app.py challenge list
+
+python3 app.py runtime build chall/simplee
+python3 app.py runtime start chall/simplee
+python3 app.py runtime status chall/simplee
+python3 app.py runtime stop chall/simplee
+
+python3 app.py export list
+python3 app.py export ngrok chall/simplee
+python3 app.py export localtunnel chall/simplee
+python3 app.py export list
+
+python3 app.py export prune
+```

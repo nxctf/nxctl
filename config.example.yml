@@ -4,7 +4,7 @@
 # ============================================================================
 # Repository Configuration
 # ============================================================================
-github_repo: https://github.com/org/ctf-challenges
+github_repo: https://github.com/ariafatah0711/a
 branch: main
 
 # GitHub personal access token (or use ${GITHUB_TOKEN} env var)
@@ -37,61 +37,59 @@ revert_cooldown_minutes: 5
 # ============================================================================
 # Default Tunnel Provider
 # ============================================================================
-# Options: frp, ngrok, rathole
-default_tunnel: frp
+# Options: ngrok, localtunnel, serveo, pinggy
+# All are hosted providers (no self-hosted infrastructure needed)
+default_tunnel: localtunnel
 
 # ============================================================================
 # Tunnel Providers Configuration
 # ============================================================================
-# Each provider can have multiple tokens/servers for load balancing and failover
+# HOSTED PROVIDERS ONLY - Free, no infrastructure setup required
+# Each provider supports multiple tokens for load balancing and rotation
 # Rotation strategy: round-robin (distribute load) or fallback (use next on error)
 
 tunnels:
 
-  # FRP: Self-hosted reverse proxy
-  # Supports multiple FRP servers for failover and load balancing
-  frp:
-    enabled: true
-    rotation_strategy: round-robin  # round-robin or fallback
-    servers:
-      - name: "frp-primary"
-        server_addr: localhost
-        server_port: 7000
-        token: ${FRP_TOKEN_PRIMARY}
-      # Add more FRP servers for failover/load balancing
-      # - name: "frp-secondary"
-      #   server_addr: frp2.example.com
-      #   server_port: 7000
-      #   token: ${FRP_TOKEN_SECONDARY}
-
-  # ngrok: Simple public tunneling
-  # Free service, supports multiple accounts for token rotation
+  # ngrok: Public tunneling service
+  # Free tier: 4 concurrent tunnels, 40 requests/min per tunnel
+  # Requires: Free account at https://ngrok.com
   ngrok:
     enabled: false
-    rotation_strategy: round-robin  # round-robin or fallback
+    rotation_strategy: round-robin
     tokens:
       - name: "ngrok-account-1"
         token: ${NGROK_TOKEN_1}
         region: us
-      # Add more ngrok tokens for account rotation
       # - name: "ngrok-account-2"
       #   token: ${NGROK_TOKEN_2}
       #   region: eu
-      # - name: "ngrok-account-3"
-      #   token: ${NGROK_TOKEN_3}
-      #   region: ap
 
-  # Rathole: Lightweight P2P reverse proxy
-  # Self-hosted, low resource usage
-  rathole:
+  # localtunnel: Simple HTTP tunneling
+  # Free tier: Unlimited, no token needed (public URLs)
+  # No setup required, just pick a subdomain name
+  localtunnel:
+    enabled: true
+    rotation_strategy: round-robin
+    # No token needed - use random subdomain names
+    subdomains:
+      - "" # Empty = random subdomain
+      # Or specify custom subdomains (if available):
+      # - "ctf-web-001"
+      # - "ctf-web-002"
+
+  # serveo: Direct SSH reverse proxy + HTTP tunneling
+  # Free tier: Unlimited, no account/token needed
+  # Supports auto-SSH tunneling or direct HTTP
+  serveo:
     enabled: false
     rotation_strategy: round-robin
-    servers:
-      - name: "rathole-server-1"
-        server_addr: localhost
-        server_port: 5202
-        token: ${RATHOLE_TOKEN_1}
-      # - name: "rathole-server-2"
-      #   server_addr: rathole2.example.com
-      #   server_port: 5202
-      #   token: ${RATHOLE_TOKEN_2}
+    # No token needed for basic HTTP forwarding
+    # Auto-generate URLs or use specific subdomain
+
+  # pinggy: Minimal tunnel service
+  # Free tier: 2 concurrent tunnels
+  # No token needed for basic usage
+  pinggy:
+    enabled: false
+    rotation_strategy: round-robin
+    # No token needed - generates random URLs

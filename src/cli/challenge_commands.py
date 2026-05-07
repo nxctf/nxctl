@@ -127,3 +127,117 @@ def cmd_challenge_inspect(args) -> int:
         logger.error(f"Error: {str(e)}")
         print(f"\n✗ Error: {str(e)}", flush=True)
         return 1
+
+
+def cmd_challenge_add(args) -> int:
+    """Command: challenge add <name> <path> <port> [--type http|tcp]"""
+    try:
+        config = get_config()
+        name = args.name
+        path = args.path
+        port = args.port
+        service_type = args.type if hasattr(args, "type") and args.type else "http"
+
+        # Initialize database
+        init_database(config.db_file)
+
+        # Add challenge
+        challenge_service = ChallengeService(config.db_file)
+        challenge = challenge_service.add_challenge(name, path, port, service_type)
+
+        print(f"\n✓ Challenge added successfully")
+        print(f"  Name:   {challenge.name}")
+        print(f"  Path:   {challenge.path}")
+        print(f"  Port:   {challenge.service_port}")
+        print(f"  Type:   {challenge.service_type}")
+        print()
+
+        return 0
+
+    except ChallengeDiscoveryError as e:
+        logger.error(f"Validation error: {str(e)}")
+        print(f"\n✗ Validation error: {str(e)}\n", flush=True)
+        return 1
+
+    except Exception as e:
+        logger.error(f"Error: {str(e)}")
+        print(f"\n✗ Error: {str(e)}", flush=True)
+        return 1
+
+
+def cmd_challenge_remove(args) -> int:
+    """Command: challenge remove <name>"""
+    try:
+        config = get_config()
+        challenge_name = args.name
+
+        # Initialize database
+        init_database(config.db_file)
+
+        # Remove challenge
+        challenge_service = ChallengeService(config.db_file)
+        removed = challenge_service.remove_challenge(challenge_name)
+
+        if not removed:
+            print(f"\n✗ Challenge not found: {challenge_name}\n")
+            return 1
+
+        print(f"\n✓ Challenge removed: {challenge_name}\n")
+        return 0
+
+    except Exception as e:
+        logger.error(f"Error: {str(e)}")
+        print(f"\n✗ Error: {str(e)}", flush=True)
+        return 1
+
+
+def cmd_challenge_enable(args) -> int:
+    """Command: challenge enable <name>"""
+    try:
+        config = get_config()
+        challenge_name = args.name
+
+        # Initialize database
+        init_database(config.db_file)
+
+        # Enable challenge
+        challenge_service = ChallengeService(config.db_file)
+        enabled = challenge_service.toggle_challenge(challenge_name, True)
+
+        if not enabled:
+            print(f"\n✗ Challenge not found: {challenge_name}\n")
+            return 1
+
+        print(f"\n✓ Challenge enabled: {challenge_name}\n")
+        return 0
+
+    except Exception as e:
+        logger.error(f"Error: {str(e)}")
+        print(f"\n✗ Error: {str(e)}", flush=True)
+        return 1
+
+
+def cmd_challenge_disable(args) -> int:
+    """Command: challenge disable <name>"""
+    try:
+        config = get_config()
+        challenge_name = args.name
+
+        # Initialize database
+        init_database(config.db_file)
+
+        # Disable challenge
+        challenge_service = ChallengeService(config.db_file)
+        disabled = challenge_service.toggle_challenge(challenge_name, False)
+
+        if not disabled:
+            print(f"\n✗ Challenge not found: {challenge_name}\n")
+            return 1
+
+        print(f"\n✓ Challenge disabled: {challenge_name}\n")
+        return 0
+
+    except Exception as e:
+        logger.error(f"Error: {str(e)}")
+        print(f"\n✗ Error: {str(e)}", flush=True)
+        return 1
