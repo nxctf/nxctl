@@ -1,6 +1,7 @@
 """Unified command handlers for the simplified flat CLI."""
 
 import logging
+import os
 from pathlib import Path
 import shutil
 
@@ -63,6 +64,30 @@ def _get_git_cache_path(config) -> str:
 
 def _get_challenge_dir(config, challenge) -> Path:
     return Path(_get_git_cache_path(config)) / challenge.path
+
+
+def _get_container_port(config, challenge) -> str:
+    """Try to extract container port from docker-compose.yml."""
+    try:
+        import yaml
+        challenge_dir = _get_challenge_dir(config, challenge)
+        docker_compose = challenge_dir / "docker-compose.yml"
+        if not docker_compose.exists():
+            return str(challenge.service_port)
+
+        with open(docker_compose, 'r') as f:
+            data = yaml.safe_load(f)
+            if 'services' in data:
+                # Find first service with ports
+                for _, sconfig in data['services'].items():
+                    if isinstance(sconfig, dict) and 'ports' in sconfig:
+                        port_spec = sconfig['ports'][0]
+                        if isinstance(port_spec, str) and ':' in port_spec:
+                            return port_spec.split(':')[-1]
+                        return str(port_spec)
+    except Exception:
+        pass
+    return str(challenge.service_port)
 
 
 def _get_services():
@@ -142,17 +167,13 @@ def cmd_list(args) -> int:
             print(f"\n{yellow('No challenges found')}\n")
             return 0
 
-        print(f"\n{bold('Challenges')}\n{'-' * 96}")
-        print(f"{'Name':28} {'Type':5} {'Port':6} {'State':8} Path")
-        print(f"{'-' * 96}")
+        print(f"\n{bold('Challenges')}")
+        print(f"{'-' * 100}")
+        print(f"{'Name':28} {'Type':8} {'Port':8} {'Path'}")
+        print(f"{'-' * 100}")
         for challenge in challenges:
-            status = green('on') if challenge.enabled else red('off')
-            if args.all:
-                print(f"{challenge.name:28} {challenge.service_type:5} {str(challenge.service_port):6} {status:8} {challenge.path}")
-            else:
-                print(f"{challenge.name:28} {challenge.service_type:5} {str(challenge.service_port):6} {status:8} {challenge.path}")
-        print(f"{'-' * 96}\n")
-        print()
+            print(f"{challenge.name:28} {challenge.service_type:8} {str(challenge.service_port):8} {challenge.path}")
+        print(f"{'-' * 100}\n")
         return 0
     except Exception as e:
         print(f"\n{red('✗')} List failed: {str(e)}\n")
@@ -288,30 +309,95 @@ def cmd_restart(args) -> int:
     return cmd_up(args)
 
 
+import time
+
 def cmd_status(args) -> int:
     try:
-        _, challenge_service, runtime_service, export_manager = _get_services()
-        challenges = [challenge_service.get_challenge(args.name)] if args.name else challenge_service.list_challenges()
-        challenges = [challenge for challenge in challenges if challenge]
+        config, challenge_service, runtime_service, export_manager = _get_services()
 
-        if not challenges:
-            print(f"\n{yellow('No challenges found')}\n")
-            return 0
+        watch_mode = getattr(args, "watch", False)
 
-        print(f"\n{bold('Status')}\n{'-' * 104}")
-        print(f"{'Challenge':28} {'Runtime':10} {'Port':6} {'Export':12} Endpoint")
-        print(f"{'-' * 104}")
+        while True:
+            challenges = [challenge_service.get_challenge(args.name)] if args.name else challenge_service.list_challenges()
+            challenges = [challenge for challenge in challenges if challenge]
 
-        for challenge in challenges:
-            runtime = runtime_service.status(challenge.name)
-            exports = export_manager.list_exports(challenge.name)
-            export_label = exports[0]["provider"] if exports else "-"
-            endpoint = exports[0]["endpoint"] if exports else "-"
-            runtime_label = green('running') if runtime.status == 'running' else red(runtime.status)
-            challenge_label = green('✓') if runtime.status == 'running' else red('✗')
-            print(f"{challenge_label} {challenge.name:26} {runtime_label:10} {str(challenge.service_port):6} {export_label:12} {endpoint}")
+            if not challenges:
+                print(f"\n{yellow('No challenges found')}\n")
+                return 0
 
-        print(f"{'-' * 104}\n")
+            # Auto-reconcile exports to ensure real-time accuracy
+            export_manager.reconcile_exports()
+
+            if watch_mode:
+                # Clear screen (cross-platform)
+                os.system('cls' if os.name == 'nt' else 'clear')
+                print(f"\n{bold('Status (Watching every 15s - Ctrl+C to stop)')}")
+            else:
+                print(f"\n{bold('Status')}")
+
+            print(f"{'-' * 145}")
+            print(f"{'Challenge':30} | {'Port (L:C)':12} | {'Export':8} | {'Provider':12} | {'Endpoint':50} | {'PID':8}")
+            print(f"{'-' * 145}")
+
+            for challenge in challenges:
+                runtime = runtime_service.status(challenge.name)
+                exports = export_manager.list_exports(challenge.name, check_health=True)
+
+                # Runtime indicators
+                is_running = runtime.status == 'running'
+                challenge_icon = green('✓') if is_running else red('✗')
+
+                # Manual padding for challenge name since it contains ANSI icon
+                name_padding = " " * max(0, 28 - len(challenge.name))
+                challenge_col = f"{challenge_icon} {challenge.name}{name_padding}"
+
+                # Export indicators
+                export_active = any(e['status'] == 'active' for e in exports)
+                if export_active:
+                    export_status_icon = f"  {green('✓')}     "
+                elif exports:
+                    export_status_icon = f"  {yellow('⚠')}     "
+                else:
+                    export_status_icon = f"  {red('✗')}     "
+
+                # Port mapping
+                container_port = _get_container_port(config, challenge)
+                port_mapping = f"{challenge.service_port}:{container_port}"
+                port_col = f"{port_mapping:12}"
+
+                # Provider, PID and Endpoint
+                raw_provider = exports[0]["provider"] if exports else "-"
+                raw_pid = str(exports[0]["pid"]) if exports and exports[0]["pid"] else "-"
+                raw_endpoint = exports[0]["endpoint"] if exports else "-"
+
+                # Coloring and truncation
+                is_dead = exports and exports[0]['status'] == 'dead'
+
+                if is_dead:
+                    provider_col = red(f"{raw_provider:12}")
+                    pid_col = red(f"{raw_pid:8}")
+                    endpoint_label = red("[DEAD]") + f" {raw_endpoint}"
+                else:
+                    provider_col = f"{raw_provider:12}"
+                    pid_col = f"{raw_pid:8}"
+                    endpoint_label = raw_endpoint
+
+                # Endpoint truncation (visible length)
+                display_endpoint = endpoint_label
+                if len(raw_endpoint) > 50:
+                    display_endpoint = endpoint_label[:47] + "..."
+
+                print(f"{challenge_col} | {port_col} | {export_status_icon} | {provider_col} | {display_endpoint:50} | {pid_col}")
+
+            print(f"{'-' * 145}\n")
+
+            if not watch_mode:
+                break
+
+            time.sleep(15)
+
+        return 0
+    except KeyboardInterrupt:
         return 0
     except Exception as e:
         print(f"\n{red('✗')} Status failed: {str(e)}\n")

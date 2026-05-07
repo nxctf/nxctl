@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from src.scripts.exports.base import ExportProvider
+from src.scripts.exports.base import ExportProvider, ExportResult
 from src.core.utils import is_pid_alive, load_state_file, save_state_file, delete_state_file, kill_process
 from src.core.constants import PROTOCOL_HTTP
 
@@ -38,7 +38,7 @@ class LocaltunnelProvider(ExportProvider):
         match = re.search(r"https?://\S+", text or "")
         return match.group(0).strip() if match else ""
 
-    def start(self, challenge_name: str, host_port: int, protocol: str = "http") -> str:
+    def start(self, challenge_name: str, host_port: int, protocol: str = "http") -> ExportResult:
         """Start localtunnel.
 
         Args:
@@ -47,7 +47,7 @@ class LocaltunnelProvider(ExportProvider):
             protocol: Must be "http"
 
         Returns:
-            Public URL
+            ExportResult containing URL and PID.
         """
         if protocol != "http":
             raise RuntimeError(f"Localtunnel only supports HTTP protocol, got {protocol}")
@@ -62,7 +62,7 @@ class LocaltunnelProvider(ExportProvider):
 
             if state_pid and state_url and is_pid_alive(state_pid):
                 logger.info(f"Reusing existing localtunnel: {state_url}")
-                return state_url
+                return ExportResult(url=state_url, pid=state_pid)
 
         # Check if 'lt' CLI is installed
         try:
@@ -113,7 +113,7 @@ class LocaltunnelProvider(ExportProvider):
                         }
                     )
                     logger.info(f"Localtunnel started: {public_url}")
-                    return public_url
+                    return ExportResult(url=public_url, pid=proc.pid)
 
             raise RuntimeError("Timed out waiting for localtunnel URL")
 

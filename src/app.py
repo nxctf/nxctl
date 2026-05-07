@@ -129,6 +129,7 @@ Examples:
 
     status_cmd = subparsers.add_parser("status", help="Show running challenges + exports")
     status_cmd.add_argument("name", nargs="?", help="Optional challenge name filter")
+    status_cmd.add_argument("-w", "--watch", action="store_true", help="Watch status in real-time (every 15s)")
     status_cmd.set_defaults(func=cmd_status)
 
     # ======== EXPORT MANAGEMENT ========

@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from src.scripts.exports.base import ExportProvider
+from src.scripts.exports.base import ExportProvider, ExportResult
 from src.core.utils import is_pid_alive, load_state_file, save_state_file, delete_state_file, kill_process
 from src.core.constants import PROTOCOL_TCP
 
@@ -46,7 +46,7 @@ class PinggyProvider(ExportProvider):
         match = re.search(r"tcp://[^\s]+", text or "")
         return match.group(0).strip() if match else ""
 
-    def start(self, challenge_name: str, host_port: int, protocol: str = "tcp") -> str:
+    def start(self, challenge_name: str, host_port: int, protocol: str = "tcp") -> ExportResult:
         """Start pinggy tunnel.
 
         Args:
@@ -55,7 +55,7 @@ class PinggyProvider(ExportProvider):
             protocol: Must be "tcp"
 
         Returns:
-            Public endpoint (tcp://IP:PORT)
+            ExportResult containing endpoint and PID.
         """
         if protocol != "tcp":
             raise RuntimeError(f"Pinggy only supports TCP protocol, got {protocol}")
@@ -70,7 +70,7 @@ class PinggyProvider(ExportProvider):
 
             if state_pid and state_url and is_pid_alive(state_pid):
                 logger.info(f"Reusing existing pinggy tunnel: {state_url}")
-                return state_url
+                return ExportResult(url=state_url, pid=state_pid)
 
         # Start pinggy process using nohup and read the endpoint from the log file.
         try:
@@ -113,7 +113,7 @@ class PinggyProvider(ExportProvider):
                             }
                         )
                         logger.info(f"Pinggy tunnel started: {endpoint}")
-                        return endpoint
+                        return ExportResult(url=endpoint, pid=pid)
 
                 time.sleep(0.2)
 

@@ -5,10 +5,11 @@ import re
 import subprocess
 import time
 
+import json
 from pathlib import Path
 from typing import Optional
 
-from src.scripts.exports.base import ExportProvider
+from src.scripts.exports.base import ExportProvider, ExportResult
 from src.core.utils import (
     is_pid_alive,
     load_state_file,
@@ -62,7 +63,7 @@ class NgrokProvider(ExportProvider):
         challenge_name: str,
         host_port: int,
         protocol: str = "http",
-    ) -> str:
+    ) -> ExportResult:
 
         logger.info(
             f"Starting ngrok tunnel for "
@@ -82,7 +83,7 @@ class NgrokProvider(ExportProvider):
                     f"Reusing existing ngrok tunnel: "
                     f"{public_url}"
                 )
-                return public_url
+                return ExportResult(url=public_url, pid=pid)
 
         try:
             from pyngrok import conf as ngrok_conf
@@ -249,7 +250,7 @@ class NgrokProvider(ExportProvider):
                 f"Ngrok tunnel started: {public_url}"
             )
 
-            return public_url
+            return ExportResult(url=public_url, pid=proc.pid)
 
         except ImportError:
             raise RuntimeError(

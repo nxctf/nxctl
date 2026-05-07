@@ -53,6 +53,7 @@ def init_database(db_path: str) -> None:
             protocol TEXT,
             target_port INTEGER,
             public_endpoint TEXT,
+            pid INTEGER,
             status TEXT DEFAULT 'active',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (runtime_id) REFERENCES runtime_instances(id)
@@ -60,6 +61,15 @@ def init_database(db_path: str) -> None:
     """)
 
     conn.commit()
+
+    # Migration: Add pid column if it doesn't exist
+    try:
+        cursor.execute("ALTER TABLE challenge_exports ADD COLUMN pid INTEGER")
+        conn.commit()
+    except sqlite3.OperationalError:
+        # Column already exists
+        pass
+
     conn.close()
 
 

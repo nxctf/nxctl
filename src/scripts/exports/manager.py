@@ -49,12 +49,12 @@ class ExportManager:
             raise RuntimeError(f"Provider {provider_name} does not support {protocol} protocol")
 
         # Start the export
-        public_url = provider.start(challenge_name, host_port, protocol)
+        result = provider.start(challenge_name, host_port, protocol)
 
         # Save to database
-        self._save_export_to_db(challenge_name, provider_name, protocol, host_port, public_url)
+        self._save_export_to_db(challenge_name, provider_name, protocol, host_port, result.url, result.pid)
 
-        return public_url
+        return result.url
 
     def stop_export(self, challenge_name: str, provider_name: str, host_port: int = 0) -> bool:
         """Stop an export."""
@@ -66,12 +66,23 @@ class ExportManager:
         stopped = provider.stop(challenge_name, host_port)
 
         # Mark as inactive in database
-        if stopped:
-            self._mark_export_inactive(challenge_name, provider_name)
+        self._mark_export_inactive(challenge_name, provider_name)
 
         return stopped
 
-    def list_exports(self, challenge_name: Optional[str] = None) -> list:
+    def check_export_alive(self, export: dict) -> bool:
+        """Check if an export is actually alive by PID."""
+        provider = self.get_provider(export['provider'])
+        if not provider:
+            return False
+
+        pid = export.get('pid')
+        if not pid:
+            return True # Assume alive if no PID stored (for legacy)
+
+        return provider.is_pid_running(pid)
+
+    def list_exports(self, challenge_name: Optional[str] = None, check_health: bool = True) -> list:
         """List all active exports."""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
@@ -79,7 +90,7 @@ class ExportManager:
         try:
             if challenge_name:
                 cursor.execute("""
-                    SELECT ce.id, c.name, ce.provider, ce.protocol, ce.target_port, ce.public_endpoint, ce.status, ce.created_at
+                    SELECT ce.id, c.name, ce.provider, ce.protocol, ce.target_port, ce.public_endpoint, ce.pid, ce.status, ce.created_at
                     FROM challenge_exports ce
                     JOIN runtime_instances ri ON ce.runtime_id = ri.id
                     JOIN challenges c ON c.id = ri.challenge_id
@@ -88,7 +99,7 @@ class ExportManager:
                 """, (challenge_name,))
             else:
                 cursor.execute("""
-                    SELECT ce.id, c.name, ce.provider, ce.protocol, ce.target_port, ce.public_endpoint, ce.status, ce.created_at
+                    SELECT ce.id, c.name, ce.provider, ce.protocol, ce.target_port, ce.public_endpoint, ce.pid, ce.status, ce.created_at
                     FROM challenge_exports ce
                     JOIN runtime_instances ri ON ce.runtime_id = ri.id
                     JOIN challenges c ON c.id = ri.challenge_id
@@ -98,19 +109,48 @@ class ExportManager:
 
             exports = []
             for row in cursor.fetchall():
-                exports.append({
+                export_data = {
                     'id': row['id'],
                     'challenge': row['name'],
                     'provider': row['provider'],
                     'protocol': row['protocol'],
                     'port': row['target_port'],
                     'endpoint': row['public_endpoint'],
+                    'pid': row['pid'],
                     'status': row['status'],
                     'created_at': row['created_at'],
-                })
+                }
+
+                if check_health:
+                    alive = self.check_export_alive(export_data)
+                    if not alive:
+                        export_data['status'] = 'dead'
+                        # Optional: auto-mark as inactive in DB if dead
+                        # self._mark_id_inactive(row['id'])
+
+                exports.append(export_data)
 
             return exports
 
+        finally:
+            close_db_connection(conn)
+
+    def reconcile_exports(self) -> int:
+        """Check all active exports and mark those with dead PIDs as inactive."""
+        exports = self.list_exports(check_health=True)
+        dead_count = 0
+
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+
+        try:
+            for export in exports:
+                if export['status'] == 'dead':
+                    cursor.execute("UPDATE challenge_exports SET status = 'inactive' WHERE id = ?", (export['id'],))
+                    dead_count += 1
+
+            conn.commit()
+            return dead_count
         finally:
             close_db_connection(conn)
 
@@ -134,7 +174,7 @@ class ExportManager:
         finally:
             close_db_connection(conn)
 
-    def _save_export_to_db(self, challenge_name: str, provider: str, protocol: str, host_port: int, public_endpoint: str) -> None:
+    def _save_export_to_db(self, challenge_name: str, provider: str, protocol: str, host_port: int, public_endpoint: str, pid: Optional[int] = None) -> None:
         """Save export record to database."""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
@@ -174,9 +214,16 @@ class ExportManager:
             if not cursor.fetchone():
                 # Insert new export record
                 cursor.execute("""
-                    INSERT INTO challenge_exports (runtime_id, provider, protocol, target_port, public_endpoint, status)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (runtime_id, provider, protocol, host_port, public_endpoint, 'active'))
+                    INSERT INTO challenge_exports (runtime_id, provider, protocol, target_port, public_endpoint, pid, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (runtime_id, provider, protocol, host_port, public_endpoint, pid, 'active'))
+            else:
+                # Update existing record (e.g. if we restarted the tunnel)
+                cursor.execute("""
+                    UPDATE challenge_exports
+                    SET public_endpoint = ?, pid = ?, status = 'active'
+                    WHERE runtime_id = ? AND provider = ? AND target_port = ?
+                """, (public_endpoint, pid, runtime_id, provider, host_port))
 
             conn.commit()
 
@@ -201,5 +248,15 @@ class ExportManager:
 
             conn.commit()
 
+        finally:
+            close_db_connection(conn)
+
+    def _mark_id_inactive(self, export_id: int) -> None:
+        """Mark a specific export ID as inactive."""
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        try:
+            cursor.execute("UPDATE challenge_exports SET status = 'inactive' WHERE id = ?", (export_id,))
+            conn.commit()
         finally:
             close_db_connection(conn)

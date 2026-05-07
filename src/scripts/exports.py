@@ -169,6 +169,10 @@ def cmd_export_list(args) -> int:
         init_database(config.db_file)
 
         export_manager = ExportManager(config, config.db_file)
+
+        # Auto-reconcile to mark dead processes as inactive before listing
+        export_manager.reconcile_exports()
+
         exports = export_manager.list_exports(challenge_name=challenge_name)
 
         if not exports:
@@ -176,12 +180,19 @@ def cmd_export_list(args) -> int:
             return 0
 
         print(f"\nActive Exports ({len(exports)} total):\n")
-        print(f"{'Challenge':<30} | {'Provider':<12} | {'Protocol':<8} | {'Port':<6} | {'Endpoint':<40}")
-        print(f"{'-'*120}")
+        print(f"{'Challenge':<30} | {'Provider':<12} | {'Status':<8} | {'Protocol':<8} | {'Port':<6} | {'Endpoint':<40}")
+        print(f"{'-'*130}")
 
         for export in exports:
             endpoint = (export['endpoint'] or "N/A")[:40]
-            print(f"{export['challenge']:<30} | {export['provider']:<12} | {export['protocol']:<8} | {export['port']:<6} | {endpoint:<40}")
+            status = export['status'].upper()
+            status_str = f"✓ {status}" if status == "ACTIVE" else f"✗ {status}"
+            if status == "DEAD":
+                status_str = f"✗ DEAD"
+            elif status == "ACTIVE":
+                status_str = "RUNNING"
+
+            print(f"{export['challenge']:<30} | {export['provider']:<12} | {status_str:<8} | {export['protocol']:<8} | {export['port']:<6} | {endpoint:<40}")
 
         print()
         return 0
@@ -259,7 +270,15 @@ def cmd_export_prune(args) -> int:
         init_database(config.db_file)
 
         export_manager = ExportManager(config, config.db_file)
+
+        # First reconcile dead PIDs
+        reconciled = export_manager.reconcile_exports()
+
+        # Then delete inactive records
         deleted = export_manager.prune_inactive(provider_name=provider_name)
+
+        if reconciled > 0:
+            print(f"✓ Reconciled {reconciled} dead export sessions")
 
         if provider_name:
             print(f"\n✓ Pruned {deleted} inactive {provider_name} export records\n")
