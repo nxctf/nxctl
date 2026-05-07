@@ -61,6 +61,7 @@ from src.cli.export_commands import (
     cmd_export,
     cmd_export_ngrok,
     cmd_export_localtunnel,
+    cmd_export_pinggy,
     cmd_export_list,
     cmd_export_stop,
     cmd_export_prune,
@@ -160,6 +161,20 @@ def main():
     export_lt.add_argument("name", help="Challenge name (e.g., chall/simplee)")
     export_lt.set_defaults(func=cmd_export_localtunnel)
 
+    export_pinggy = export_sub.add_parser(
+        "pinggy",
+        help="Export via Pinggy TCP tunnel"
+    )
+
+    export_pinggy.add_argument(
+        "name",
+        help="Challenge name"
+    )
+
+    export_pinggy.set_defaults(
+        func=cmd_export_pinggy
+    )
+
     # export list
     export_list = export_sub.add_parser("list", help="List active exports/tunnels")
     export_list.add_argument("name", nargs="?", help="Optional challenge name to filter")
@@ -169,12 +184,12 @@ def main():
     # export stop
     export_stop = export_sub.add_parser("stop", help="Stop export/tunnel for a challenge")
     export_stop.add_argument("name", help="Challenge name (e.g., chall/simplee)")
-    export_stop.add_argument("provider", nargs="?", choices=["ngrok", "localtunnel"], help="Optional provider to stop (ngrok|localtunnel). If omitted, stop all providers for the challenge.")
+    export_stop.add_argument("provider", nargs="?", choices=["ngrok", "localtunnel", "pinggy"], help="Optional provider to stop (ngrok|localtunnel|pinggy). If omitted, stop all providers for the challenge.")
     export_stop.set_defaults(func=cmd_export_stop)
 
     # export prune
     export_prune = export_sub.add_parser("prune", help="Delete non-active export records from DB")
-    export_prune.add_argument("provider", nargs="?", choices=["ngrok", "localtunnel"], help="Optional provider filter (positional)")
+    export_prune.add_argument("provider", nargs="?", choices=["ngrok", "localtunnel", "pinggy"], help="Optional provider filter (positional)")
     export_prune.set_defaults(func=cmd_export_prune)
 
     # Parse arguments

@@ -2,12 +2,18 @@
 
 import logging
 import subprocess
+import socket
+import yaml
 from pathlib import Path
 from typing import Optional
 
 from src.domain.models import Challenge, RuntimeInstance
 from src.infrastructure.database import get_db_connection, close_db_connection
-from src.infrastructure.git import GitRepository
+
+
+# NOTE: this service executes docker/compose commands on the host.
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +155,29 @@ class RuntimeService:
         except Exception as e:
             raise RuntimeError(f"Build failed: {str(e)}")
 
+    def _is_port_in_use(self, port: int) -> bool:
+        """Check if a port is in use on the host."""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            return s.connect_ex(('localhost', port)) == 0
+
+    def _find_free_port(self, start_port: int) -> int:
+        """Find the next available port starting from start_port."""
+        port = start_port
+        while self._is_port_in_use(port):
+            port += 1
+        return port
+
+    def _update_challenge_port(self, challenge_id: int, port: int) -> None:
+        """Update challenge service port in database."""
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        try:
+            cursor.execute("UPDATE challenges SET service_port = ? WHERE id = ?", (port, challenge_id))
+            conn.commit()
+            logger.info(f"Updated challenge {challenge_id} port to {port} in database")
+        finally:
+            close_db_connection(conn)
+
     def start(self, challenge_name: str) -> RuntimeInstance:
         """Start a challenge runtime."""
         # Get challenge from DB
@@ -174,12 +203,68 @@ class RuntimeService:
         if not docker_compose.exists():
             raise RuntimeError(f"docker-compose.yml not found in {challenge_dir}")
 
-        # Start with docker compose (v2 with fallback to v1)
-        logger.info(f"Starting challenge: {challenge_name}")
-
+        # Load and modify docker-compose.yml to override ports
         try:
+            with open(docker_compose, 'r') as f:
+                compose_data = yaml.safe_load(f) or {}
+
+            # Determine the port to use
+            # Use the port from DB, but if it's busy or 0, find a free one
+            original_port = challenge.service_port
+            if original_port == 0 or self._is_port_in_use(original_port):
+                # Start searching from 9000 if 0, or from the next port if busy
+                start_search = 9000 if original_port == 0 else original_port + 1
+                new_port = self._find_free_port(start_search)
+                logger.info(f"Port {original_port} is busy or 0, using {new_port} instead")
+
+                # Update DB and object
+                self._update_challenge_port(challenge.id, new_port)
+                challenge.service_port = new_port
+
+            desired_port = challenge.service_port
+
+            # Override ports in compose_data
+            if 'services' in compose_data:
+                # We prioritize the first service found or the one named 'challenge' or similar
+                # For now, we'll apply it to the first service that seems to be the main one
+                for service_name, service_config in compose_data['services'].items():
+                    # If the service has ports, override the host part of the FIRST port
+                    if 'ports' in service_config and service_config['ports']:
+                        new_ports = []
+                        for i, p in enumerate(service_config['ports']):
+                            if i == 0:  # Only override the primary port to avoid host-side collisions
+                                if isinstance(p, str):
+                                    if ':' in p:
+                                        _, container_p = p.split(':')
+                                        new_ports.append(f"{desired_port}:{container_p}")
+                                    else:
+                                        new_ports.append(f"{desired_port}:{p}")
+                                elif isinstance(p, dict):
+                                    p_copy = p.copy()
+                                    p_copy['published'] = desired_port
+                                    new_ports.append(p_copy)
+                                else:
+                                    new_ports.append(f"{desired_port}:{p}")
+                            else:
+                                # Keep other ports as is
+                                new_ports.append(p)
+                        service_config['ports'] = new_ports
+                    elif not any('ports' in s for s in compose_data['services'].values()):
+                        # If NO service has ports defined, inject it into the first service
+                        # This handles the case where port is missing in docker-compose
+                        service_config['ports'] = [f"{desired_port}:{desired_port}"]
+                        break # Only inject into one service
+
+            # Write temporary compose file to avoid modifying the original
+            docker_compose_run = challenge_dir / "docker-compose.run.yml"
+            with open(docker_compose_run, 'w') as f:
+                yaml.dump(compose_data, f)
+
+            # Start with docker compose (v2 with fallback to v1) using the new file
+            logger.info(f"Starting challenge: {challenge_name} on port {desired_port}")
+
             # Try docker compose v2 first
-            cmd = ["docker", "compose", "-f", str(docker_compose), "up", "-d"]
+            cmd = ["docker", "compose", "-f", str(docker_compose_run), "up", "-d"]
             try:
                 result = subprocess.run(
                     cmd,
@@ -192,7 +277,7 @@ class RuntimeService:
             except FileNotFoundError:
                 # Fallback to docker-compose v1
                 logger.info("docker compose v2 not found, trying docker-compose v1...")
-                cmd = ["docker-compose", "-f", str(docker_compose), "up", "-d"]
+                cmd = ["docker-compose", "-f", str(docker_compose_run), "up", "-d"]
                 result = subprocess.run(
                     cmd,
                     cwd=str(challenge_dir),
@@ -203,7 +288,7 @@ class RuntimeService:
                 )
 
             # Get container ID from docker compose
-            ps_cmd = ["docker", "compose", "-f", str(docker_compose), "ps", "-q"]
+            ps_cmd = ["docker", "compose", "-f", str(docker_compose_run), "ps", "-q"]
             try:
                 container_result = subprocess.run(
                     ps_cmd,
@@ -215,7 +300,7 @@ class RuntimeService:
                 )
             except FileNotFoundError:
                 # Fallback to docker-compose v1
-                ps_cmd = ["docker-compose", "-f", str(docker_compose), "ps", "-q"]
+                ps_cmd = ["docker-compose", "-f", str(docker_compose_run), "ps", "-q"]
                 container_result = subprocess.run(
                     ps_cmd,
                     cwd=str(challenge_dir),
@@ -228,17 +313,24 @@ class RuntimeService:
             container_id = container_result.stdout.strip().split("\n")[0] if container_result.stdout.strip() else "unknown"
 
             # Save to database
+            challenge_id = challenge.id
+            if challenge_id is None:
+                raise RuntimeError(f"Invalid challenge id for {challenge_name}")
+
             self._save_runtime_to_db(
-                challenge_id=challenge.id,
+                challenge_id=challenge_id,
                 status="running",
                 container_id=container_id,
             )
 
+
             logger.info(f"Successfully started challenge: {challenge_name}")
 
             # Fetch and return the created runtime
-            runtime = self._get_runtime_from_db(challenge.id)
+            runtime = self._get_runtime_from_db(challenge_id)
             if not runtime:
+
+
                 raise RuntimeError("Failed to retrieve runtime instance")
 
             return runtime
@@ -263,20 +355,40 @@ class RuntimeService:
             raise RuntimeError(f"Challenge directory not found: {challenge_dir}")
 
         docker_compose = challenge_dir / "docker-compose.yml"
-        if not docker_compose.exists():
-            raise RuntimeError(f"docker-compose.yml not found in {challenge_dir}")
+        docker_compose_run = challenge_dir / "docker-compose.run.yml"
 
-        # Stop with docker-compose down
+        # Use the temporary run file if it exists, otherwise use original
+        target_compose = docker_compose_run if docker_compose_run.exists() else docker_compose
+
+        if not target_compose.exists():
+            raise RuntimeError(f"No docker-compose file found in {challenge_dir}")
+
+        # Stop with docker compose (v2 with fallback to v1)
         logger.info(f"Stopping challenge: {challenge_name}")
 
         try:
-            result = subprocess.run(
-                ["docker-compose", "-f", str(docker_compose), "down"],
-                cwd=str(challenge_dir),
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
+            # Prefer docker compose v2
+            cmd = ["docker", "compose", "-f", str(target_compose), "down", "--remove-orphans", "-v"]
+            try:
+                result = subprocess.run(
+                    cmd,
+                    cwd=str(challenge_dir),
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                    check=True,
+                )
+            except FileNotFoundError:
+                logger.info("docker compose v2 not found, trying docker-compose v1...")
+                cmd = ["docker-compose", "-f", str(docker_compose), "down", "--remove-orphans", "-v"]
+                result = subprocess.run(
+                    cmd,
+                    cwd=str(challenge_dir),
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                    check=False,
+                )
 
             if result.returncode != 0:
                 raise RuntimeError(f"Stop failed: {result.stderr}")
@@ -291,6 +403,7 @@ class RuntimeService:
             raise RuntimeError("Stop operation timed out")
         except Exception as e:
             raise RuntimeError(f"Stop failed: {str(e)}")
+
 
     def status(self, challenge_name: str) -> RuntimeInstance:
         """Get status of a challenge runtime."""

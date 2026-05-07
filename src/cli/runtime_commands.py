@@ -161,8 +161,15 @@ def cmd_runtime_status(args) -> int:
 
 def _compose_down_force(challenge_dir: Path, docker_compose: Path) -> None:
     """Force stop containers using docker compose (v2 fallback v1)."""
-    cmd_v2 = ["docker", "compose", "-f", str(docker_compose), "down", "--remove-orphans", "-v"]
-    cmd_v1 = ["docker-compose", "-f", str(docker_compose), "down", "--remove-orphans", "-v"]
+    # Check for run-specific compose file
+    docker_compose_run = challenge_dir / "docker-compose.run.yml"
+    target_compose = docker_compose_run if docker_compose_run.exists() else docker_compose
+
+    if not target_compose.exists():
+        return
+
+    cmd_v2 = ["docker", "compose", "-f", str(target_compose), "down", "--remove-orphans", "-v"]
+    cmd_v1 = ["docker-compose", "-f", str(target_compose), "down", "--remove-orphans", "-v"]
 
     try:
         subprocess.run(cmd_v2, cwd=str(challenge_dir), capture_output=True, text=True, timeout=90, check=True)
@@ -223,9 +230,12 @@ def cmd_runtime_force_stop(args) -> int:
             # 2) best effort compose down to clean network/leftovers
             challenge_dir = (Path(git_cache_path) / chall_path).resolve()
             docker_compose = challenge_dir / "docker-compose.yml"
-            if docker_compose.exists():
+            docker_compose_run = challenge_dir / "docker-compose.run.yml"
+            target_compose = docker_compose_run if docker_compose_run.exists() else docker_compose
+
+            if target_compose.exists():
                 try:
-                    _compose_down_force(challenge_dir, docker_compose)
+                    _compose_down_force(challenge_dir, target_compose)
                 except Exception:
                     pass
 

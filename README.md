@@ -239,7 +239,7 @@ tunnels:
 To be determined.
 
 
-```
+```bash
 python3 app.py challenge sync
 python3 app.py challenge add a chall/simplee 80
 python3 app.py challenge list
@@ -255,4 +255,38 @@ python3 app.py export localtunnel chall/simplee
 python3 app.py export list
 
 python3 app.py export prune
+
+---
+
+python3 app.py challenge list
+
+python3 app.py runtime start chall/baby-stack
+python3 app.py runtime stop chall/baby-stack
+python3 app.py challenge remove chall/baby-stack
+
+python3 app.py challenge add chall/baby-stack chall/baby-stack 9001 --type tcp
+python3 app.py runtime start chall/baby-stack
+nc localhost 9001
+
+python3 app.py export ngrok chall/baby-stack
+python3 app.py export localtunnel chall/baby-stack
+python3 app.py export pinggy chall/baby-stack
+python3 app.py export list
+
+python3 app.py runtime status chall/baby-stack
+```
+
+
+```
+nohup ssh \
+-o StrictHostKeyChecking=no \
+-o UserKnownHostsFile=/dev/null \
+-o ServerAliveInterval=30 \
+-p 443 \
+-R0:localhost:9001 \
+tcp@a.pinggy.io \
+> /tmp/pinggy.log 2>&1 < /dev/null &
+
+sleep 3
+cat /tmp/pinggy.log
 ```

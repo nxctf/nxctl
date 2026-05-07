@@ -268,7 +268,11 @@ def _start_ngrok_detached(config, host_port: int, token: str | None = None) -> s
     if not ngrok_path.exists():
         ngrok_installer.install_ngrok(str(ngrok_path))
 
-    cmd = [str(ngrok_path), "http", str(host_port), "--log=stdout"]
+    # Use protocol based on challenge type: ngrok must use the correct listener.
+    # We store protocol as part of challenge_exports, but _start_ngrok_detached currently only knows host_port.
+    # For now, launch ngrok in TCP mode to support both HTTP and raw TCP challenges.
+    cmd = [str(ngrok_path), "tcp", str(host_port), "--log=stdout"]
+
 
     # Ensure token is configured for the agent before launching detached process.
     if token:
@@ -350,16 +354,38 @@ def cmd_export(args) -> int:
 
         init_database(config.db_file)
 
-        git_cache_path = _get_git_cache_path(config)
+        # Determine host port from database first
+        host_port = None
+        conn = None
+        try:
+            conn = get_db_connection(config.db_file)
+            cur = conn.cursor()
+            # Try exact name or search for it
+            cur.execute("SELECT service_port FROM challenges WHERE name = ? OR name LIKE ?", (challenge_name, f"%/{challenge_name}"))
+            row = cur.fetchone()
+            if row:
+                host_port = row[0]
+                logger.info(f"Found host port {host_port} for {challenge_name} in database")
+        except Exception as e:
+            logger.warning(f"Failed to fetch port from DB for {challenge_name}: {e}")
+        finally:
+            if conn:
+                close_db_connection(conn)
 
-        # Find compose and determine host port
-        from pathlib import Path as P
-        challenge_path = P(git_cache_path) / challenge_name
-        compose = challenge_path / "docker-compose.yml"
-        if not compose.exists():
-            raise RuntimeError(f"docker-compose.yml not found for {challenge_name}")
-
-        host_port = _get_host_port_from_compose(compose)
+        if host_port is None:
+            # Fallback to compose file if not in DB
+            git_cache_path = _get_git_cache_path(config)
+            from pathlib import Path as P
+            # Try to find challenge path (might need discovery logic if path is complex)
+            # For simplicity, we check common locations or the provided name
+            challenge_path = P(git_cache_path) / challenge_name
+            compose = challenge_path / "docker-compose.yml"
+            if compose.exists():
+                host_port = _get_host_port_from_compose(compose)
+                logger.info(f"Fallback: read host port {host_port} from {compose}")
+            else:
+                # If still nothing, raise error or use default
+                raise RuntimeError(f"Could not determine port for challenge {challenge_name}. Is it synced/running?")
 
         if provider == "ngrok":
             try:
@@ -427,8 +453,9 @@ def cmd_export(args) -> int:
                     exists_row = cur.fetchone()
                     if not exists_row:
                         cur.execute(
-                            "INSERT INTO challenge_exports (runtime_id, provider, protocol, target_port, public_endpoint, status) VALUES (?, ?, ?, ?, ?, ?)",
-                            (runtime_id, 'ngrok', 'http', host_port, public_url, 'active')
+                    "INSERT INTO challenge_exports (runtime_id, provider, protocol, target_port, public_endpoint, status) VALUES (?, ?, ?, ?, ?, ?)",
+                            (runtime_id, 'ngrok', 'tcp', host_port, public_url, 'active')
+
                         )
                     conn.commit()
                 except Exception:
@@ -441,6 +468,79 @@ def cmd_export(args) -> int:
                 return 0
             except Exception as e:
                 raise RuntimeError(f"Failed to start ngrok tunnel: {str(e)}")
+
+        elif provider == "pinggy":
+            try:
+                public_url = _start_pinggy_detached(
+                    config=config,
+                    challenge_name=challenge_name,
+                    host_port=host_port,
+                )
+
+                conn = None
+
+                try:
+                    conn = get_db_connection(config.db_file)
+                    cur = conn.cursor()
+
+                    cur.execute(
+                        "SELECT id FROM challenges WHERE name = ?",
+                        (challenge_name,)
+                    )
+
+                    chall_row = cur.fetchone()
+
+                    if not chall_row:
+                        raise RuntimeError(
+                            f"Challenge not found in DB: {challenge_name}"
+                        )
+
+                    chall_id = chall_row[0]
+
+                    cur.execute(
+                        "SELECT id FROM runtime_instances WHERE challenge_id = ? ORDER BY created_at DESC LIMIT 1",
+                        (chall_id,)
+                    )
+
+                    r = cur.fetchone()
+
+                    runtime_id = r[0] if r else None
+
+                    if runtime_id is None:
+                        cur.execute(
+                            "INSERT INTO runtime_instances (challenge_id, status, container_id) VALUES (?, ?, ?)",
+                            (chall_id, 'running', '')
+                        )
+
+                        runtime_id = cur.lastrowid
+
+                    cur.execute(
+                        "INSERT INTO challenge_exports (runtime_id, provider, protocol, target_port, public_endpoint, status) VALUES (?, ?, ?, ?, ?, ?)",
+                        (
+                            runtime_id,
+                            'pinggy',
+                            'tcp',
+                            host_port,
+                            public_url,
+                            'active'
+                        )
+                    )
+
+                    conn.commit()
+
+                finally:
+                    if conn:
+                        close_db_connection(conn)
+
+                print(
+                    f"\n✓ Exported {challenge_name} via pinggy: {public_url}\n"
+                )
+                return 0
+
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to start pinggy tunnel: {str(e)}"
+                )
 
         elif provider == "localtunnel":
             # Require `lt` CLI (localtunnel) installed globally
@@ -546,6 +646,10 @@ def cmd_export_localtunnel(args) -> int:
     args.provider = "localtunnel"
     return cmd_export(args)
 
+def cmd_export_pinggy(args) -> int:
+    """Wrapper: export pinggy <challenge>"""
+    args.provider = "pinggy"
+    return cmd_export(args)
 
 def cmd_export_list(args) -> int:
     """List recorded exports from the database. Optionally filter by challenge name."""
@@ -653,25 +757,47 @@ def cmd_export_stop(args) -> int:
         init_database(config.db_file)
 
         challenge_name = args.name
-        git_cache_path = _get_git_cache_path(config)
-        challenge_path = Path(git_cache_path) / challenge_name
-        compose = challenge_path / "docker-compose.yml"
-        if not compose.exists():
-            raise RuntimeError(f"docker-compose.yml not found for {challenge_name}")
-        host_port = _get_host_port_from_compose(compose)
+        # Determine host port from database first
+        host_port = None
+        chall_id = None
+        conn = get_db_connection(config.db_file)
+        cur = conn.cursor()
+
+        try:
+            # Try exact name or search for it
+            cur.execute("SELECT service_port, id FROM challenges WHERE name = ? OR name LIKE ?", (challenge_name, f"%/{challenge_name}"))
+            row = cur.fetchone()
+            if row:
+                host_port = row[0]
+                chall_id = row[1]
+                logger.info(f"Found host port {host_port} for {challenge_name} in database")
+        except Exception as e:
+            logger.warning(f"Failed to fetch port from DB for {challenge_name}: {e}")
+
+        if host_port is None:
+            # Fallback to compose file ONLY if not found in DB
+            git_cache_path = _get_git_cache_path(config)
+            challenge_path = Path(git_cache_path) / challenge_name
+            compose = challenge_path / "docker-compose.yml"
+            if compose.exists():
+                host_port = _get_host_port_from_compose(compose)
+            else:
+                # Last resort: check active exports in DB
+                cur.execute("SELECT target_port FROM challenge_exports WHERE status = 'active' LIMIT 1")
+                row = cur.fetchone()
+                if row:
+                    host_port = row[0]
+                else:
+                    raise RuntimeError(f"Could not determine port for challenge {challenge_name}. Try sync first.")
 
         stopped_ngrok = _stop_ngrok_by_port(config, host_port)
         stopped_lt = _stop_localtunnel_by_port(config, host_port)
-        stopped = stopped_ngrok or stopped_lt
+        stopped_pinggy = _stop_pinggy_by_port(config, host_port)
+        stopped = stopped_ngrok or stopped_lt or stopped_pinggy
 
-        conn = get_db_connection(config.db_file)
-        cur = conn.cursor()
-        cur.execute("SELECT id FROM challenges WHERE name = ?", (challenge_name,))
-        row = cur.fetchone()
-        if row:
-            chall_id = row[0]
+        if chall_id:
             cur.execute(
-                "UPDATE challenge_exports SET status = 'stopped' WHERE runtime_id IN (SELECT id FROM runtime_instances WHERE challenge_id = ?) AND provider IN ('ngrok', 'localtunnel') AND target_port = ? AND status = 'active'",
+                "UPDATE challenge_exports SET status = 'stopped' WHERE runtime_id IN (SELECT id FROM runtime_instances WHERE challenge_id = ?) AND target_port = ? AND status = 'active'",
                 (chall_id, host_port),
             )
             conn.commit()
@@ -736,3 +862,180 @@ def cmd_export_prune(args) -> int:
                 close_db_connection(conn)
             except Exception:
                 pass
+
+def _pinggy_state_file(config, host_port: int) -> Path:
+    """Path for persisted pinggy process state per host port."""
+    base = Path(config.cache_dir).parent / "exports"
+    base.mkdir(parents=True, exist_ok=True)
+    return base / f"pinggy_{host_port}.json"
+
+def _pinggy_log_file(challenge_name: str) -> Path:
+    safe_name = challenge_name.replace("/", "_")
+    base = Path("/tmp/pinggy")
+    base.mkdir(parents=True, exist_ok=True)
+    return base / f"{safe_name}.log"
+
+def _load_pinggy_state(config, host_port: int) -> dict:
+    state_path = _pinggy_state_file(config, host_port)
+    if not state_path.exists():
+        return {}
+    try:
+        return json.loads(state_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_pinggy_state(config, host_port: int, state: dict) -> None:
+    state_path = _pinggy_state_file(config, host_port)
+    state_path.write_text(
+        json.dumps(state, ensure_ascii=True, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _delete_pinggy_state(config, host_port: int) -> None:
+    state_path = _pinggy_state_file(config, host_port)
+    try:
+        if state_path.exists():
+            state_path.unlink()
+    except Exception:
+        pass
+
+def _stop_pinggy_by_port(config, host_port: int) -> bool:
+    """Stop pinggy ssh tunnel process."""
+    stopped = False
+
+    state = _load_pinggy_state(config, host_port)
+
+    pid = int(state.get("pid", 0)) if state else 0
+
+    if pid and _is_pid_alive(pid):
+        try:
+            os.kill(pid, signal.SIGTERM)
+
+            for _ in range(10):
+                if not _is_pid_alive(pid):
+                    break
+                time.sleep(0.2)
+
+            if _is_pid_alive(pid):
+                os.kill(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+
+            stopped = True
+
+        except Exception:
+            pass
+
+    _delete_pinggy_state(config, host_port)
+
+    log_file = state.get("log_file")
+
+    if log_file:
+        try:
+            Path(log_file).unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    return stopped
+
+def _start_pinggy_detached(
+    config,
+    challenge_name: str,
+    host_port: int
+) -> str:
+    """Start Pinggy TCP tunnel."""
+
+    state = _load_pinggy_state(config, host_port)
+
+    state_pid = int(state.get("pid", 0)) if state else 0
+    state_url = str(state.get("public_url", "")) if state else ""
+
+    if state_pid and state_url and _is_pid_alive(state_pid):
+        return state_url
+
+    log_file = str(
+        _pinggy_log_file(challenge_name)
+    )
+
+    try:
+        Path(log_file).unlink(missing_ok=True)
+    except Exception:
+        pass
+
+    cmd = f"""
+nohup ssh \
+-o StrictHostKeyChecking=no \
+-o UserKnownHostsFile=/dev/null \
+-o ServerAliveInterval=30 \
+-p 443 \
+-R0:localhost:{host_port} \
+tcp@a.pinggy.io \
+> {log_file} 2>&1 < /dev/null &
+"""
+
+    proc = subprocess.Popen(
+        cmd,
+        shell=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+    deadline = time.time() + 30
+
+    while time.time() < deadline:
+
+        try:
+            data = Path(log_file).read_text(
+                encoding="utf-8",
+                errors="ignore",
+            )
+        except Exception:
+            data = ""
+
+        # logger.info(f"[PINGGY LOG]\\n{data}")
+
+        m = re.search(r"tcp://\S+", data)
+
+        if m:
+
+            public_url = m.group(0).strip()
+
+            # cari PID ssh terbaru
+            pid = 0
+
+            try:
+                out = subprocess.check_output(
+                    ["pgrep", "-f", f"localhost:{host_port}"],
+                    text=True,
+                )
+
+                pids = [
+                    int(x.strip())
+                    for x in out.splitlines()
+                    if x.strip().isdigit()
+                ]
+
+                if pids:
+                    pid = pids[-1]
+
+            except Exception:
+                pass
+
+            _save_pinggy_state(
+                config,
+                host_port,
+                {
+                    "pid": pid,
+                    "public_url": public_url,
+                    "host_port": host_port,
+                    "started_at": int(time.time()),
+                    "log_file": log_file,
+                },
+            )
+
+            return public_url
+
+        time.sleep(0.5)
+
+    raise RuntimeError("Timed out waiting for Pinggy tunnel URL")
