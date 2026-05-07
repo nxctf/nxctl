@@ -1,0 +1,9 @@
+version: "3.8"
+services:
+  web:
+    build: ./web
+    ports:
+      - "8001:80"
+    volumes:
+      - ./web/html:/var/www/html
+    restart: "unless-stopped"

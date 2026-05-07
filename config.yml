@@ -1,0 +1,48 @@
+# CTF Challenge Orchestration Engine Configuration
+
+# Repository Configuration
+github_repo: https://github.com/org/ctf-challenges
+branch: main
+access_token: ${GITHUB_TOKEN}
+
+# Cache and Build Directories
+cache_dir: ./data/cache
+build_dir: ./data/build
+db_file: ./data/ctf-orch.db
+
+# Default Tunnel Provider
+default_tunnel: frp
+
+# Runtime Behavior
+idle_timeout_minutes: 15
+revert_cooldown_minutes: 5
+max_runtime_hours: 2
+
+# Tunnel Providers Configuration
+# Each provider supports multiple tokens/servers for failover and load balancing
+tunnels:
+  frp:
+    enabled: true
+    rotation_strategy: round-robin
+    servers:
+      - name: "frp-primary"
+        server_addr: localhost
+        server_port: 7000
+        token: ${FRP_TOKEN_PRIMARY}
+
+  ngrok:
+    enabled: false
+    rotation_strategy: round-robin
+    tokens:
+      - name: "ngrok-account-1"
+        token: ${NGROK_TOKEN_1}
+        region: us
+
+  rathole:
+    enabled: false
+    rotation_strategy: round-robin
+    servers:
+      - name: "rathole-server-1"
+        server_addr: localhost
+        server_port: 5202
+        token: ${RATHOLE_TOKEN_1}

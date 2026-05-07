@@ -1,0 +1,12 @@
+services:
+ web:
+   image: vulhub/flask:1.1.1
+   volumes:
+    - ./src:/app
+      - ./src:/app:ro
+   working_dir: /app
+   environment:
+      - PYTHONPATH=/app
+      - FLAG=FGTE{SSTI_JINJA2_M4SUK_S3KOL4H}
+   ports:
+    - "8000:8000"
