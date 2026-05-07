@@ -1,15 +1,13 @@
-"""Challenge discovery and validation service."""
+"""Challenge discovery and management service."""
 
-import json
 import logging
 from pathlib import Path
 from typing import Optional
 
-import yaml
-
-from src.domain.models import Challenge
-from src.infrastructure.database import get_db_connection, close_db_connection
-from src.infrastructure.git import GitRepository
+from src.core.models import Challenge
+from src.core.db import get_db_connection, close_db_connection
+from src.core.git import GitRepository
+from src.core.yaml import extract_port_from_compose, detect_service_type_from_compose
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +64,6 @@ class ChallengeService:
         """Extract challenge information from directory."""
         dockerfile = challenge_dir / "Dockerfile"
         docker_compose = challenge_dir / "docker-compose.yml"
-        challenge_yml = challenge_dir / "challenge.yml"
 
         # Check if it's a valid challenge directory
         if not dockerfile.exists() and not docker_compose.exists():
@@ -77,9 +74,13 @@ class ChallengeService:
         challenge_name = f"{category}/{challenge_dir.name}"
         challenge_path = str(challenge_dir.relative_to(repo_root)).replace("\\", "/")
 
-        # Extract port information
-        service_port = self._extract_port(challenge_dir)
-        service_type = self._detect_service_type(challenge_dir)
+        # Extract port and service type information
+        service_port = 8080
+        service_type = "http"
+
+        if docker_compose.exists():
+            service_port = extract_port_from_compose(docker_compose)
+            service_type = detect_service_type_from_compose(docker_compose)
 
         challenge = Challenge(
             name=challenge_name,
@@ -90,63 +91,6 @@ class ChallengeService:
 
         logger.info(f"Discovered challenge: {challenge_name} (port {service_port}, type {service_type})")
         return challenge
-
-    def _extract_port(self, challenge_dir: Path) -> int:
-        """Extract service port from Docker config."""
-        docker_compose = challenge_dir / "docker-compose.yml"
-
-        if docker_compose.exists():
-            try:
-                with open(docker_compose, "r") as f:
-                    config = yaml.safe_load(f) or {}
-
-                services = config.get("services", {})
-                for service_name, service_config in services.items():
-                    if isinstance(service_config, dict):
-                        ports = service_config.get("ports", [])
-                        if ports:
-                            # Extract first port
-                            first_port = ports[0]
-                            if isinstance(first_port, str):
-                                # Format: "8080" or "8080:8080"
-                                container_port = first_port.split(":")[-1].strip()
-                                try:
-                                    return int(container_port)
-                                except ValueError:
-                                    pass
-                            elif isinstance(first_port, int):
-                                return first_port
-
-            except Exception as e:
-                logger.warning(f"Failed to extract port from {docker_compose}: {str(e)}")
-
-        # Default port
-        return 8080
-
-    def _detect_service_type(self, challenge_dir: Path) -> str:
-        """Detect service type (http/tcp)."""
-        docker_compose = challenge_dir / "docker-compose.yml"
-
-        if docker_compose.exists():
-            try:
-                with open(docker_compose, "r") as f:
-                    config = yaml.safe_load(f) or {}
-
-                # Look for environment variables that might indicate type
-                services = config.get("services", {})
-                for service_config in services.values():
-                    if isinstance(service_config, dict):
-                        env = service_config.get("environment", {})
-                        if isinstance(env, dict):
-                            service_type = env.get("SERVICE_TYPE") or env.get("service_type")
-                            if service_type:
-                                return str(service_type).lower()
-
-            except Exception:
-                pass
-
-        # Default: HTTP
-        return "http"
 
     def sync_challenges(
         self,
@@ -226,7 +170,7 @@ class ChallengeService:
             close_db_connection(conn)
 
     def get_challenge(self, name: str) -> Optional[Challenge]:
-        """Get challenge by name."""
+        """Get a single challenge by name."""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
 
@@ -254,54 +198,44 @@ class ChallengeService:
         finally:
             close_db_connection(conn)
 
-    def add_challenge(
-        self,
-        name: str,
-        path: str,
-        service_port: int,
-        service_type: str = "http"
-    ) -> Challenge:
-        """Add a challenge manually to the database."""
-        # Check if challenge already exists
-        if self.get_challenge(name):
-            raise ChallengeDiscoveryError(f"Challenge already exists: {name}")
+    def add_challenge(self, name: str, path: str, port: int, service_type: str = "http") -> Challenge:
+        """Add a challenge manually."""
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
 
-        # Validate inputs
-        if not name or not path:
-            raise ChallengeDiscoveryError("Challenge name and path cannot be empty")
+        try:
+            cursor.execute("""
+                INSERT INTO challenges (name, path, service_port, service_type, enabled)
+                VALUES (?, ?, ?, ?, ?)
+            """, (name, path, port, service_type, True))
 
-        if service_type not in ("http", "tcp"):
-            raise ChallengeDiscoveryError(f"Invalid service_type: {service_type}. Must be 'http' or 'tcp'")
+            conn.commit()
+            challenge_id = cursor.lastrowid
 
-        if not isinstance(service_port, int) or service_port < 1 or service_port > 65535:
-            raise ChallengeDiscoveryError(f"Invalid port: {service_port}. Must be between 1 and 65535")
+            return Challenge(
+                id=challenge_id,
+                name=name,
+                path=path,
+                service_port=port,
+                service_type=service_type,
+                enabled=True,
+            )
 
-        challenge = Challenge(
-            name=name,
-            path=path,
-            service_port=service_port,
-            service_type=service_type,
-            enabled=True,
-        )
-
-        self._save_challenges_to_db([challenge])
-        logger.info(f"Added challenge: {name}")
-        return challenge
+        except Exception as e:
+            conn.rollback()
+            raise ChallengeDiscoveryError(f"Failed to add challenge: {str(e)}")
+        finally:
+            close_db_connection(conn)
 
     def remove_challenge(self, name: str) -> bool:
-        """Remove a challenge from the database."""
+        """Remove a challenge."""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
 
         try:
             cursor.execute("DELETE FROM challenges WHERE name = ?", (name,))
             conn.commit()
-
-            if cursor.rowcount == 0:
-                return False
-
-            logger.info(f"Removed challenge: {name}")
-            return True
+            return cursor.rowcount > 0
 
         except Exception as e:
             conn.rollback()
@@ -309,27 +243,34 @@ class ChallengeService:
         finally:
             close_db_connection(conn)
 
-    def toggle_challenge(self, name: str, enabled: bool) -> bool:
-        """Enable or disable a challenge."""
+    def enable_challenge(self, name: str) -> bool:
+        """Enable a challenge."""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
 
         try:
-            cursor.execute(
-                "UPDATE challenges SET enabled = ? WHERE name = ?",
-                (int(enabled), name)
-            )
+            cursor.execute("UPDATE challenges SET enabled = 1 WHERE name = ?", (name,))
             conn.commit()
-
-            if cursor.rowcount == 0:
-                return False
-
-            action = "enabled" if enabled else "disabled"
-            logger.info(f"Challenge {action}: {name}")
-            return True
+            return cursor.rowcount > 0
 
         except Exception as e:
             conn.rollback()
-            raise ChallengeDiscoveryError(f"Failed to toggle challenge: {str(e)}")
+            raise ChallengeDiscoveryError(f"Failed to enable challenge: {str(e)}")
+        finally:
+            close_db_connection(conn)
+
+    def disable_challenge(self, name: str) -> bool:
+        """Disable a challenge."""
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute("UPDATE challenges SET enabled = 0 WHERE name = ?", (name,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+        except Exception as e:
+            conn.rollback()
+            raise ChallengeDiscoveryError(f"Failed to disable challenge: {str(e)}")
         finally:
             close_db_connection(conn)

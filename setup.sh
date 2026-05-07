@@ -47,3 +47,7 @@ echo "[setup] Done. Note: for ngrok you should set NGROK authtoken via 'ngrok au
 echo "Activate virtualenv with: source .venv/bin/activate"
 
 exit 0
+
+wget https://github.com/Pinggy-io/cli-js/releases/download/v0.4.7/pinggy-linux-x64 -o pinggy
+chmod +x pinggy
+sudo mv pinggy /usr/bin/pinggy

@@ -1,4 +1,4 @@
-"""Challenge domain models."""
+"""Domain models for challenges and runtimes."""
 
 from dataclasses import dataclass, field
 from datetime import datetime

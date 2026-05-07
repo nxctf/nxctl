@@ -1,12 +1,10 @@
-"""CLI commands for challenge management."""
+"""CLI command handlers for challenge management."""
 
 import logging
-from pathlib import Path
-
-from src.infrastructure.config import get_config
-from src.infrastructure.database import init_database
-from src.infrastructure.git import GitRepository, GitError
-from src.services.challenge_service import ChallengeService, ChallengeDiscoveryError
+from src.core.config import get_config
+from src.core.db import init_database
+from src.core.git import GitRepository, GitError
+from src.scripts.challenge_service import ChallengeService, ChallengeDiscoveryError
 
 logger = logging.getLogger(__name__)
 
@@ -113,12 +111,14 @@ def cmd_challenge_inspect(args) -> int:
             print(f"\n✗ Challenge not found: {challenge_name}\n")
             return 1
 
-        print(f"\nChallenge: {challenge.name}")
-        print(f"  Path:        {challenge.path}")
-        print(f"  Port:        {challenge.service_port}")
-        print(f"  Type:        {challenge.service_type}")
-        print(f"  Enabled:     {'Yes' if challenge.enabled else 'No'}")
-        print(f"  Created:     {challenge.created_at}")
+        print(f"\n{'='*60}")
+        print(f"Challenge: {challenge.name}")
+        print(f"{'='*60}")
+        print(f"Path:         {challenge.path}")
+        print(f"Port:         {challenge.service_port}")
+        print(f"Type:         {challenge.service_type}")
+        print(f"Enabled:      {challenge.enabled}")
+        print(f"Created:      {challenge.created_at}")
         print()
 
         return 0
@@ -130,37 +130,38 @@ def cmd_challenge_inspect(args) -> int:
 
 
 def cmd_challenge_add(args) -> int:
-    """Command: challenge add <name> <path> <port> [--type http|tcp]"""
+    """Command: challenge add <name> <path> <port> [--type]"""
     try:
         config = get_config()
-        name = args.name
-        path = args.path
-        port = args.port
-        service_type = args.type if hasattr(args, "type") and args.type else "http"
 
         # Initialize database
         init_database(config.db_file)
 
         # Add challenge
         challenge_service = ChallengeService(config.db_file)
-        challenge = challenge_service.add_challenge(name, path, port, service_type)
+        challenge = challenge_service.add_challenge(
+            name=args.name,
+            path=args.path,
+            port=args.port,
+            service_type=args.type,
+        )
 
         print(f"\n✓ Challenge added successfully")
-        print(f"  Name:   {challenge.name}")
-        print(f"  Path:   {challenge.path}")
-        print(f"  Port:   {challenge.service_port}")
-        print(f"  Type:   {challenge.service_type}")
+        print(f"  Name:  {challenge.name}")
+        print(f"  Path:  {challenge.path}")
+        print(f"  Port:  {challenge.service_port}")
+        print(f"  Type:  {challenge.service_type}")
         print()
 
         return 0
 
     except ChallengeDiscoveryError as e:
-        logger.error(f"Validation error: {str(e)}")
-        print(f"\n✗ Validation error: {str(e)}\n", flush=True)
+        logger.error(f"Error: {str(e)}")
+        print(f"\n✗ Error: {str(e)}\n", flush=True)
         return 1
 
     except Exception as e:
-        logger.error(f"Error: {str(e)}")
+        logger.error(f"Unexpected error: {str(e)}")
         print(f"\n✗ Error: {str(e)}", flush=True)
         return 1
 
@@ -185,8 +186,13 @@ def cmd_challenge_remove(args) -> int:
         print(f"\n✓ Challenge removed: {challenge_name}\n")
         return 0
 
-    except Exception as e:
+    except ChallengeDiscoveryError as e:
         logger.error(f"Error: {str(e)}")
+        print(f"\n✗ Error: {str(e)}\n", flush=True)
+        return 1
+
+    except Exception as e:
+        logger.error(f"Unexpected error: {str(e)}")
         print(f"\n✗ Error: {str(e)}", flush=True)
         return 1
 
@@ -202,7 +208,7 @@ def cmd_challenge_enable(args) -> int:
 
         # Enable challenge
         challenge_service = ChallengeService(config.db_file)
-        enabled = challenge_service.toggle_challenge(challenge_name, True)
+        enabled = challenge_service.enable_challenge(challenge_name)
 
         if not enabled:
             print(f"\n✗ Challenge not found: {challenge_name}\n")
@@ -211,8 +217,13 @@ def cmd_challenge_enable(args) -> int:
         print(f"\n✓ Challenge enabled: {challenge_name}\n")
         return 0
 
-    except Exception as e:
+    except ChallengeDiscoveryError as e:
         logger.error(f"Error: {str(e)}")
+        print(f"\n✗ Error: {str(e)}\n", flush=True)
+        return 1
+
+    except Exception as e:
+        logger.error(f"Unexpected error: {str(e)}")
         print(f"\n✗ Error: {str(e)}", flush=True)
         return 1
 
@@ -228,7 +239,7 @@ def cmd_challenge_disable(args) -> int:
 
         # Disable challenge
         challenge_service = ChallengeService(config.db_file)
-        disabled = challenge_service.toggle_challenge(challenge_name, False)
+        disabled = challenge_service.disable_challenge(challenge_name)
 
         if not disabled:
             print(f"\n✗ Challenge not found: {challenge_name}\n")
@@ -237,7 +248,12 @@ def cmd_challenge_disable(args) -> int:
         print(f"\n✓ Challenge disabled: {challenge_name}\n")
         return 0
 
-    except Exception as e:
+    except ChallengeDiscoveryError as e:
         logger.error(f"Error: {str(e)}")
+        print(f"\n✗ Error: {str(e)}\n", flush=True)
+        return 1
+
+    except Exception as e:
+        logger.error(f"Unexpected error: {str(e)}")
         print(f"\n✗ Error: {str(e)}", flush=True)
         return 1

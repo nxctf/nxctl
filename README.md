@@ -290,3 +290,11 @@ tcp@a.pinggy.io \
 sleep 3
 cat /tmp/pinggy.log
 ```
+
+```bash
+URL=$(pinggy -p 443 -R0:localhost:9001 tcp@free.pinggy.io 2>/dev/null \
+ | grep -m1 -oE 'tcp://[^ ]+' \
+ | sed 's#tcp://##')
+
+echo "$URL"
+```
