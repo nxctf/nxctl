@@ -27,8 +27,11 @@ def cmd_challenge_sync(args) -> int:
         )
 
         # Clone/update repository
-        repo_path = git_repo.clone() if not git_repo.local_path.exists() else git_repo.local_path
-        git_repo.pull()
+        if git_repo._is_git_repository(git_repo.local_path):
+            repo_path = git_repo.local_path
+            git_repo.pull()
+        else:
+            repo_path = git_repo.clone()
 
         logger.info(f"Repository synced: {repo_path}")
 

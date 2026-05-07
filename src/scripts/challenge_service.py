@@ -34,31 +34,52 @@ class ChallengeService:
         search_dir = repo_path / challenge_base_dir if challenge_base_dir else repo_path
 
         try:
-            for category_dir in search_dir.iterdir():
-                if not category_dir.is_dir() or category_dir.name.startswith("."):
-                    continue
+            candidate_dirs = self._find_candidate_challenge_dirs(search_dir)
 
-                for challenge_dir in category_dir.iterdir():
-                    if not challenge_dir.is_dir() or challenge_dir.name.startswith("."):
-                        continue
-
-                    challenge = self._extract_challenge_info(
-                        challenge_dir,
-                        category_dir.name,
-                        repo_path
-                    )
-                    if challenge:
-                        challenges.append(challenge)
+            for challenge_dir in candidate_dirs:
+                challenge = self._extract_challenge_info(challenge_dir, repo_path)
+                if challenge:
+                    challenges.append(challenge)
 
         except Exception as e:
             raise ChallengeDiscoveryError(f"Failed to discover challenges: {str(e)}")
 
         return challenges
 
+    def _find_candidate_challenge_dirs(self, search_dir: Path) -> list[Path]:
+        """Find directories that look like challenge roots."""
+        compose_dirs = set()
+        dockerfile_dirs = set()
+
+        for compose_path in search_dir.rglob("docker-compose.yml"):
+            if self._is_hidden_path(compose_path, search_dir):
+                continue
+            compose_dirs.add(compose_path.parent)
+
+        for dockerfile_path in search_dir.rglob("Dockerfile"):
+            if self._is_hidden_path(dockerfile_path, search_dir):
+                continue
+
+            dockerfile_dir = dockerfile_path.parent
+            if any(compose_dir in dockerfile_dir.parents or compose_dir == dockerfile_dir for compose_dir in compose_dirs):
+                continue
+            dockerfile_dirs.add(dockerfile_dir)
+
+        candidates = compose_dirs | dockerfile_dirs
+        return sorted(candidates, key=lambda path: str(path.relative_to(search_dir)).replace("\\", "/"))
+
+    def _is_hidden_path(self, path: Path, search_dir: Path) -> bool:
+        """Return True when the path is inside a hidden directory."""
+        try:
+            relative_parts = path.relative_to(search_dir).parts
+        except ValueError:
+            relative_parts = path.parts
+
+        return any(part.startswith(".") for part in relative_parts)
+
     def _extract_challenge_info(
         self,
         challenge_dir: Path,
-        category: str,
         repo_root: Path
     ) -> Optional[Challenge]:
         """Extract challenge information from directory."""
@@ -70,8 +91,8 @@ class ChallengeService:
             logger.debug(f"Skipping {challenge_dir} - no Dockerfile or docker-compose.yml")
             return None
 
-        # Get challenge name (category/name)
-        challenge_name = f"{category}/{challenge_dir.name}"
+        # Use the relative path from repo root as the challenge name.
+        challenge_name = str(challenge_dir.relative_to(repo_root)).replace("\\", "/")
         challenge_path = str(challenge_dir.relative_to(repo_root)).replace("\\", "/")
 
         # Extract port and service type information
@@ -101,7 +122,11 @@ class ChallengeService:
         logger.info(f"Syncing challenges from {git_repo.repo_url}")
 
         # Ensure repository is cloned/updated
-        git_repo.pull() if git_repo.local_path.exists() else git_repo.clone()
+        # If the cache path is a valid git work tree, pull updates; otherwise clone.
+        if git_repo._is_git_repository(git_repo.local_path):
+            git_repo.pull()
+        else:
+            git_repo.clone()
 
         # Discover challenges
         challenges = self.discover_challenges(git_repo.local_path, challenge_base_dir)

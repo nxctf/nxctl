@@ -56,6 +56,7 @@ from src.scripts.lifecycle import (
     cmd_unexport,
     cmd_exports,
     cmd_clean,
+    cmd_purge,
     cmd_prune,
 )
 
@@ -76,6 +77,7 @@ Examples:
   ctf-orch export ngrok web/sqli     Manual ngrok tunnel
   ctf-orch unexport web/sqli         Stop all exports
   ctf-orch clean web/sqli --data     Remove challenge data
+    ctf-orch purge web/sqli            Stop everything, remove Docker data, delete cached folder
         """.strip()
     )
 
@@ -150,6 +152,11 @@ Examples:
     clean_cmd.add_argument("--image", action="store_true", help="Also remove image (--rmi local)")
     clean_cmd.add_argument("--volume", action="store_true", help="Also remove volumes (-v)")
     clean_cmd.set_defaults(func=cmd_clean)
+
+    purge_cmd = subparsers.add_parser("purge", help="Stop everything, clean Docker data, delete cached challenge folder")
+    purge_cmd.add_argument("name", nargs="?", help="Challenge name")
+    purge_cmd.add_argument("--all", action="store_true", help="Purge all challenges")
+    purge_cmd.set_defaults(func=cmd_purge)
 
     prune_cmd = subparsers.add_parser("prune", help="Delete inactive export records from DB")
     prune_cmd.add_argument("--provider", choices=["ngrok", "localtunnel", "pinggy"], help="Filter by provider")

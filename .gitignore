@@ -1,5 +1,7 @@
 HPone
 _tmp
+data/chall
+data/exports
 
 # Python
 __pycache__/

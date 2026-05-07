@@ -2,8 +2,8 @@
 
 import logging
 import subprocess
+import shutil
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -17,178 +17,213 @@ class GitRepository:
     """Manage Git repository operations."""
 
     def __init__(self, repo_url: str, cache_dir: str, branch: str = "main", token: str = ""):
-        """Initialize Git repository handler."""
         self.repo_url = repo_url
         self.branch = branch
         self.token = token
+
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-        # Extract repo name from URL
-        self.repo_name = repo_url.rstrip("/").split("/")[-1].replace(".git", "")
-        self.local_path = self.cache_dir / self.repo_name
+        # Determine a stable local_path for cloning:
+        # - If cache_dir is the repository cache root (./data), clone into ./data/chall
+        # - If cache_dir already points to ./data/chall, use it directly
+        # - Otherwise clone into a subdir named after the repo
+        repo_name = repo_url.rstrip("/").split("/")[-1].replace(".git", "")
+
+        normalized = str(self.cache_dir).replace("\\", "/").rstrip("/")
+        if self.cache_dir.name == "chall" or normalized.endswith("/chall"):
+            # cache_dir is already the challenge folder
+            self.local_path = self.cache_dir
+            self.repo_name = repo_name
+        elif normalized in {"./data", "data", "/data"} or normalized.endswith("/data"):
+            # cache_dir is the generic data root -> use data/chall
+            self.repo_name = "chall"
+            self.local_path = self.cache_dir / "chall"
+        else:
+            # default: use cache_dir/<repo_name>
+            self.repo_name = repo_name
+            self.local_path = self.cache_dir / self.repo_name
 
     def _add_token_to_url(self, url: str) -> str:
-        """Add authentication token to repository URL."""
         if not self.token:
             return url
 
         if url.startswith("https://"):
-            # Insert token: https://token@github.com/org/repo.git
-            return url.replace("https://", f"https://x-access-token:{self.token}@")
-        elif url.startswith("http://"):
-            return url.replace("http://", f"http://:{self.token}@")
+            return url.replace(
+                "https://",
+                f"https://x-access-token:{self.token}@"
+            )
+
+        if url.startswith("http://"):
+            return url.replace(
+                "http://",
+                f"http://:{self.token}@"
+            )
 
         return url
 
-    def clone(self) -> Path:
-        """Clone repository if not already cached.
-
-        Strategy:
-        1. Try clone without token first (for public repos)
-        2. If authentication fails, try with token (for private repos)
-        3. If both fail, raise error
-        """
-        if self.local_path.exists():
-            logger.info(f"Repository already cached at {self.local_path}")
-            return self.local_path
-
-        logger.info(f"Cloning repository: {self.repo_url}")
-
-        # First attempt: without token (public repository)
-        try:
-            result = subprocess.run(
-                [
-                    "git",
-                    "clone",
-                    "--depth=1",
-                    "--branch",
-                    self.branch,
-                    self.repo_url,
-                    str(self.local_path),
-                ],
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-
-            if result.returncode == 0:
-                logger.info(f"Repository cloned successfully (public)")
-                return self.local_path
-
-            # Check if error is authentication-related
-            stderr = result.stderr.lower()
-            is_auth_error = any(keyword in stderr for keyword in [
-                "authentication failed",
-                "permission denied",
-                "not found",
-                "could not read",
-                "fatal: repository",
-            ])
-
-            # If not auth error, fail immediately
-            if not is_auth_error:
-                raise GitError(f"Clone failed: {result.stderr}")
-
-            # Auth error detected, try with token if available
-            if not self.token:
-                raise GitError(f"Clone failed (authentication required, no token provided): {result.stderr}")
-
-            logger.info(f"Public clone failed, retrying with token...")
-
-        except subprocess.TimeoutExpired:
-            raise GitError("Clone operation timed out")
-
-        # Second attempt: with token (private repository)
-        try:
-            url_with_token = self._add_token_to_url(self.repo_url)
-            result = subprocess.run(
-                [
-                    "git",
-                    "clone",
-                    "--depth=1",
-                    "--branch",
-                    self.branch,
-                    url_with_token,
-                    str(self.local_path),
-                ],
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-
-            if result.returncode != 0:
-                raise GitError(f"Clone with token failed: {result.stderr}")
-
-            logger.info(f"Repository cloned successfully (private, with token)")
-            return self.local_path
-
-        except subprocess.TimeoutExpired:
-            raise GitError("Clone operation timed out")
-        except Exception as e:
-            raise GitError(f"Clone failed: {str(e)}")
-
-    def pull(self) -> None:
-        """Update existing repository."""
-        if not self.local_path.exists():
-            raise GitError(f"Repository not found at {self.local_path}")
-
-        logger.info(f"Updating repository: {self.repo_name}")
+    def _is_git_repository(self, path: Path) -> bool:
+        if not path.exists():
+            return False
 
         try:
             result = subprocess.run(
-                ["git", "-C", str(self.local_path), "pull", "origin", self.branch],
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-
-            if result.returncode != 0:
-                raise GitError(f"Pull failed: {result.stderr}")
-
-            logger.info(f"Repository updated successfully")
-
-        except subprocess.TimeoutExpired:
-            raise GitError("Pull operation timed out")
-        except Exception as e:
-            raise GitError(f"Pull failed: {str(e)}")
-
-    def get_commit_hash(self) -> str:
-        """Get current HEAD commit hash."""
-        if not self.local_path.exists():
-            raise GitError(f"Repository not found at {self.local_path}")
-
-        try:
-            result = subprocess.run(
-                ["git", "-C", str(self.local_path), "rev-parse", "HEAD"],
+                ["git", "-C", str(path), "rev-parse", "--is-inside-work-tree"],
                 capture_output=True,
                 text=True,
                 timeout=10,
             )
 
-            if result.returncode != 0:
-                raise GitError(f"Failed to get commit hash: {result.stderr}")
+            return (
+                result.returncode == 0
+                and result.stdout.strip().lower() == "true"
+            )
 
-            return result.stdout.strip()
+        except Exception:
+            return False
 
-        except Exception as e:
-            raise GitError(f"Failed to get commit hash: {str(e)}")
+    def clone(self) -> Path:
+        """Clone repository.
 
-    def list_paths(self, subdirectory: str = "") -> list[str]:
-        """List all directories in repository."""
-        if not self.local_path.exists():
-            raise GitError(f"Repository not found at {self.local_path}")
+        Flow:
+        1. try public clone
+        2. if auth fail -> retry with token
+        """
 
-        search_dir = self.local_path / subdirectory if subdirectory else self.local_path
-        paths = []
+        if self._is_git_repository(self.local_path):
+            logger.info(f"Repository already cached at {self.local_path}")
+            return self.local_path
+
+        # remove broken cache
+        if self.local_path.exists():
+            shutil.rmtree(self.local_path, ignore_errors=True)
+
+        git_path = shutil.which("git")
+
+        if not git_path:
+            raise GitError("git executable not found")
+
+        def run_clone(url: str):
+            cmd = [
+                git_path,
+                "clone",
+                "--depth=1",
+                "--branch",
+                self.branch,
+                url,
+                str(self.local_path),
+            ]
+
+            logger.info(f"Running: {' '.join(cmd)}")
+
+            return subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+
+        # FIRST TRY: public clone
+        try:
+            result = run_clone(self.repo_url)
+
+        except subprocess.TimeoutExpired:
+            raise GitError("Clone timeout")
+
+        if result.returncode == 0:
+            logger.info("Public clone success")
+            return self.local_path
+
+        stderr = (result.stderr or "").lower()
+
+        auth_error = any(
+            x in stderr
+            for x in [
+                "authentication failed",
+                "permission denied",
+                "could not read",
+                "repository not found",
+            ]
+        )
+
+        # non-auth failure
+        if not auth_error:
+            raise GitError(result.stderr)
+
+        # no token available
+        if not self.token:
+            raise GitError(
+                f"Authentication required but no token provided:\n{result.stderr}"
+            )
+
+        # SECOND TRY: token clone
+        token_url = self._add_token_to_url(self.repo_url)
 
         try:
-            for item in search_dir.iterdir():
-                if item.is_dir() and not item.name.startswith("."):
-                    rel_path = item.relative_to(self.local_path)
-                    paths.append(str(rel_path).replace("\\", "/"))
+            result = run_clone(token_url)
 
-            return sorted(paths)
+        except subprocess.TimeoutExpired:
+            raise GitError("Clone with token timeout")
 
-        except Exception as e:
-            raise GitError(f"Failed to list paths: {str(e)}")
+        if result.returncode != 0:
+            raise GitError(
+                f"Clone with token failed:\n{result.stderr}"
+            )
+
+        logger.info("Private clone success")
+        return self.local_path
+
+    def pull(self):
+        if not self._is_git_repository(self.local_path):
+            raise GitError(f"Invalid repository: {self.local_path}")
+
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.local_path),
+                "pull",
+                "origin",
+                self.branch,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        if result.returncode != 0:
+            raise GitError(result.stderr)
+
+        logger.info("Repository updated successfully")
+
+    def get_commit_hash(self) -> str:
+        result = subprocess.run(
+            ["git", "-C", str(self.local_path), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+
+        if result.returncode != 0:
+            raise GitError(result.stderr)
+
+        return result.stdout.strip()
+
+    def list_paths(self, subdirectory: str = "") -> list[str]:
+        search_dir = (
+            self.local_path / subdirectory
+            if subdirectory
+            else self.local_path
+        )
+
+        if not search_dir.exists():
+            return []
+
+        paths = []
+
+        for item in search_dir.iterdir():
+            if item.is_dir() and not item.name.startswith("."):
+                rel = item.relative_to(self.local_path)
+                paths.append(str(rel).replace("\\", "/"))
+
+        return sorted(paths)

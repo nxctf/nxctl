@@ -10,8 +10,16 @@ logger = logging.getLogger(__name__)
 
 def _get_git_cache_path(config):
     """Extract repo name from config URL and build cache path."""
-    repo_name = config.github_repo.rstrip("/").split("/")[-1].replace(".git", "")
-    return f"{config.cache_dir}/{repo_name}"
+    cache_dir = Path(config.cache_dir)
+    normalized = str(cache_dir).replace("\\", "/").rstrip("/")
+
+    if cache_dir.name == "chall" or normalized.endswith("/chall"):
+        return str(cache_dir)
+
+    if normalized in {"./data", "data", "/data"} or normalized.endswith("/data"):
+        return str(cache_dir / "chall")
+
+    return str(cache_dir)
 
 
 def cmd_runtime_build(args) -> int:

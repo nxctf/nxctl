@@ -7,7 +7,7 @@ import yaml
 
 from src.core.models import Challenge, RuntimeInstance
 from src.core.db import get_db_connection, close_db_connection
-from src.core.docker import run_docker_compose_build, run_docker_compose_up, run_docker_compose_down, DockerError
+from src.core.docker import run_docker_compose_build, run_docker_compose_up, run_docker_compose_down_with_cleanup, DockerError
 from src.core.utils import is_port_in_use, find_free_port
 
 logger = logging.getLogger(__name__)
@@ -210,7 +210,13 @@ class RuntimeService:
         except Exception as e:
             raise RuntimeError(f"Start failed: {str(e)}")
 
-    def stop(self, challenge_name: str) -> bool:
+    def stop(
+        self,
+        challenge_name: str,
+        remove_volumes: bool = False,
+        remove_images: Optional[str] = None,
+        remove_orphans: bool = True,
+    ) -> bool:
         """Stop a challenge runtime."""
         # Get challenge from DB
         challenge = self._get_challenge_from_db(challenge_name)
@@ -233,7 +239,13 @@ class RuntimeService:
 
         try:
             logger.info(f"Stopping challenge: {challenge_name}")
-            run_docker_compose_down(target_compose, cwd=challenge_dir)
+            run_docker_compose_down_with_cleanup(
+                target_compose,
+                cwd=challenge_dir,
+                remove_volumes=remove_volumes,
+                remove_images=remove_images,
+                remove_orphans=remove_orphans,
+            )
 
             # Update database status
             if challenge.id:

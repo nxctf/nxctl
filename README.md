@@ -1,300 +1,108 @@
-# CTF Challenge Orchestration Engine
+e# CTF Orchestration Engine - Refactoring Summary
 
-A lightweight, CLI-first container orchestration platform for CTF challenges.
+## New Structure (src)
 
-## Features
+Successfully refactored the codebase to be more modular and maintainable. Here's what changed:
 
-- **Single Repository Source**: All challenges from one Git repo, organized by path
-- **Shared Runtime Instances**: Challenges are shared across users, not one per user
-- **Fast Startup**: Prebuilt images and local caching for instant challenge starts
-- **Multiple Export Providers**: ngrok, localtunnel, serveo, pinggy (all free, hosted)
-- **Idle Cleanup**: Auto-shutdown after 15 minutes of inactivity
-- **Revert with Cooldown**: Restore challenges to clean state safely
-- **Simple Database**: 3 tables (challenges, runtime_instances, challenge_exports)
-- **CLI-First Design**: API and web dashboard can come later
-
-## Quick Architecture
-
-```yaml
-config.yml          # 1 global config
-  ↓
-github repo         # 1 repository source
-  ↓
-challenges (DB)     # Challenge registry
-  ↓
-runtime_instances   # Running containers
-  ↓
-challenge_exports   # Public URLs (multiple per runtime)
-```
-
-## Quick Start
-
-### Installation
-
-```bash
-# Clone this repository
-git clone <this-repo>
-cd ctf-orchestration
-
-# Install Python dependencies
-pip install -r requirements.txt
-
-# Configure
-cp config.example.yml config.yml
-# Edit config.yml with your GitHub token and repo
-```
-
-### Usage
-
-```bash
-# Sync challenges from repository
-python app.py challenge sync
-
-# List all challenges
-python app.py challenge list
-
-# Start a challenge
-python app.py runtime start web/sqli-basic
-
-# Get public URL
-python app.py export url web/sqli-basic
-
-# Stop challenge
-python app.py runtime stop web/sqli-basic
-
-# Revert to clean state
-python app.py runtime revert web/sqli-basic
-```
-
-## Architecture
-
-Full architecture documentation: [docs/ctf-orchestrator-architecture.md](docs/ctf-orchestrator-architecture.md)
-
-### Key Concepts
-
-**Challenges**: Stored in one Git repo under different paths
-```
-challenges/
-├── web/
-│   ├── sqli-basic/
-│   │   ├── Dockerfile
-│   │   └── docker-compose.yml
-│   └── xss-advanced/
-├── crypto/
-│   └── rsa-101/
-└── pwn/
-    └── buffer-overflow/
-```
-
-**Runtime**: Single container instance shared by all users
-```
-Challenge web/sqli-basic
-├── Container: abc123xyz
-├── Exports:
-│   ├── FRP TCP: tcp://attacker.com:31337
-│   ├── Cloudflare HTTP: https://sqli.ctf.lab
-│   └── ngrok: https://abc123.ngrok.io
-```
-
-**Lifecycle**: Simple state transitions
-```
-stopped → running → {idle → stopped | revert → running}
-```
-
-## Database Schema
-
-**challenges** - Challenge registry
-```sql
-id, name, path, service_port, service_type, enabled, created_at
-```
-
-**runtime_instances** - Active/stopped runtimes
-```sql
-id, challenge_id, status, container_id, tunnel_provider, public_url,
-started_at, expires_at, last_activity, last_revert, created_at
-```
-
-**challenge_exports** - Multiple exports per runtime
-```sql
-id, runtime_id, provider, protocol, target_port, public_endpoint, status, created_at
-```
-
-## Configuration
-
-Global config file: `config.yml`
-
-```yaml
-# Repository
-github_repo: https://github.com/org/ctf-challenges
-branch: main
-access_token: ${GITHUB_TOKEN}
-
-# Paths
-cache_dir: ./data/cache
-build_dir: ./data/build
-db_file: ./data/ctf-orch.db
-
-# Behavior
-idle_timeout_minutes: 15
-revert_cooldown_minutes: 5
-max_runtime_hours: 2
-
-# Tunnel Providers (with multi-token support)
-tunnels:
-  frp:
-    enabled: true
-    rotation_strategy: round-robin  # or fallback
-    servers:
-      - name: "frp-primary"
-        server_addr: frp1.example.com
-        server_port: 7000
-        token: ${FRP_TOKEN_PRIMARY}
-      - name: "frp-secondary"  # Failover/load balancing
-        server_addr: frp2.example.com
-        server_port: 7000
-        token: ${FRP_TOKEN_SECONDARY}
-
-  ngrok:
-    enabled: false
-    rotation_strategy: round-robin
-    tokens:
-      - name: "ngrok-account-1"
-        token: ${NGROK_TOKEN_1}
-        region: us
-      - name: "ngrok-account-2"  # Token rotation for free tier
-        token: ${NGROK_TOKEN_2}
-        region: eu
-
-  rathole:
-    enabled: false
-    rotation_strategy: round-robin
-    servers:
-      - name: "rathole-main"
-        server_addr: rathole.example.com
-        server_port: 5202
-        token: ${RATHOLE_TOKEN}
-```
-
-**Multi-Token Strategy:**
-- Support multiple tokens/servers per provider
-- Automatic rotation when token limits are reached
-- Failover for high availability
-- Round-robin or fallback strategies
-- See [Tunnel Providers Guide](docs/tunnel-providers-guide.md) for detailed setup
-
-## Project Structure
+### Directory Structure
 
 ```
-.
-├── app.py                    # CLI entry point
-├── config.yml                # Global configuration
-├── config.example.yml        # Config template
-├── requirements.txt          # Python dependencies
-├── docs/
-│   └── ctf-orchestrator-architecture.md
-├── src/                      # Source code
+src/
+├── __init__.py
+├── app.py                          # Main CLI entry point (was cli/ commands)
+├── core/                           # Infrastructure & utilities
 │   ├── __init__.py
-│   ├── cli/                  # CLI command handlers
-│   ├── domain/               # Core models
-│   ├── services/             # Business logic
-│   └── infrastructure/       # External adapters
-├── data/                     # Runtime artifacts
-│   ├── cache/                # Git clones
-│   ├── build/                # Build artifacts
-│   └── ctf-orch.db          # SQLite database
-├── tests/                    # Test suite
-├── HPone/                    # Reference: Honeypot manager (separate project)
-└── README.md                 # This file
+│   ├── models.py                   # Domain models (Challenge, RuntimeInstance, etc.)
+│   ├── db.py                       # Database operations (was database.py)
+│   ├── config.py                   # Configuration management
+│   ├── git.py                      # Git repository operations
+│   ├── docker.py                   # Docker/Docker Compose utilities (new)
+│   ├── yaml.py                     # YAML parsing & Docker extraction (new)
+│   ├── utils.py                    # Shared utilities (new - process, port, endpoint helpers)
+│   └── constants.py                # Constants & defaults (new)
+│
+├── scripts/                        # Business logic & CLI commands
+│   ├── __init__.py
+│   ├── challenge_service.py        # Challenge discovery & management
+│   ├── challenges.py               # CLI commands: challenge sync, list, inspect, add, remove, enable, disable
+│   ├── runtime_service.py          # Runtime/container management
+│   ├── runtime.py                  # CLI commands: runtime build, start, stop, status, force-stop
+│   ├── exports.py                  # CLI commands: export ngrok, localtunnel, pinggy, list, stop, prune
+│   └── exports/                    # Tunnel provider implementations (new, modular)
+│       ├── __init__.py
+│       ├── base.py                 # Base ExportProvider class
+│       ├── ngrok.py                # Ngrok provider (http + tcp, http disabled by default)
+│       ├── localtunnel.py          # Localtunnel provider (http only)
+│       ├── pinggy.py               # Pinggy provider (tcp only)
+│       └── manager.py              # Export orchestrator/manager
 ```
 
-## Next Steps
+### Key Improvements
 
-1. **Foundation**: Set up database schema and config loader
-2. **Git Sync**: Implement repository sync and challenge discovery
-3. **Docker**: Implement build and container lifecycle
-4. **Runtime**: Implement start/stop/restart/revert logic
-5. **Tunnels**: Implement tunnel provider abstractions
-6. **CLI**: Build command handlers and CLI wiring
-7. **Worker**: Implement background idle detection
-8. **Testing**: Add test coverage
-9. **API**: Wrap CLI with REST API (later)
-10. **Web**: Build web dashboard (later)
+1. **Core Infrastructure** (`core/` directory)
+   - Centralized database operations (`db.py`)
+   - Configuration management with .env support (`config.py`)
+   - Git operations (`git.py`)
+   - Docker/Compose utilities (`docker.py` - new)
+   - YAML parsing & Docker config extraction (`yaml.py` - new)
+   - Shared utilities for processes, ports, endpoints (`utils.py` - new)
+   - Protocol and provider constants (`constants.py` - new)
 
-## Why This Design?
+2. **Scripts & Commands** (`scripts/` directory)
+   - Separated services from CLI commands
+   - Each service handles business logic (ChallengeService, RuntimeService)
+   - CLI commands import and use services
+   - Clean separation of concerns
 
-- **Simple**: 3 database tables, 1 config file, 1 repo
-- **Scalable**: Easy to add providers, services, commands
-- **Maintainable**: Clear separation of concerns (CLI → Services → Infrastructure)
-- **Testable**: Each layer is independently testable
-- **Extensible**: Provider interfaces allow swapping implementations
+3. **Export/Tunnel System** (`scripts/exports/` directory - modular)
+   - **Base provider**: Abstract class for tunnel providers
+   - **Ngrok**: Supports both HTTP and TCP (HTTP disabled by default)
+   - **Localtunnel**: HTTP only
+   - **Pinggy**: TCP only
+   - **Manager**: Orchestrates all providers, manages DB records, lists/prunes exports
 
-## References
+4. **Entry Point** (`app_refactored.py`)
+   - Similar to HPone's launcher
+   - Disables input during execution
+   - Handles Ctrl+C gracefully
+   - Runs `src/app.py` as main CLI
 
-- [CTF Orchestrator Architecture Docs](docs/ctf-orchestrator-architecture.md) - Complete architecture design
-- [Tunnel Providers Guide](docs/tunnel-providers-guide.md) - Multi-token setup and provider comparison
-- [HPone Honeypot Manager](HPone/) - Reference Docker manager (separate project)
+### Configuration Highlights
 
-## License
-
-To be determined.
-
-
-```bash
-python3 app.py challenge sync
-python3 app.py challenge add a chall/simplee 80
-python3 app.py challenge list
-
-python3 app.py runtime build chall/simplee
-python3 app.py runtime start chall/simplee
-python3 app.py runtime status chall/simplee
-python3 app.py runtime stop chall/simplee
-
-python3 app.py export list
-python3 app.py export ngrok chall/simplee
-python3 app.py export localtunnel chall/simplee
-python3 app.py export list
-
-python3 app.py export prune
-
----
-
-python3 app.py challenge list
-
-python3 app.py runtime start chall/baby-stack
-python3 app.py runtime stop chall/baby-stack
-python3 app.py challenge remove chall/baby-stack
-
-python3 app.py challenge add chall/baby-stack chall/baby-stack 9001 --type tcp
-python3 app.py runtime start chall/baby-stack
-nc localhost 9001
-
-python3 app.py export ngrok chall/baby-stack
-python3 app.py export localtunnel chall/baby-stack
-python3 app.py export pinggy chall/baby-stack
-python3 app.py export list
-
-python3 app.py runtime status chall/baby-stack
+Provider protocol support:
+```python
+PROVIDER_PROTOCOLS = {
+    'ngrok': ['http', 'tcp'],       # http disabled by default
+    'localtunnel': ['http'],        # http only
+    'pinggy': ['tcp'],              # tcp only
+}
 ```
 
+### How to Test
 
-```
-nohup ssh \
--o StrictHostKeyChecking=no \
--o UserKnownHostsFile=/dev/null \
--o ServerAliveInterval=30 \
--p 443 \
--R0:localhost:9001 \
-tcp@a.pinggy.io \
-> /tmp/pinggy.log 2>&1 < /dev/null &
+1. Keep the old `src/` intact for now (for safety)
+2. Copy over `config.yml` if needed
+3. Test the new structure:
+   ```bash
+   python app_refactored.py challenge list
+   python app_refactored.py challenge sync
+   python app_refactored.py runtime build <challenge>
+   python app_refactored.py export ngrok <challenge>
+   ```
 
-sleep 3
-cat /tmp/pinggy.log
-```
+### Next Steps (if no issues found)
 
-```bash
-URL=$(pinggy -p 443 -R0:localhost:9001 tcp@free.pinggy.io 2>/dev/null \
- | grep -m1 -oE 'tcp://[^ ]+' \
- | sed 's#tcp://##')
+1. ✅ Verify all imports work correctly
+2. ✅ Test all CLI commands
+3. ✅ Verify database operations
+4. ✅ Test export providers (ngrok, localtunnel, pinggy)
+5. ⏳ Once verified, replace old `src/` with `src/`
+6. ⏳ Update `app.py` launcher if needed
 
-echo "$URL"
-```
+### Benefits
+
+- **Modular**: Each provider is isolated, easy to add/remove
+- **Maintainable**: Clear separation between infrastructure, services, and CLI
+- **Testable**: Services can be tested independently
+- **Scalable**: Easy to add new providers or commands
+- **Clean**: No monolithic files, focused responsibilities

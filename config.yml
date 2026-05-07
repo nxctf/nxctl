@@ -1,12 +1,12 @@
 # CTF Challenge Orchestration Engine Configuration
 
 # Repository Configuration
-github_repo: https://github.com/ariafatah0711/a
+github_repo: https://github.com/ariafatah0711/b
 branch: main
 access_token: ${GITHUB_TOKEN}
 
 # Cache and Build Directories
-cache_dir: ./data/cache
+cache_dir: ./data/chall
 build_dir: ./data/build
 db_file: ./data/ctf-orch.db
 

@@ -49,8 +49,20 @@ def bold(text: str) -> str:
 
 
 def _get_git_cache_path(config) -> str:
-    repo_name = config.github_repo.rstrip("/").split("/")[-1].replace(".git", "")
-    return f"{config.cache_dir}/{repo_name}"
+    cache_dir = Path(config.cache_dir)
+    normalized = str(cache_dir).replace("\\", "/").rstrip("/")
+
+    if cache_dir.name == "chall" or normalized.endswith("/chall"):
+        return str(cache_dir)
+
+    if normalized in {"./data", "data", "/data"} or normalized.endswith("/data"):
+        return str(cache_dir / "chall")
+
+    return str(cache_dir)
+
+
+def _get_challenge_dir(config, challenge) -> Path:
+    return Path(_get_git_cache_path(config)) / challenge.path
 
 
 def _get_services():
@@ -394,7 +406,7 @@ def cmd_clean(args) -> int:
                 export_manager.stop_export(args.name, export["provider"], challenge.service_port)
             runtime_service.stop(args.name)
 
-            challenge_dir = Path(config.cache_dir) / Path(config.github_repo.rstrip("/").split("/")[-1].replace(".git", "")) / challenge.path
+            challenge_dir = _get_challenge_dir(config, challenge)
             run_file = challenge_dir / "docker-compose.run.yml"
             if run_file.exists():
                 run_file.unlink()
@@ -408,6 +420,51 @@ def cmd_clean(args) -> int:
         return 0
     except Exception as e:
         print(f"\n{red('✗')} Clean failed: {str(e)}\n")
+        return 1
+
+
+def cmd_purge(args) -> int:
+    try:
+        config, challenge_service, runtime_service, export_manager = _get_services()
+
+        if getattr(args, "all", False):
+            challenges = challenge_service.list_challenges()
+        elif getattr(args, "name", None):
+            challenge = challenge_service.get_challenge(args.name)
+            challenges = [challenge] if challenge else []
+        else:
+            print(f"\n{red('✗')} Specify a challenge name or use --all\n")
+            return 1
+
+        challenges = [challenge for challenge in challenges if challenge]
+        if not challenges:
+            print(f"\n{yellow('No challenges found')}\n")
+            return 0
+
+        print(f"\n{blue('Purging challenges...')}")
+        for challenge in challenges:
+            for export in export_manager.list_exports(challenge.name):
+                export_manager.stop_export(challenge.name, export["provider"], challenge.service_port)
+
+            try:
+                runtime_service.stop(
+                    challenge.name,
+                    remove_volumes=True,
+                    remove_images="local",
+                    remove_orphans=True,
+                )
+            except Exception as e:
+                logger.warning("Runtime cleanup failed for %s: %s", challenge.name, e)
+
+            challenge_dir = _get_challenge_dir(config, challenge)
+            if challenge_dir.exists():
+                shutil.rmtree(challenge_dir)
+                print(f"{green('✓')} Removed cache: {challenge_dir}")
+
+        print(f"\n{green('✓')} Purge complete\n")
+        return 0
+    except Exception as e:
+        print(f"\n{red('✗')} Purge failed: {str(e)}\n")
         return 1
 
 

@@ -8,6 +8,8 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
+HTTP_COMMON_PORTS = {80, 443, 8000, 8080}
+
 
 def load_yaml_file(file_path: Path) -> Dict[str, Any]:
     """Load YAML file, return empty dict if not found."""
@@ -82,6 +84,28 @@ def detect_service_type_from_compose(compose_path: Path) -> str:
                     for env_var in env:
                         if env_var.startswith("SERVICE_TYPE="):
                             return env_var.split("=", 1)[1].lower()
+
+                ports = service_config.get("ports", [])
+                for port_spec in ports:
+                    container_port = None
+
+                    if isinstance(port_spec, int):
+                        container_port = port_spec
+                    elif isinstance(port_spec, str):
+                        # Support formats like "8080", "8080:80", "127.0.0.1:8080:80", "80/tcp"
+                        port_part = port_spec.split("/")[0].strip()
+                        if ":" in port_part:
+                            container_port_text = port_part.split(":")[-1].strip()
+                        else:
+                            container_port_text = port_part
+
+                        try:
+                            container_port = int(container_port_text)
+                        except ValueError:
+                            container_port = None
+
+                    if container_port is not None:
+                        return "http" if container_port in HTTP_COMMON_PORTS else "tcp"
 
     except Exception as e:
         logger.warning(f"Failed to detect service type from {compose_path}: {e}")

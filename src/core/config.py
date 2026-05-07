@@ -13,7 +13,7 @@ try:
 except Exception:
     load_dotenv = None
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, root_validator
 
 
 class FRPServer(BaseModel):
@@ -75,7 +75,7 @@ class Config(BaseModel):
     access_token: str = ""
 
     # Paths
-    cache_dir: str = "./data/cache"
+    cache_dir: str = "./data/chall"
     build_dir: str = "./data/build"
     db_file: str = "./data/ctf-orch.db"
 
@@ -92,6 +92,19 @@ class Config(BaseModel):
 
     class Config:
         extra = "allow"  # Allow extra fields
+
+    @root_validator(pre=True)
+    def _normalize_cache_dir(cls, values):
+        cache_dir = values.get("cache_dir")
+        if not cache_dir:
+            values["cache_dir"] = "./data"
+            return values
+
+        normalized = str(cache_dir).replace("\\", "/").rstrip("/")
+        if normalized in {"./data/chall", "data/chall", "./data/cache", "data/cache"}:
+            values["cache_dir"] = "./data"
+
+        return values
 
 
 def substitute_env_vars(value: Any) -> Any:
