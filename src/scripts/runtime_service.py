@@ -437,9 +437,12 @@ class RuntimeService:
             cursor.execute("""
                 UPDATE runtime_instances
                 SET status = ?
-                WHERE challenge_id = ?
-                ORDER BY created_at DESC
-                LIMIT 1
+                WHERE id = (
+                    SELECT id FROM runtime_instances
+                    WHERE challenge_id = ?
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                )
             """, (status, challenge_id))
 
             conn.commit()

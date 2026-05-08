@@ -4,6 +4,8 @@ import logging
 import subprocess
 import time
 import re
+import psutil
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -54,15 +56,31 @@ class LocaltunnelProvider(ExportProvider):
 
         logger.info(f"Starting localtunnel for {challenge_name}:{host_port}")
 
-        # Try to reuse existing tunnel if still alive
+        # Try to reuse existing tunnel if still alive (from state file)
         state = load_state_file(self._get_state_file(host_port))
         if state:
             state_pid = int(state.get("pid", 0))
             state_url = str(state.get("public_url", ""))
 
             if state_pid and state_url and is_pid_alive(state_pid):
-                logger.info(f"Reusing existing localtunnel: {state_url}")
+                logger.info(f"Reusing existing localtunnel from state: {state_url}")
                 return ExportResult(url=state_url, pid=state_pid)
+
+        # Fallback: check system processes for any 'lt' running on this port
+        # This prevents race conditions between CLI and Daemon
+        for proc in psutil.process_iter(['pid', 'cmdline']):
+            try:
+                cmdline = proc.info['cmdline']
+                if cmdline and "node" in cmdline[0].lower() and "lt" in " ".join(cmdline) and "--port" in cmdline and str(host_port) in cmdline:
+                    logger.info(f"Found ghost localtunnel process (PID {proc.info['pid']}) for port {host_port}, reusing it if possible...")
+                    # We don't have the URL if state file was missing, but we can kill it to be clean
+                    # or just let it be and start new. Better: kill and fresh start to ensure we get a URL.
+                    try:
+                        os.kill(proc.info['pid'], 9)
+                    except:
+                        pass
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
 
         # Check if 'lt' CLI is installed
         try:
