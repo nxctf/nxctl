@@ -65,6 +65,32 @@ def serialize_datetime(value):
     return str(value)
 
 
+def compute_remaining_seconds(value):
+    """Return remaining seconds until expiry as int, or None if unknown."""
+    if value is None:
+        return None
+
+    # If it's a string, try to parse common datetime formats
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value)
+        except Exception:
+            try:
+                value = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+            except Exception:
+                return None
+
+    if isinstance(value, datetime):
+        now = datetime.now()
+        try:
+            secs = int((value - now).total_seconds())
+            return max(0, secs)
+        except Exception:
+            return None
+
+    return None
+
+
 def safe_exports(export_manager, name: str, health: bool = False):
     """
     Safe wrapper for export listing.
@@ -169,7 +195,7 @@ async def get_all_status():
                 "name": c.name,
                 "status": runtime.status,
                 "container_id": runtime.container_id,
-                "expires_at": serialize_datetime(
+                "remaining_seconds": compute_remaining_seconds(
                     runtime.expires_at
                 ),
                 "restart_cooldown": cooldown,
@@ -231,10 +257,7 @@ async def inspect_challenge(name: str):
             "runtime": {
                 "status": runtime.status,
                 "container_id": runtime.container_id,
-                "started_at": serialize_datetime(
-                    runtime.started_at
-                ),
-                "expires_at": serialize_datetime(
+                "remaining_seconds": compute_remaining_seconds(
                     runtime.expires_at
                 ),
                 "restart_cooldown":
@@ -469,7 +492,7 @@ async def extend_challenge(name: str):
 
         return {
             "message": f"Challenge {name} extended",
-            "expires_at": serialize_datetime(
+            "remaining_seconds": compute_remaining_seconds(
                 runtime.expires_at
             )
         }
