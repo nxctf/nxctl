@@ -7,9 +7,12 @@ pidfile="/run/${RC_SVCNAME}.pid"
 # These will be replaced by setup-alpine.sh
 command="/usr/local/bin/ctfc"
 command_args="daemon --interval 10 --with-api"
-command_background=true
+command_background="yes"
 directory="/opt/ctfs-back"
 command_user="root"
+
+output_log="/opt/ctfs-back/data/logs/ctfc.log"
+error_log="/opt/ctfs-back/data/logs/ctfc-error.log"
 
 depend() {
     need docker

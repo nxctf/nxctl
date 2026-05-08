@@ -95,9 +95,11 @@ install_ctfc() {
 
     # Pinggy
     if ! command -v pinggy >/dev/null 2>&1; then
-        echo -e "${GREEN}[*] Downloading Pinggy binary...${NC}"
-        sudo wget -q "https://github.com/Pinggy-io/cli-js/releases/download/v0.4.7/pinggy-linux-x64" -O /usr/local/bin/pinggy
-        sudo chmod +x /usr/local/bin/pinggy
+        echo -e "${GREEN}[*] Installing Pinggy via npm...${NC}"
+
+        sudo npm install -g pinggy || {
+            echo -e "${RED}[!] Failed to install Pinggy.${NC}"
+        }
     fi
 
     # Create Data Directories
@@ -167,14 +169,23 @@ uninstall_ctfc() {
 
 enable_service() {
     echo -e "${YELLOW}[*] Enabling ctfc-daemon OpenRC service...${NC}"
+    CURRENT_USER=$(whoami)
+    PROJECT_PATH=$(pwd)
 
     if [ ! -f "$INITD_SOURCE" ]; then
         echo -e "${RED}❌ Error: $INITD_SOURCE not found.${NC}"
         exit 1
     fi
 
+    echo "  -> Configuring service for user: $CURRENT_USER"
+    echo "  -> Project path: $PROJECT_PATH"
+
     # Create directory variable for the script
-    sed "s|directory=\"/opt/ctfs-back\"|directory=\"$PROJECT_DIR\"|" "$INITD_SOURCE" | sudo tee "$INITD_TARGET" > /dev/null
+    sudo sed \
+        -e "s|directory=\"/opt/ctfs-back\"|directory=\"$PROJECT_PATH\"|" \
+        -e "s|command_user=\"root\"|command_user=\"$CURRENT_USER\"|" \
+        -e "s|/opt/ctfs-back/data/logs|$PROJECT_PATH/data/logs|g" \
+        "$INITD_SOURCE" | sudo tee "$INITD_TARGET" > /dev/null
 
     # Set execution permissions
     sudo chmod +x "$INITD_TARGET"
