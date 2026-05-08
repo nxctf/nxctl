@@ -1,0 +1,21 @@
+#!/sbin/openrc-run
+
+name="ctfc-daemon"
+description="CTF Orchestrator Daemon & API"
+pidfile="/run/${RC_SVCNAME}.pid"
+
+# These will be replaced by setup-alpine.sh
+command="/usr/local/bin/ctfc"
+command_args="daemon --interval 10 --with-api"
+command_background=true
+directory="/opt/ctfs-back"
+command_user="root"
+
+depend() {
+    need docker
+    after docker
+}
+
+start_pre() {
+    checkpath --directory --owner "${command_user}" --mode 0755 "${directory}/data/logs"
+}

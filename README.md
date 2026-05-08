@@ -36,7 +36,8 @@
 
 ```
 📦 CTFS_Back/
-┣ 🚀 setup.sh                   # Interactive installer/uninstaller
+┣ 🚀 setup.sh                   # Interactive installer (Ubuntu/Debian)
+┣ 🚀 setup-alpine.sh            # Interactive installer (Alpine)
 ┣ 📂 src/
 ┃ ┣ 🎯 app.py                   # Main CLI entry point
 ┃ ┣ 📂 core/                    # ⚙️ Core Logic (Docker, Git, DB, Models)
@@ -61,12 +62,17 @@ The easiest way to install **ctfc** is using the automated setup script. This wi
 # Clone the repository
 git clone https://github.com/ariafatah0711/CTFS_Back ctfs-back
 cd ctfs-back
+```
 
-# Run interactive installer
+#### Ubuntu / Debian (systemd)
+```bash
 sudo ./setup.sh install
-
-# 🔄 IMPORTANT: Restart your shell or run
 source ~/.bashrc
+```
+
+#### Alpine Linux (OpenRC)
+```bash
+sudo ./setup-alpine.sh install
 ```
 
 ---
