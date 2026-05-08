@@ -112,6 +112,12 @@ class RuntimeService:
         if not runtime or runtime.status != "running":
             raise RuntimeError(f"Challenge not running: {challenge_name}")
 
+        cooldown_remaining = self.check_extend_cooldown(challenge_name)
+        if cooldown_remaining:
+            raise RuntimeError(
+                f"Extend cooldown active. Wait {cooldown_remaining}s"
+            )
+
         if not runtime.expires_at:
             raise RuntimeError("Challenge has no expiration time")
 
@@ -126,6 +132,7 @@ class RuntimeService:
         new_expires_at = expires_at + timedelta(minutes=self.config.extend_time_minutes)
 
         self._update_runtime_expiry(challenge.id, new_expires_at)
+        self.update_extend_time(challenge_name)
         logger.info(f"Extended {challenge_name} expiry to {new_expires_at}")
 
         return self._get_runtime_from_db(challenge.id)
@@ -145,6 +152,25 @@ class RuntimeService:
             return int(self.config.restart_cooldown_seconds - elapsed)
         return None
 
+    def check_extend_cooldown(self, challenge_name: str) -> Optional[int]:
+        """Check extend cooldown. Returns remaining seconds or None."""
+        cooldown_seconds = int(getattr(self.config, "extend_cooldown_seconds", 30) or 0)
+        if cooldown_seconds <= 0:
+            return None
+
+        challenge = self._get_challenge_from_db(challenge_name)
+        if not challenge:
+            return None
+
+        runtime = self._get_runtime_from_db(challenge.id)
+        if not runtime or not runtime.last_activity:
+            return None
+
+        elapsed = (datetime.now() - runtime.last_activity).total_seconds()
+        if elapsed < cooldown_seconds:
+            return int(cooldown_seconds - elapsed)
+        return None
+
     def update_restart_time(self, challenge_name: str):
         """Update last_restart timestamp."""
         challenge = self._get_challenge_from_db(challenge_name)
@@ -156,6 +182,23 @@ class RuntimeService:
         try:
             cursor.execute(
                 "UPDATE runtime_instances SET last_restart = datetime('now', 'localtime') WHERE challenge_id = ?",
+                (challenge.id,)
+            )
+            conn.commit()
+        finally:
+            close_db_connection(conn)
+
+    def update_extend_time(self, challenge_name: str):
+        """Update last_activity timestamp after a successful extend."""
+        challenge = self._get_challenge_from_db(challenge_name)
+        if not challenge:
+            return
+
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "UPDATE runtime_instances SET last_activity = datetime('now', 'localtime') WHERE challenge_id = ?",
                 (challenge.id,)
             )
             conn.commit()

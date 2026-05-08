@@ -91,6 +91,54 @@ def compute_remaining_seconds(value):
     return None
 
 
+def build_extend_availability(runtime_service, config, challenge_name: str, runtime):
+    """
+    Build extend availability state for frontend.
+
+    Returns:
+      - can_extend: bool
+      - eligible_in_seconds: seconds until challenge enters extend window
+      - cooldown_remaining_seconds: seconds until cooldown clears
+      - threshold_seconds: extend threshold in seconds
+    """
+    threshold_seconds = int((getattr(config, "extend_threshold_minutes", 5) or 0) * 60)
+    check_extend_cooldown = getattr(runtime_service, "check_extend_cooldown", None)
+    if callable(check_extend_cooldown):
+        cooldown_remaining = check_extend_cooldown(challenge_name) or 0
+    else:
+        cooldown_remaining = 0
+    remaining_seconds = compute_remaining_seconds(getattr(runtime, "expires_at", None))
+
+    eligible_in_seconds = None
+    window_open = False
+
+    if remaining_seconds is not None:
+        eligible_in_seconds = max(0, remaining_seconds - threshold_seconds)
+        window_open = remaining_seconds <= threshold_seconds
+
+    can_extend = bool(
+        getattr(runtime, "status", None) == "running"
+        and remaining_seconds is not None
+        and window_open
+        and cooldown_remaining == 0
+    )
+
+    return {
+        "can_extend": can_extend,
+        "eligible_in_seconds": eligible_in_seconds,
+        "cooldown_remaining_seconds": cooldown_remaining,
+        "threshold_seconds": threshold_seconds,
+    }
+
+
+def get_extend_cooldown(runtime_service, challenge_name: str) -> int:
+    """Compatibility wrapper when RuntimeService has not been reloaded yet."""
+    checker = getattr(runtime_service, "check_extend_cooldown", None)
+    if not callable(checker):
+        return 0
+    return int(checker(challenge_name) or 0)
+
+
 def safe_exports(export_manager, name: str, health: bool = False):
     """
     Safe wrapper for export listing.
@@ -191,6 +239,18 @@ async def get_all_status():
                 or 0
             )
 
+            extend_cooldown = get_extend_cooldown(
+                runtime_service,
+                c.name
+            )
+
+            extend_availability = build_extend_availability(
+                runtime_service,
+                config,
+                c.name,
+                runtime
+            )
+
             results.append({
                 "name": c.name,
                 "status": runtime.status,
@@ -199,6 +259,8 @@ async def get_all_status():
                     runtime.expires_at
                 ),
                 "restart_cooldown": cooldown,
+                "extend_cooldown": extend_cooldown,
+                "extend": extend_availability,
                 "exports": safe_exports(
                     export_manager,
                     c.name,
@@ -241,6 +303,12 @@ async def inspect_challenge(name: str):
             )
 
         runtime = runtime_service.status(name)
+        extend_availability = build_extend_availability(
+            runtime_service,
+            config,
+            name,
+            runtime
+        )
 
         return {
             "challenge": {
@@ -262,7 +330,10 @@ async def inspect_challenge(name: str):
                 ),
                 "restart_cooldown":
                     runtime_service.check_restart_cooldown(name)
-                    or 0
+                    or 0,
+                "extend_cooldown":
+                    get_extend_cooldown(runtime_service, name),
+                "extend": extend_availability
             },
 
             "exports": safe_exports(
@@ -486,16 +557,54 @@ async def restart_challenge(
 )
 async def extend_challenge(name: str):
     try:
-        _, _, runtime_service, _ = get_services()
+        config, _, runtime_service, _ = get_services()
+        runtime = runtime_service.status(name)
+
+        extend_availability = build_extend_availability(
+            runtime_service,
+            config,
+            name,
+            runtime
+        )
+
+        cooldown = extend_availability["cooldown_remaining_seconds"]
+        if cooldown:
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "message": "Extend cooldown active",
+                    "remaining_seconds": cooldown,
+                    "extend": extend_availability
+                }
+            )
+
+        if not extend_availability["can_extend"]:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "Extend not yet eligible",
+                    "extend": extend_availability
+                }
+            )
 
         runtime = runtime_service.extend_time(name)
+        extend_after = build_extend_availability(
+            runtime_service,
+            config,
+            name,
+            runtime
+        )
 
         return {
             "message": f"Challenge {name} extended",
             "remaining_seconds": compute_remaining_seconds(
                 runtime.expires_at
-            )
+            ),
+            "extend": extend_after
         }
+
+    except HTTPException:
+        raise
 
     except Exception as e:
         raise HTTPException(
