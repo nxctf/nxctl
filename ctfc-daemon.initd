@@ -21,4 +21,5 @@ depend() {
 
 start_pre() {
     checkpath --directory --owner "${command_user}" --mode 0755 "${directory}/data/logs"
+    checkpath --file --owner "${command_user}" --mode 0644 "${output_log}" "${error_log}"
 }

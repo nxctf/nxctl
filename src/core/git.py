@@ -1,6 +1,7 @@
 """Git repository operations."""
 
 import logging
+import os
 import subprocess
 import shutil
 from pathlib import Path
@@ -116,11 +117,16 @@ class GitRepository:
 
             logger.info(f"Running: {' '.join(cmd)}")
 
+            # Use GIT_TERMINAL_PROMPT=0 to prevent hanging on authentication prompts
+            env = os.environ.copy()
+            env["GIT_TERMINAL_PROMPT"] = "0"
+
             return subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 timeout=120,
+                env=env
             )
 
         # FIRST TRY: public clone
@@ -177,6 +183,9 @@ class GitRepository:
         if not self._is_git_repository(self.local_path):
             raise GitError(f"Invalid repository: {self.local_path}")
 
+        env = os.environ.copy()
+        env["GIT_TERMINAL_PROMPT"] = "0"
+
         result = subprocess.run(
             [
                 "git",
@@ -189,6 +198,7 @@ class GitRepository:
             capture_output=True,
             text=True,
             timeout=60,
+            env=env
         )
 
         if result.returncode != 0:
