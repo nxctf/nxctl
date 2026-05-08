@@ -1,4 +1,5 @@
 # Python dependencies for CTF Orchestration Engine
+psutil
 
 # CLI
 click>=8.0.0

@@ -87,7 +87,7 @@ def substitute_env_vars(value: Any) -> Any:
         # Replace ${VAR_NAME} with environment variable values
         def replace_env(match):
             var_name = match.group(1)
-            return os.environ.get(var_name, match.group(0))
+            return os.environ.get(var_name, "")
 
         return re.sub(r'\$\{([A-Z0-9_]+)\}', replace_env, value)
     elif isinstance(value, dict):

@@ -66,11 +66,39 @@ check_dependencies() {
 
     # Docker Compose
     if ! docker compose version >/dev/null 2>&1; then
-        echo -e "${YELLOW}[!] Docker Compose plugin not found.${NC}"
-        read -p "👉 Do you want to install it now? (y/n): " yn
+        HAS_LEGACY=false
+        if command -v docker-compose >/dev/null 2>&1; then
+            HAS_LEGACY=true
+            echo -e "${YELLOW}[!] Found legacy 'docker-compose' but 'docker compose' (plugin) is missing.${NC}"
+            read -p "👉 Do you want to install the modern Docker Compose plugin? (y/n): " yn
+        else
+            echo -e "${YELLOW}[!] Docker Compose not found.${NC}"
+            read -p "👉 Do you want to install it now? (y/n): " yn
+        fi
+
         case $yn in
-            [Yy]*) sudo apt update && sudo apt install -y docker-compose-plugin ;;
-            *) echo "❌ Failed: Docker Compose is required."; exit 1 ;;
+            [Yy]*)
+                echo -e "${GREEN}[*] Adding Docker repository and installing plugin...${NC}"
+                sudo apt-get update
+                sudo apt-get install -y ca-certificates curl gnupg
+                sudo install -m 0755 -d /etc/apt/keyrings
+                curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg --yes
+                sudo chmod a+r /etc/apt/keyrings/docker.gpg
+
+                echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+                sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+                sudo apt-get update
+                sudo apt-get install -y docker-compose-plugin
+                ;;
+            *)
+                if [ "$HAS_LEGACY" = false ]; then
+                    echo -e "${RED}❌ Failed: Docker Compose is required.${NC}"
+                    exit 1
+                else
+                    echo -e "${YELLOW}[!] Proceeding with legacy 'docker-compose' as fallback.${NC}"
+                fi
+                ;;
         esac
     fi
 }

@@ -65,6 +65,10 @@ class GitRepository:
         if not path.exists():
             return False
 
+        # Check for .git directory or file (submodule)
+        if not (path / ".git").exists():
+            return False
+
         try:
             result = subprocess.run(
                 ["git", "-C", str(path), "rev-parse", "--is-inside-work-tree"],

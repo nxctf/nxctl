@@ -1,6 +1,6 @@
 # CTF Challenge Orchestration Engine Configuration
 
-github_repo: https://github.com/ariafatah0711/b
+github_repo: https://github.com/ariafatah0711/ctfc_chall
 branch: main
 access_token: ${GITHUB_TOKEN}
 
