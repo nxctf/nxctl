@@ -60,8 +60,8 @@ The easiest way to install **ctfc** is using the automated setup script. This wi
 
 ```bash
 # Clone the repository
-git clone https://github.com/ariafatah0711/CTFS_Back ctfs-back
-cd ctfs-back
+git clone https://github.com/ariafatah0711/ctfc
+cd ctfc
 ```
 
 #### Ubuntu / Debian (systemd)
