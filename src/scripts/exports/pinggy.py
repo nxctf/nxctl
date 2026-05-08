@@ -7,6 +7,8 @@ import re
 from pathlib import Path
 from typing import Optional
 
+import os
+import psutil
 from src.scripts.exports.base import ExportProvider, ExportResult
 from src.core.utils import is_pid_alive, load_state_file, save_state_file, delete_state_file, kill_process
 from src.core.constants import PROTOCOL_TCP
@@ -72,57 +74,145 @@ class PinggyProvider(ExportProvider):
                 logger.info(f"Reusing existing pinggy tunnel: {state_url}")
                 return ExportResult(url=state_url, pid=state_pid)
 
-        # Start pinggy process using nohup and read the endpoint from the log file.
-        try:
-            log_file = self._get_log_file(challenge_name, host_port)
-            command = (
-                f"nohup pinggy -p 443 -R0:localhost:{host_port} tcp@free.pinggy.io "
-                f"> {log_file} 2>&1 < /dev/null & echo $!"
-            )
-            proc = subprocess.Popen(
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                text=True,
-                shell=True,
-                start_new_session=True,
-            )
+        # Determine mode from config
+        mode = getattr(self.config, "pinggy_mode", "cli").lower()
 
-            if proc.stdout is None:
-                raise RuntimeError("Failed to capture pinggy PID")
+        # Safeguard: check for ghost ssh/pinggy processes on this port
+        for proc in psutil.process_iter(['pid', 'cmdline']):
+            try:
+                cmdline = proc.info['cmdline']
+                cmd_str = " ".join(cmdline).lower()
+                if ("ssh" in cmd_str or "pinggy" in cmd_str) and f"localhost:{host_port}" in cmd_str:
+                    logger.info(f"Found ghost tunnel process (PID {proc.info['pid']}) for port {host_port}, cleaning up...")
+                    try:
+                        os.kill(proc.info['pid'], 9)
+                    except:
+                        pass
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
 
-            pid_output = proc.stdout.read().strip()
-            pid = int(pid_output) if pid_output.isdigit() else 0
-            if pid <= 0:
-                raise RuntimeError(f"Failed to start pinggy background process: {pid_output}")
+        if mode == "python":
+            logger.info("Using Pinggy Python SDK mode")
+            try:
+                import pinggy
+                # We run this in a separate background process so it survives CLI exit
+                # We'll use a small python snippet to start the tunnel
+                token_arg = f', token="{self.config.pinggy_token}"' if hasattr(self.config, "pinggy_token") and self.config.pinggy_token else ""
+                py_cmd = (
+                    f"import pinggy, time, sys; "
+                    f"tunnel = pinggy.start_tunnel(forwardto='localhost:{host_port}', type='tcp'{token_arg}); "
+                    f"print(f'ENDPOINT:{{tunnel.urls[0]}}', flush=True); "
+                    f"tunnel.wait()"
+                )
 
-            deadline = time.time() + 10
-            while time.time() < deadline:
-                if log_file.exists():
-                    content = log_file.read_text(encoding="utf-8", errors="ignore")
-                    endpoint = self._extract_endpoint(content)
-                    if endpoint:
-                        save_state_file(
-                            self._get_state_file(challenge_name),
-                            {
-                                "pid": pid,
-                                "public_endpoint": endpoint,
-                                "log_file": str(log_file),
-                                "challenge_name": challenge_name,
-                                "started_at": int(time.time()),
-                            }
-                        )
-                        logger.info(f"Pinggy tunnel started: {endpoint}")
-                        return ExportResult(url=endpoint, pid=pid)
+                log_file = self._get_log_file(challenge_name, host_port)
+                command = f"nohup python3 -c \"{py_cmd}\" > {log_file} 2>&1 < /dev/null & echo $!"
 
-                time.sleep(0.2)
+                proc = subprocess.Popen(
+                    command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    shell=True,
+                    start_new_session=True,
+                )
 
-            raise RuntimeError(f"Timed out waiting for pinggy endpoint in {log_file}")
+                if proc.stdout is None:
+                    raise RuntimeError("Failed to capture python process PID")
 
-        except FileNotFoundError:
-            raise RuntimeError("pinggy not installed. Install from https://pinggy.io/")
-        except Exception as e:
-            raise RuntimeError(f"Failed to start pinggy: {str(e)}")
+                pid = int(proc.stdout.read().strip())
+                return self._wait_for_endpoint(challenge_name, host_port, pid, log_file)
+
+            except ImportError:
+                logger.warning("pinggy SDK not installed, falling back to CLI")
+                mode = "cli"
+
+        if mode == "cli":
+            # Check which command to use: pinggy or ssh fallback
+            import shutil
+            pinggy_path = shutil.which("pinggy")
+            ssh_path = shutil.which("ssh")
+
+            use_ssh = False
+            if not pinggy_path:
+                logger.info("pinggy binary not found, falling back to ssh")
+                use_ssh = True
+            else:
+                # Test if pinggy binary works (to catch Segmentation Faults on Alpine)
+                try:
+                    test_proc = subprocess.run([pinggy_path, "--version"], capture_output=True, timeout=2)
+                    if test_proc.returncode != 0:
+                        use_ssh = True
+                except:
+                    use_ssh = True
+
+            if use_ssh and not ssh_path:
+                raise RuntimeError("Neither 'pinggy' nor 'ssh' found. Please install openssh-client.")
+
+            try:
+                log_file = self._get_log_file(challenge_name, host_port)
+                if use_ssh:
+                    logger.info(f"Using SSH fallback for Pinggy tunnel")
+                    command = (
+                        f"nohup {ssh_path} -p 443 -o StrictHostKeyChecking=no -o ServerAliveInterval=30 "
+                        f"-R0:localhost:{host_port} {protocol}@free.pinggy.io "
+                        f"> {log_file} 2>&1 < /dev/null & echo $!"
+                    )
+                else:
+                    logger.info(f"Using pinggy binary for tunnel")
+                    command = (
+                        f"nohup {pinggy_path} -p 443 -R0:localhost:{host_port} {protocol}@free.pinggy.io "
+                        f"> {log_file} 2>&1 < /dev/null & echo $!"
+                    )
+
+                proc = subprocess.Popen(
+                    command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    shell=True,
+                    start_new_session=True,
+                )
+
+                if proc.stdout is None:
+                    raise RuntimeError("Failed to capture tunnel PID")
+
+                pid = int(proc.stdout.read().strip())
+                return self._wait_for_endpoint(challenge_name, host_port, pid, log_file)
+
+            except Exception as e:
+                raise RuntimeError(f"Failed to start Pinggy CLI/SSH: {str(e)}")
+
+    def _wait_for_endpoint(self, challenge_name: str, host_port: int, pid: int, log_file: Path) -> ExportResult:
+        """Wait for endpoint to appear in log file."""
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            if log_file.exists():
+                content = log_file.read_text(encoding="utf-8", errors="ignore")
+                # Look for tcp:// (CLI/SSH) or ENDPOINT: (Python SDK)
+                endpoint = self._extract_endpoint(content)
+                if not endpoint and "ENDPOINT:" in content:
+                    match = re.search(r"ENDPOINT:(tcp://[^\s]+)", content)
+                    endpoint = match.group(1).strip() if match else ""
+
+                if endpoint:
+                    save_state_file(
+                        self._get_state_file(challenge_name),
+                        {
+                            "pid": pid,
+                            "public_endpoint": endpoint,
+                            "log_file": str(log_file),
+                            "challenge_name": challenge_name,
+                            "started_at": int(time.time()),
+                        }
+                    )
+                    logger.info(f"Pinggy tunnel started: {endpoint}")
+                    return ExportResult(url=endpoint, pid=pid)
+
+            time.sleep(0.5)
+
+        raise RuntimeError(f"Timed out waiting for pinggy endpoint in {log_file}")
+
 
     def stop(self, challenge_name: str, host_port: int = 0) -> bool:
         """Stop pinggy tunnel."""

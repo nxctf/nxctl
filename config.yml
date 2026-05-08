@@ -8,11 +8,6 @@ cache_dir: ./data/chall
 build_dir: ./data/build
 db_file: ./data/ctf-orch.db
 
-default_tunnel: localtunnel
-enable_ngrok: true
-enable_localtunnel: true
-enable_pinggy: true
-
 # TTL settings
 default_ttl_minutes: 15
 extend_time_minutes: 10
@@ -21,6 +16,13 @@ daemon_interval: 10
 restart_cooldown_seconds: 300
 auto_heal_exports: true
 
+default_tunnel: localtunnel
+enable_ngrok: true
+enable_localtunnel: true
+enable_pinggy: true
+pinggy_mode: cli # options: cli, python
+pinggy_token: ${PINGGY_TOKEN}
+
 ngrok_tokens:
   - ${NGROK_TOKEN_1}
   - ${NGROK_TOKEN_2}
@@ -28,5 +30,3 @@ ngrok_tokens:
   - ${NGROK_TOKEN_4}
   - ${NGROK_TOKEN_5}
   - ${NGROK_TOKEN_6}
-
-pinggy_token: ${PINGGY_TOKEN}
