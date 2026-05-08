@@ -18,7 +18,7 @@ echo -e "\n--- Testing Status ---"
 curl -s -X GET "$API_URL/status" -H "X-CTFC-Token: $TOKEN" | jq .
 
 echo -e "\n--- Testing Inspect ($CHALLENGE) ---"
-curl -s -X GET "$API_ROOT/inspect/$CHALLENGE" -H "X-CTFC-Token: $TOKEN" | jq .
+curl -s -X GET "$API_URL/inspect/$CHALLENGE" -H "X-CTFC-Token: $TOKEN" | jq .
 
 echo -e "\n--- Testing Extend ($CHALLENGE) ---"
 curl -s -X POST "$API_URL/extend/$CHALLENGE" -H "X-CTFC-Token: $TOKEN" | jq .
