@@ -131,29 +131,29 @@ def _stop_challenge_completely(name: str, challenge_service, runtime_service, ex
             pass
 
 
-def cmd_up(args) -> int:
+def _cmd_up_one(name: str, challenge_service, runtime_service, export_manager) -> bool:
+    """Start one challenge and render the normal up output."""
     try:
-        _, challenge_service, runtime_service, export_manager = get_services()
-        print(f"\n{bold(f'Starting challenge: {args.name}')}\n")
+        print(f"\n{bold(f'Starting challenge: {name}')}\n")
 
-        challenge = challenge_service.get_challenge(args.name)
+        challenge = challenge_service.get_challenge(name)
         if not challenge:
-            print(f"\n{red(ERR)} Challenge not found: {args.name}\n")
-            return 1
+            print(f"\n{red(ERR)} Challenge not found: {name}\n")
+            return False
         step_ok("Loaded challenge config")
 
         with spinner("Starting Docker container"):
-            runtime_service.start(args.name)
-        challenge = challenge_service.get_challenge(args.name) or challenge
-        ports = challenge_service.list_challenge_ports(args.name)
-        runtime = runtime_service.status(args.name)
+            runtime_service.start(name)
+        challenge = challenge_service.get_challenge(name) or challenge
+        ports = challenge_service.list_challenge_ports(name)
+        runtime = runtime_service.status(name)
         step_ok(f"Allocated host ports: {_port_summary(ports)}")
         step_ok("Docker container started")
         ttl_text, _ = ttl_remaining(runtime.expires_at)
         step_ok(f"TTL registered: {ttl_text}")
 
         with spinner("Creating exports"):
-            exports, failures = _start_available_exports(export_manager, args.name, challenge, ports)
+            exports, failures = _start_available_exports(export_manager, name, challenge, ports)
 
         print()
         print(box("Exports", exports_table(exports), width=116))
@@ -162,7 +162,41 @@ def cmd_up(args) -> int:
 
         print(f"\n{green(OK)} Challenge is running.")
         print(f"Expires in: {ttl_text}\n")
-        return 0
+        return True
+    except Exception as e:
+        print(f"\n{red(ERR)} Up failed for {name}: {str(e)}\n")
+        return False
+
+
+def cmd_up(args) -> int:
+    try:
+        _, challenge_service, runtime_service, export_manager = get_services()
+
+        if getattr(args, "all", False):
+            challenges = [challenge for challenge in challenge_service.list_challenges() if challenge.enabled]
+            if not challenges:
+                print(f"\n{yellow('No enabled challenges found')}\n")
+                return 0
+
+            print(f"\n{blue(f'Starting all enabled challenges ({len(challenges)})...')}")
+            ok_count = 0
+            failed_count = 0
+            for challenge in challenges:
+                if _cmd_up_one(challenge.name, challenge_service, runtime_service, export_manager):
+                    ok_count += 1
+                else:
+                    failed_count += 1
+
+            print(f"{green(OK)} Up --all complete")
+            print(f"  Started: {ok_count}")
+            print(f"  Failed:  {failed_count}\n")
+            return 1 if failed_count else 0
+
+        if not getattr(args, "name", None):
+            print(f"\n{red(ERR)} Please provide a challenge name or use --all\n")
+            return 1
+
+        return 0 if _cmd_up_one(args.name, challenge_service, runtime_service, export_manager) else 1
     except Exception as e:
         print(f"\n{red(ERR)} Up failed: {str(e)}\n")
         return 1

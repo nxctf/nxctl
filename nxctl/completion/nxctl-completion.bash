@@ -69,7 +69,7 @@ _nxctl_completion() {
             if [[ ${COMP_CWORD} -eq 2 ]]; then
                 local challenges
                 challenges="$(_nxctl_get_challenges)"
-                if [[ "${cmd}" == "down" ]]; then
+                if [[ "${cmd}" == "down" || "${cmd}" == "up" ]]; then
                     challenges="--all ${challenges}"
                 fi
                 if [[ -n "${challenges}" ]]; then
@@ -81,6 +81,9 @@ _nxctl_completion() {
                 COMPREPLY=( $(compgen -W "-w --watch" -- "${cur}") )
             fi
             if [[ "${cmd}" == "down" ]] && [[ "${cur}" == -* ]]; then
+                COMPREPLY=( $(compgen -W "--all" -- "${cur}") )
+            fi
+            if [[ "${cmd}" == "up" ]] && [[ "${cur}" == -* ]]; then
                 COMPREPLY=( $(compgen -W "--all" -- "${cur}") )
             fi
             ;;

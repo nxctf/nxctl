@@ -45,7 +45,7 @@ nxctl/
 |-- setup.sh                    # Interactive installer/uninstaller
 |-- nxctl/                      # Main Python package
 |   |-- app.py                  # CLI entry point
-|   |-- api.py                  # FastAPI app
+|   |-- api/                    # FastAPI app, auth, serializers, routes
 |   |-- core/                   # Config, Docker, Git, DB, models
 |   |-- scripts/                # CLI handlers and service logic
 |   `-- completion/             # Bash completion scripts
@@ -174,7 +174,7 @@ github_repo: https://github.com/nxctf/nxctl-challenges
 branch: main
 access_token: ${GITHUB_TOKEN}
 
-db_file: ./data/nxctl.db
+dir_app: ./data
 base_ip: "203.0.113.10"
 enable_ngrok: true
 enable_localtunnel: true
@@ -186,6 +186,8 @@ extend_threshold_minutes: 5
 extend_cooldown_seconds: 30
 daemon_interval: 10
 auto_heal_exports: true
+export_endpoint_check_interval_seconds: 120
+export_endpoint_check_timeout_seconds: 5
 ```
 
 Ngrok tokens can be provided with `ngrok_tokens` in `config.yml`, with `NGROK_AUTHTOKEN`, or through an existing ngrok config file.
@@ -215,3 +217,11 @@ sudo ./setup.sh uninstall
 **Built by the NXCTF community for the global cybersecurity ecosystem.**
 
 </div>
+
+
+```bash
+chmod +x test_api.sh
+API_TOKEN=client123 API_ADMIN_SECRET=aria123 CHALLENGE=simplee ./test_api.sh
+START_API=1 API_TOKEN=client123 API_ADMIN_SECRET=aria123 ./test_api.sh
+RUN_SYNC=1 RUN_ADMIN_GLOBAL=1 API_TOKEN=client123 API_ADMIN_SECRET=aria123 ./test_api.sh
+```

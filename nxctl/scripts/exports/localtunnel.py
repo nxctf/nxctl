@@ -27,7 +27,7 @@ class LocaltunnelProvider(ExportProvider):
     def __init__(self, config):
         """Initialize localtunnel provider."""
         super().__init__(config)
-        self.state_dir = Path(config.cache_dir) / "exports"
+        self.state_dir = Path(getattr(config, "exports_dir", Path(config.cache_dir) / "exports"))
         self.state_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_state_file(self, host_port: int) -> Path:

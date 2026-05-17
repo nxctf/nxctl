@@ -22,10 +22,14 @@ class Config(BaseModel):
     branch: str = "main"
     access_token: str = ""
 
-    cache_dir: str = "./data/chall"
+    dir_app: str = "./data"
+    cache_dir: str = "./data"
     build_dir: str = "./data/build"
     db_file: str = "./data/nxctl.db"
+    exports_dir: str = "./data/exports"
     base_ip: str = ""
+    api_token: str = ""
+    api_admin_secret: str = ""
 
     ngrok_tokens: list[str] = Field(default_factory=list)
     pinggy_token: str = ""
@@ -54,13 +58,36 @@ class Config(BaseModel):
 
     @root_validator(pre=True)
     def _normalize_values(cls, values):
+        dir_app = values.get("dir_app") or values.get("data_dir") or values.get("app_dir")
         cache_dir = values.get("cache_dir")
-        if not cache_dir:
-            values["cache_dir"] = "./data"
-        else:
-            normalized = str(cache_dir).replace("\\", "/").rstrip("/")
-            if normalized in {"./data/chall", "data/chall", "./data/cache", "data/cache"}:
-                values["cache_dir"] = "./data"
+
+        if not dir_app and cache_dir:
+            normalized_cache = cls._normalize_path(cache_dir)
+            if normalized_cache.endswith("/chall") or normalized_cache.endswith("/cache"):
+                dir_app = str(Path(normalized_cache).parent).replace("\\", "/")
+            else:
+                dir_app = normalized_cache
+
+        dir_app = cls._normalize_path(dir_app or "./data")
+        values["dir_app"] = dir_app
+
+        # Internally cache_dir means the NXCTL data root. Keep accepting legacy
+        # cache_dir values like ./data/chall, but normalize them to ./data.
+        values["cache_dir"] = dir_app
+
+        if not values.get("build_dir"):
+            values["build_dir"] = str(Path(dir_app) / "build").replace("\\", "/")
+
+        if not values.get("db_file"):
+            values["db_file"] = str(Path(dir_app) / "nxctl.db").replace("\\", "/")
+
+        exports_dir = (
+            values.get("exports_dir")
+            or values.get("data_exports")
+            or values.get("export_dir")
+            or values.get("exports_path")
+        )
+        values["exports_dir"] = cls._normalize_path(exports_dir or str(Path(dir_app) / "exports"))
 
         if not values.get("ngrok_tokens"):
             legacy_tunnels = values.get("tunnels", {}) or {}
@@ -86,6 +113,10 @@ class Config(BaseModel):
                     values["pinggy_token"] = legacy_token
 
         return values
+
+    @staticmethod
+    def _normalize_path(value: Any) -> str:
+        return str(value).replace("\\", "/").rstrip("/") or "."
 
 
 def substitute_env_vars(value: Any) -> Any:

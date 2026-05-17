@@ -27,7 +27,7 @@ class PinggyProvider(ExportProvider):
     def __init__(self, config):
         """Initialize pinggy provider."""
         super().__init__(config)
-        self.state_dir = Path(config.cache_dir) / "exports"
+        self.state_dir = Path(getattr(config, "exports_dir", Path(config.cache_dir) / "exports"))
         self.state_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_state_file(self, challenge_name: str, host_port: int = 0) -> Path:
@@ -57,6 +57,25 @@ class PinggyProvider(ExportProvider):
             "pinggy" in {Path(part).name.lower() for part in cmdline if part}
             or "tcp@free.pinggy.io" in command
         ) and f"localhost:{host_port}" in command
+
+    def _find_pinggy_pid(self, host_port: int) -> int:
+        """Find a running pinggy process for this local port."""
+        for proc in psutil.process_iter(["pid", "cmdline", "name"]):
+            try:
+                pid = int(proc.info.get("pid") or 0)
+                cmdline = proc.info.get("cmdline") or []
+                command = " ".join(cmdline).lower()
+                name = str(proc.info.get("name") or "").lower()
+                if (
+                    ("pinggy" in {Path(part).name.lower() for part in cmdline if part} or name == "pinggy" or "tcp@free.pinggy.io" in command)
+                    and f"localhost:{host_port}" in command
+                ):
+                    return pid
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+            except Exception:
+                continue
+        return 0
 
     def _load_state(self, challenge_name: str, host_port: int) -> tuple[Path, dict]:
         """Load current state, migrating legacy challenge-only state when possible."""
@@ -109,6 +128,11 @@ class PinggyProvider(ExportProvider):
                 return ExportResult(url=state_url, pid=state_pid)
             logger.info("Ignoring stale pinggy state for %s:%s", challenge_name, host_port)
             delete_state_file(state_path)
+
+        existing_pid = self._find_pinggy_pid(host_port)
+        if existing_pid:
+            logger.info("Killing orphan pinggy process for %s:%s before restart", challenge_name, host_port)
+            kill_process(existing_pid)
 
         # Start pinggy directly and read the endpoint from the log file.
         log_handle = None
@@ -196,6 +220,10 @@ class PinggyProvider(ExportProvider):
                 if kill_process(pid):
                     stopped = True
 
+        orphan_pid = self._find_pinggy_pid(host_port)
+        if orphan_pid and kill_process(orphan_pid):
+            stopped = True
+
         # Clean up state file
         delete_state_file(state_path)
 
@@ -205,7 +233,7 @@ class PinggyProvider(ExportProvider):
         """Check if tunnel is running."""
         state_path, state = self._load_state(challenge_name, host_port)
         if not state:
-            return False
+            return bool(self._find_pinggy_pid(host_port))
 
         pid = int(state.get("pid", 0))
         endpoint = state.get("public_endpoint", "")
@@ -213,4 +241,6 @@ class PinggyProvider(ExportProvider):
         if not (pid > 0 and bool(endpoint)):
             delete_state_file(state_path)
             return False
-        return self._is_pinggy_pid(pid, host_port)
+        if self._is_pinggy_pid(pid, host_port):
+            return True
+        return bool(self._find_pinggy_pid(host_port))

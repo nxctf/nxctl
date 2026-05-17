@@ -135,7 +135,8 @@ Examples:
     # ======== LIFECYCLE ========
     up_cmd = subparsers.add_parser("up", help="Build + start + auto-export")
     add_debug_flag(up_cmd, default=argparse.SUPPRESS)
-    up_cmd.add_argument("name", help="Challenge name")
+    up_cmd.add_argument("name", nargs="?", help="Challenge name")
+    up_cmd.add_argument("--all", action="store_true", help="Start all enabled challenges")
     up_cmd.set_defaults(func=cmd_up)
 
     down_cmd = subparsers.add_parser("down", help="Stop container + exports")

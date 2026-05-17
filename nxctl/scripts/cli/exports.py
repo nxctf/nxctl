@@ -122,6 +122,18 @@ def cmd_test(args) -> int:
         }
         if challenge_name:
             affected_names.add(challenge_name)
+        else:
+            for challenge in challenge_service.list_challenges():
+                if runtime_service.status(challenge.name).status != "running":
+                    continue
+                active_exports = export_manager.list_exports(challenge.name, check_health=False)
+                has_tunnel = any(
+                    export.get("type") != "direct"
+                    and export.get("provider") != "base_ip"
+                    for export in active_exports
+                )
+                if not has_tunnel:
+                    affected_names.add(challenge.name)
 
         for name in sorted(affected_names):
             try:
@@ -140,7 +152,7 @@ def cmd_test(args) -> int:
                     "error": str(exc),
                 })
 
-        if not results:
+        if not results and not healed_exports and not heal_failures:
             if killed:
                 print(f"\n{yellow(f'Cleaned orphan tunnel processes: {killed}')}")
             print(f"\n{yellow('No tunnel exports to test')}\n")
@@ -164,15 +176,18 @@ def cmd_test(args) -> int:
             ])
 
         print()
-        print(box(
-            "Endpoint Test",
-            table(
-                ["Challenge", "Provider", "Type", "Port", "Result", "Latency", "URL", "Error"],
-                rows,
-                [24, 14, 8, 12, 14, 10, 54, 36],
-            ),
-            width=150,
-        ))
+        if rows:
+            print(box(
+                "Endpoint Test",
+                table(
+                    ["Challenge", "Provider", "Type", "Port", "Result", "Latency", "URL", "Error"],
+                    rows,
+                    [24, 14, 8, 12, 14, 10, 54, 36],
+                ),
+                width=150,
+            ))
+        else:
+            print(yellow("No existing tunnel exports to test; checking auto-heal candidates."))
         if killed:
             print(f"\n{yellow(f'Cleaned orphan tunnel processes: {killed}')}")
         if healed_exports:
