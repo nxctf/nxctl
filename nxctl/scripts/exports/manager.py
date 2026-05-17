@@ -2,8 +2,15 @@
 
 import logging
 import os
+import re
+import socket
+import time
+import warnings
 from pathlib import Path
 from typing import Any, Dict, Optional
+from urllib.parse import urlparse
+import urllib.error
+import urllib.request
 
 from nxctl.core.db import get_db_connection, close_db_connection
 from nxctl.core.constants import (
@@ -252,6 +259,62 @@ class ExportManager:
 
         return killed
 
+    def sweep_orphan_tunnel_processes(self, active_exports: Optional[list[dict]] = None) -> int:
+        """Kill duplicate/orphan tunnel processes not represented by active export records."""
+        try:
+            import psutil
+        except Exception as exc:
+            logger.warning("Cannot sweep orphan tunnel processes because psutil is unavailable: %s", exc)
+            return 0
+
+        active_exports = active_exports if active_exports is not None else self.list_exports(check_health=False)
+        keep_exports = [
+            export
+            for export in active_exports
+            if export.get("provider") != EXPORT_PROVIDER_BASE_IP
+            and int(export.get("pid") or 0) > 0
+            and str(export.get("runtime_status") or "running") == "running"
+            and str(export.get("status") or "running") in {"active", "running"}
+        ]
+        keep_pids = {int(export.get("pid") or 0) for export in keep_exports}
+        active_keys = {
+            (str(export.get("provider") or ""), int(export.get("port") or 0))
+            for export in keep_exports
+        }
+        seen_keys: set[tuple[str, int]] = set()
+        killed = 0
+
+        for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+            try:
+                pid = int(proc.info.get("pid") or 0)
+                cmdline = proc.info.get("cmdline") or []
+                parsed = self._parse_tunnel_process(proc.info.get("name") or "", cmdline)
+                if not parsed:
+                    continue
+
+                provider, host_port = parsed
+                key = (provider, host_port)
+                should_keep = pid in keep_pids and key not in seen_keys
+                if should_keep:
+                    seen_keys.add(key)
+                    continue
+
+                if key in active_keys or pid not in keep_pids:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=3)
+                    except psutil.TimeoutExpired:
+                        proc.kill()
+                        proc.wait(timeout=3)
+                    killed += 1
+                    logger.info("Killed orphan tunnel process PID %s: %s", pid, " ".join(cmdline))
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+            except Exception as exc:
+                logger.debug("Failed sweeping tunnel process PID %s: %s", proc.info.get("pid"), exc)
+
+        return killed
+
     def mark_all_exports_inactive(self) -> int:
         """Mark every active export record inactive."""
         conn = get_db_connection(self.db_path)
@@ -283,13 +346,143 @@ class ExportManager:
 
         return provider.is_pid_running(pid)
 
+    def test_tunnel_exports(
+        self,
+        challenge_name: Optional[str] = None,
+        timeout: Optional[float] = None,
+        mark_unhealthy: bool = False,
+    ) -> list[dict]:
+        """Actively test tunnel endpoints, not just provider PIDs."""
+        timeout = float(
+            timeout
+            if timeout is not None
+            else getattr(self.config, "export_endpoint_check_timeout_seconds", 5) or 5
+        )
+        exports = [
+            export
+            for export in self.list_exports(challenge_name, check_health=True)
+            if export.get("provider") != EXPORT_PROVIDER_BASE_IP
+            and export.get("type") != "direct"
+        ]
+
+        results: list[dict] = []
+        for export in exports:
+            started = time.monotonic()
+            ok, error = self._test_export_endpoint(export, timeout)
+            latency_ms = int((time.monotonic() - started) * 1000)
+            result = dict(export)
+            result.update({
+                "reachable": ok,
+                "health": "reachable" if ok else "unreachable",
+                "latency_ms": latency_ms,
+                "error": error,
+            })
+            results.append(result)
+
+            if mark_unhealthy and not ok:
+                try:
+                    self.stop_export(
+                        export.get("challenge") or "",
+                        export.get("provider") or "",
+                        int(export.get("port") or 0),
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Failed stopping unhealthy %s export for %s: %s",
+                        export.get("provider"),
+                        export.get("challenge"),
+                        exc,
+                    )
+                try:
+                    if export.get("id"):
+                        self._mark_id_inactive(int(export["id"]))
+                except Exception:
+                    pass
+
+        return results
+
+    def _test_export_endpoint(self, export: dict, timeout: float) -> tuple[bool, str]:
+        endpoint = str(export.get("url") or export.get("endpoint") or "").strip()
+        if not endpoint:
+            return False, "missing endpoint"
+
+        protocol = str(export.get("protocol") or "").lower()
+        if endpoint.startswith("tcp://") or protocol == PROTOCOL_TCP:
+            return self._test_tcp_endpoint(endpoint, timeout)
+
+        return self._test_http_endpoint(endpoint, timeout)
+
+    def _test_http_endpoint(self, endpoint: str, timeout: float) -> tuple[bool, str]:
+        try:
+            import requests
+            try:
+                from urllib3.exceptions import InsecureRequestWarning
+            except Exception:
+                InsecureRequestWarning = Warning
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", InsecureRequestWarning)
+                response = requests.get(endpoint, timeout=timeout, verify=False)
+            body = (response.text or "")[:4096].lower()
+            if self._looks_like_tunnel_failure(response.status_code, body):
+                return False, f"http {response.status_code}"
+            return True, ""
+        except ImportError:
+            pass
+        except Exception as exc:
+            return False, str(exc)
+
+        try:
+            with urllib.request.urlopen(endpoint, timeout=timeout) as response:
+                body = response.read(4096).decode("utf-8", errors="ignore").lower()
+                if self._looks_like_tunnel_failure(response.status, body):
+                    return False, f"http {response.status}"
+                return True, ""
+        except urllib.error.HTTPError as exc:
+            body = exc.read(4096).decode("utf-8", errors="ignore").lower()
+            if self._looks_like_tunnel_failure(exc.code, body):
+                return False, f"http {exc.code}"
+            return True, ""
+        except Exception as exc:
+            return False, str(exc)
+
+    def _looks_like_tunnel_failure(self, status_code: int, body: str) -> bool:
+        if status_code in {502, 503, 504}:
+            return True
+        failure_markers = (
+            "err_ngrok_3200",
+            "endpoint is offline",
+            "tunnel not found",
+            "failed to connect to upstream",
+            "bad gateway",
+            "service unavailable",
+            "gateway timeout",
+        )
+        return any(marker in body for marker in failure_markers)
+
+    def _test_tcp_endpoint(self, endpoint: str, timeout: float) -> tuple[bool, str]:
+        parsed = urlparse(endpoint if "://" in endpoint else f"tcp://{endpoint}")
+        host = parsed.hostname
+        port = parsed.port
+        if not host or not port:
+            return False, "invalid tcp endpoint"
+
+        try:
+            with socket.create_connection((host, port), timeout=timeout):
+                return True, ""
+        except Exception as exc:
+            return False, str(exc)
+
     def list_exports(
         self,
         challenge_name: Optional[str] = None,
         check_health: bool = True,
         latest_only: bool = True,
+        dedupe: bool = True,
     ) -> list:
         """List all active exports."""
+        if dedupe:
+            self.dedupe_active_exports()
         self._deactivate_direct_exports_if_unconfigured()
         self._backfill_direct_exports(challenge_name)
 
@@ -341,9 +534,20 @@ class ExportManager:
                 """)
 
             exports = []
+            seen_exports: set[tuple[str, str, int]] = set()
             for row in cursor.fetchall():
                 if row["provider"] == EXPORT_PROVIDER_BASE_IP and not self._configured_base_ip():
                     continue
+
+                export_key = (
+                    str(row["name"]),
+                    str(row["provider"]),
+                    int(row["target_port"] or 0),
+                )
+                if export_key in seen_exports:
+                    self._mark_id_inactive(int(row["id"]))
+                    continue
+                seen_exports.add(export_key)
 
                 export_data = {
                     'id': row['id'],
@@ -380,8 +584,8 @@ class ExportManager:
 
     def reconcile_exports(self) -> int:
         """Check active exports and mark dead/stopped-runtime records inactive."""
+        dead_count = self.dedupe_active_exports()
         exports = self.list_exports(check_health=True, latest_only=False)
-        dead_count = 0
 
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
@@ -411,9 +615,12 @@ class ExportManager:
                     dead_count += 1
 
             conn.commit()
-            return dead_count
         finally:
             close_db_connection(conn)
+
+        active_exports = self.list_exports(check_health=False, latest_only=False)
+        dead_count += self.sweep_orphan_tunnel_processes(active_exports)
+        return dead_count
 
     def prune_inactive(self, provider_name: Optional[str] = None) -> int:
         """Delete inactive export records."""
@@ -468,11 +675,13 @@ class ExportManager:
 
             # Check if already exists
             cursor.execute(
-                "SELECT id FROM challenge_exports WHERE runtime_id = ? AND provider = ? AND target_port = ? AND status = 'active'",
+                "SELECT id FROM challenge_exports WHERE runtime_id = ? AND provider = ? AND target_port = ? AND status = 'active' ORDER BY id DESC",
                 (runtime_id, provider, host_port)
             )
 
-            if not cursor.fetchone():
+            existing_rows = cursor.fetchall()
+
+            if not existing_rows:
                 # Insert new export record
                 cursor.execute("""
                     INSERT INTO challenge_exports (runtime_id, provider, export_type, protocol, target_port, public_endpoint, pid, status)
@@ -480,14 +689,87 @@ class ExportManager:
                 """, (runtime_id, provider, export_type, protocol, host_port, public_endpoint, pid, 'active'))
             else:
                 # Update existing record (e.g. if we restarted the tunnel)
+                keep_id = existing_rows[0]["id"]
                 cursor.execute("""
                     UPDATE challenge_exports
                     SET export_type = ?, public_endpoint = ?, pid = ?, status = 'active'
-                    WHERE runtime_id = ? AND provider = ? AND target_port = ?
-                """, (export_type, public_endpoint, pid, runtime_id, provider, host_port))
+                    WHERE id = ?
+                """, (export_type, public_endpoint, pid, keep_id))
+
+                stale_ids = [row["id"] for row in existing_rows[1:]]
+                if stale_ids:
+                    placeholders = ",".join("?" for _ in stale_ids)
+                    cursor.execute(
+                        f"UPDATE challenge_exports SET status = 'inactive' WHERE id IN ({placeholders})",
+                        stale_ids,
+                    )
 
             conn.commit()
 
+        finally:
+            close_db_connection(conn)
+
+    def _parse_tunnel_process(self, name: str, cmdline: list[str]) -> Optional[tuple[str, int]]:
+        command = " ".join(cmdline).lower()
+        basenames = {Path(part).name.lower() for part in cmdline if part}
+        proc_name = (name or "").lower()
+
+        if ("lt" in basenames or "localtunnel" in command) and "--port" in cmdline:
+            try:
+                index = cmdline.index("--port")
+                return EXPORT_PROVIDER_LOCALTUNNEL, int(cmdline[index + 1])
+            except Exception:
+                return None
+
+        if "pinggy" in basenames or proc_name == "pinggy" or "tcp@free.pinggy.io" in command:
+            match = re.search(r"-r0:localhost:(\d+)", command)
+            if match:
+                return EXPORT_PROVIDER_PINGGY, int(match.group(1))
+            return None
+
+        if "ngrok" in basenames or proc_name == "ngrok":
+            for index, part in enumerate(cmdline):
+                if part in {"http", "tcp"} and index + 1 < len(cmdline):
+                    try:
+                        return EXPORT_PROVIDER_NGROK, int(cmdline[index + 1])
+                    except ValueError:
+                        return None
+            return None
+
+        return None
+
+    def dedupe_active_exports(self) -> int:
+        """Mark duplicate active export rows inactive, keeping newest per runtime/provider/port."""
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                SELECT id, runtime_id, provider, target_port, public_endpoint
+                FROM challenge_exports
+                WHERE status = 'active'
+                ORDER BY id DESC
+            """)
+            seen: set[tuple[int, str, int]] = set()
+            stale_ids: list[int] = []
+            for row in cursor.fetchall():
+                key = (
+                    int(row["runtime_id"] or 0),
+                    str(row["provider"] or ""),
+                    int(row["target_port"] or 0),
+                )
+                if key in seen:
+                    stale_ids.append(int(row["id"]))
+                else:
+                    seen.add(key)
+
+            if stale_ids:
+                placeholders = ",".join("?" for _ in stale_ids)
+                cursor.execute(
+                    f"UPDATE challenge_exports SET status = 'inactive' WHERE id IN ({placeholders})",
+                    stale_ids,
+                )
+                conn.commit()
+            return len(stale_ids)
         finally:
             close_db_connection(conn)
 

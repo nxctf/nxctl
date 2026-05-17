@@ -408,6 +408,10 @@ def cmd_daemon(args) -> int:
             api_thread.start()
 
         print(f"{blue('[daemon]')} Monitoring challenges for auto-shutdown & auto-heal...\n")
+        last_endpoint_check = 0.0
+        endpoint_check_interval = int(
+            getattr(config, "export_endpoint_check_interval_seconds", 120) or 120
+        )
 
         while True:
             try:
@@ -447,6 +451,21 @@ def cmd_daemon(args) -> int:
 
                 # 3. Reconcile exports (mark dead PIDs as 'dead')
                 export_manager.reconcile_exports()
+
+                # 3b. Actively test tunnel endpoints at a slower cadence.
+                if endpoint_check_interval > 0 and time.time() - last_endpoint_check >= endpoint_check_interval:
+                    last_endpoint_check = time.time()
+                    endpoint_results = export_manager.test_tunnel_exports(mark_unhealthy=True)
+                    export_manager.sweep_orphan_tunnel_processes()
+                    for result in endpoint_results:
+                        if not result.get("reachable"):
+                            print(
+                                f"{yellow('[daemon]')} "
+                                f"Endpoint failed: {result.get('challenge')} "
+                                f"{result.get('provider')} "
+                                f"{result.get('url') or result.get('endpoint')} "
+                                f"({format_error(result.get('error'))}); scheduling auto-heal"
+                            )
 
                 # 4. Auto-heal missing exports for running challenges
                 if config.auto_heal_exports:

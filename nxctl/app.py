@@ -66,6 +66,7 @@ from nxctl.scripts.cli.exports import (
     cmd_export,
     cmd_unexport,
     cmd_exports,
+    cmd_test,
 )
 
 
@@ -191,6 +192,11 @@ Examples:
     add_debug_flag(exports_cmd, default=argparse.SUPPRESS)
     exports_cmd.add_argument("--all", action="store_true", help="Show all history")
     exports_cmd.set_defaults(func=cmd_exports)
+
+    test_cmd = subparsers.add_parser("test", help="Actively test tunnel endpoints")
+    add_debug_flag(test_cmd, default=argparse.SUPPRESS)
+    test_cmd.add_argument("name", nargs="?", help="Optional challenge name filter")
+    test_cmd.set_defaults(func=cmd_test)
 
     return parser
 

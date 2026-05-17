@@ -21,6 +21,8 @@ default_ttl_minutes: 15
 extend_time_minutes: 10
 extend_threshold_minutes: 5
 extend_cooldown_seconds: 30
+export_endpoint_check_interval_seconds: 120
+export_endpoint_check_timeout_seconds: 5
 
 ngrok_tokens:
   - ${NGROK_TOKEN_1}

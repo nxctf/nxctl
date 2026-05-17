@@ -46,6 +46,8 @@ class Config(BaseModel):
     daemon_interval: int = 10
     restart_cooldown_seconds: int = 300
     auto_heal_exports: bool = True
+    export_endpoint_check_interval_seconds: int = 120
+    export_endpoint_check_timeout_seconds: int = 5
 
     class Config:
         extra = "allow"
