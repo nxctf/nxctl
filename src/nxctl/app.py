@@ -7,11 +7,17 @@ import argparse
 import os
 from pathlib import Path
 
-# Auto-detect project root (one level up from nxctl/)
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Auto-detect project root for both root and src layouts.
+PACKAGE_DIR = Path(__file__).resolve().parent
+if PACKAGE_DIR.parent.name == "src":
+    PROJECT_ROOT = str(PACKAGE_DIR.parent.parent)
+    SRC_ROOT = str(PACKAGE_DIR.parent)
+else:
+    PROJECT_ROOT = str(PACKAGE_DIR.parent)
+    SRC_ROOT = PROJECT_ROOT
 os.chdir(PROJECT_ROOT)
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
+if SRC_ROOT not in sys.path:
+    sys.path.insert(0, SRC_ROOT)
 
 # Auto-load .env
 try:

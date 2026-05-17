@@ -2,7 +2,7 @@
 
 from fastapi import HTTPException
 
-from nxctl.api.serializers import compute_remaining_seconds, serialize_ports
+from nxctl_api.serializers import compute_remaining_seconds, serialize_ports
 from nxctl.scripts.cli.lifecycle import _start_available_exports
 
 

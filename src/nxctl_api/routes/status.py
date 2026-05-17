@@ -2,8 +2,8 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from nxctl.api.auth import verify_client_token
-from nxctl.api.serializers import (
+from nxctl_api.auth import verify_client_token
+from nxctl_api.serializers import (
     build_extend_availability,
     compute_remaining_seconds,
     get_extend_cooldown,

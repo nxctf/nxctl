@@ -4,7 +4,7 @@ set -e
 # setup.sh - Interactive setup for NXCTL
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COMPLETION_SRC="$PROJECT_DIR/nxctl/completion/nxctl-completion.bash"
+COMPLETION_SRC="$PROJECT_DIR/completion/nxctl-completion.bash"
 NXCTL_BIN_TARGET="/usr/local/bin/nxctl"
 REQUIREMENTS="$PROJECT_DIR/requirements.txt"
 SYSTEMD_DIR="/etc/systemd/system"
@@ -125,7 +125,7 @@ install_nxctl() {
 
     echo -e "${GREEN}[*] Installing nxctl command...${NC}"
     NXCTL_WRAPPER="#!/bin/bash
-export PYTHONPATH=\$PYTHONPATH:$PROJECT_DIR
+export PYTHONPATH=\$PYTHONPATH:$PROJECT_DIR/src
 python3 -m nxctl.app \"\$@\"
 "
     echo "$NXCTL_WRAPPER" | sudo tee "$NXCTL_BIN_TARGET" > /dev/null

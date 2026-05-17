@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from nxctl.api.auth import verify_client_token
+from nxctl_api.auth import verify_client_token
 from nxctl.scripts.cli.base import get_services
 
 router = APIRouter()

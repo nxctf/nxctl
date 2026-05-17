@@ -2,8 +2,8 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from nxctl.api.auth import verify_admin_secret, verify_client_token
-from nxctl.api.serializers import (
+from nxctl_api.auth import verify_admin_secret, verify_client_token
+from nxctl_api.serializers import (
     serialize_challenge_basic,
     serialize_challenge_with_runtime,
 )

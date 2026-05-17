@@ -12,7 +12,7 @@
 #   ./test_api.sh
 #   API_TOKEN=client123 API_ADMIN_SECRET=aria123 ./test_api.sh
 #   CHALLENGE=simplee API_URL=http://127.0.0.1:8000 ./test_api.sh
-#   RUN_ADMIN_GLOBAL=1 API_ADMIN_SECRET=aria123 ./test_api.sh
+#   RUN_ADMIN_GLOBAL=1 API_ADMIN_SECRET=aria123 GLOBAL_CURL_TIMEOUT=600 ./test_api.sh
 #   RUN_SYNC=1 API_ADMIN_SECRET=aria123 ./test_api.sh
 #   START_API=1 API_PORT=8000 API_TOKEN=client123 API_ADMIN_SECRET=aria123 ./test_api.sh
 
@@ -32,6 +32,8 @@ RUN_MUTATING="${RUN_MUTATING:-auto}"
 RUN_ADMIN_GLOBAL="${RUN_ADMIN_GLOBAL:-0}"
 RUN_SYNC="${RUN_SYNC:-0}"
 CURL_TIMEOUT="${CURL_TIMEOUT:-30}"
+GLOBAL_CURL_TIMEOUT="${GLOBAL_CURL_TIMEOUT:-300}"
+SYNC_CURL_TIMEOUT="${SYNC_CURL_TIMEOUT:-120}"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -115,6 +117,7 @@ make_request() {
   local method="$3"
   local path="$4"
   local expected="$5"
+  local timeout="${6:-$CURL_TIMEOUT}"
   local url="${API_URL}${path}"
   local body_file
   body_file="$(mktemp)"
@@ -122,7 +125,7 @@ make_request() {
   local args=(
     --silent
     --show-error
-    --max-time "$CURL_TIMEOUT"
+    --max-time "$timeout"
     --output "$body_file"
     --write-out "%{http_code}"
     --request "$method"
@@ -241,6 +244,7 @@ if [ "$START_API" = "1" ]; then
   section "Starting API"
   NXCTL_API_TOKEN="$API_TOKEN" \
   NXCTL_API_ADMIN_SECRET="$API_ADMIN_SECRET" \
+  PYTHONPATH="${PYTHONPATH:+${PYTHONPATH}:}src" \
     python3 -m nxctl.app api --host "$API_HOST" --port "$API_PORT" >/tmp/nxctl-api-test.log 2>&1 &
   API_PID="$!"
   API_URL="http://${API_HOST}:${API_PORT}"
@@ -355,7 +359,7 @@ fi
 
 if [ "$RUN_SYNC" = "1" ]; then
   section "Admin Sync"
-  make_request "POST /sync" admin POST "/sync" "200"
+  make_request "POST /sync" admin POST "/sync" "200" "$SYNC_CURL_TIMEOUT"
 else
   section "Admin Sync"
   skip "RUN_SYNC=0; set RUN_SYNC=1 to test /sync"
@@ -363,8 +367,10 @@ fi
 
 if [ "$RUN_ADMIN_GLOBAL" = "1" ]; then
   section "Global Admin Actions"
-  make_request "POST /up?all=true" admin POST "/up?all=true" "200"
-  make_request "POST /down?all=true" admin POST "/down?all=true" "200"
+  printf "Using GLOBAL_CURL_TIMEOUT=%ss because global up/down can build and export many challenges.\n" "$GLOBAL_CURL_TIMEOUT"
+  make_request "POST /up?all=true" admin POST "/up?all=true" "200" "$GLOBAL_CURL_TIMEOUT"
+  make_request "GET /status after global up" client GET "/status" "200"
+  make_request "POST /down?all=true" admin POST "/down?all=true" "200" "$GLOBAL_CURL_TIMEOUT"
 else
   section "Global Admin Actions"
   skip "RUN_ADMIN_GLOBAL=0; set RUN_ADMIN_GLOBAL=1 to test /up?all=true and /down?all=true"

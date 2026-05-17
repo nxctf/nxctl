@@ -30,8 +30,9 @@ nxctl = "nxctl.app:main"
 [tool.setuptools.dynamic]
 dependencies = { file = ["requirements.txt"] }
 
-[tool.setuptools.packages.find]
-include = ["nxctl*", "src"]
+[tool.setuptools]
+package-dir = {"" = "src"}
 
-[tool.setuptools.package-data]
-nxctl = ["completion/*.bash", "completion/*.sh", "completion/README.md"]
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["nxctl*", "nxctl_api*"]

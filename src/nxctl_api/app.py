@@ -2,11 +2,11 @@
 
 from fastapi import FastAPI
 
-from nxctl.api.routes.challenges import router as challenges_router
-from nxctl.api.routes.health import router as health_router
-from nxctl.api.routes.lifecycle import router as lifecycle_router
-from nxctl.api.routes.root import router as root_router
-from nxctl.api.routes.status import router as status_router
+from nxctl_api.routes.challenges import router as challenges_router
+from nxctl_api.routes.health import router as health_router
+from nxctl_api.routes.lifecycle import router as lifecycle_router
+from nxctl_api.routes.root import router as root_router
+from nxctl_api.routes.status import router as status_router
 
 
 def create_app() -> FastAPI:

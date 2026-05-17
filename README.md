@@ -43,13 +43,13 @@ NXCTL is the command-line orchestrator in the NXCTF ecosystem. It simplifies the
 ```text
 nxctl/
 |-- setup.sh                    # Interactive installer/uninstaller
-|-- nxctl/                      # Main Python package
-|   |-- app.py                  # CLI entry point
-|   |-- api/                    # FastAPI app, auth, serializers, routes
-|   |-- core/                   # Config, Docker, Git, DB, models
-|   |-- scripts/                # CLI handlers and service logic
-|   `-- completion/             # Bash completion scripts
-|-- src/                        # Deprecated compatibility launcher path
+|-- completion/                 # Bash completion scripts
+|-- src/
+|   |-- nxctl/                  # CLI and orchestration package
+|   |   |-- app.py              # CLI entry point
+|   |   |-- core/               # Config, Docker, Git, DB, models
+|   |   `-- scripts/            # CLI handlers and service logic
+|   `-- nxctl_api/              # FastAPI app, auth, serializers, routes
 |-- data/                       # Persistent data, builds, logs
 |-- config.yml                  # Local configuration
 `-- requirements.txt            # Python dependencies
@@ -68,6 +68,16 @@ sudo ./setup.sh enable-service
 
 source ~/.bashrc
 ```
+
+For local development without installing, run commands from the repository root
+with `src` on `PYTHONPATH`:
+
+```bash
+PYTHONPATH=src python3 -m nxctl.app status
+```
+
+The project uses Python's `src/` layout, so the actual package lives at
+`src/nxctl/`. The console entry point still resolves to `nxctl.app:main`.
 
 ## TTL and Extension System
 
@@ -223,5 +233,5 @@ sudo ./setup.sh uninstall
 chmod +x test_api.sh
 API_TOKEN=client123 API_ADMIN_SECRET=aria123 CHALLENGE=simplee ./test_api.sh
 START_API=1 API_TOKEN=client123 API_ADMIN_SECRET=aria123 ./test_api.sh
-RUN_SYNC=1 RUN_ADMIN_GLOBAL=1 API_TOKEN=client123 API_ADMIN_SECRET=aria123 ./test_api.sh
+RUN_SYNC=1 RUN_ADMIN_GLOBAL=1 API_TOKEN=client123 API_ADMIN_SECRET=aria123 GLOBAL_CURL_TIMEOUT=600 ./test_api.sh
 ```

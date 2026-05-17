@@ -2,12 +2,12 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from nxctl.api.auth import verify_admin_secret, verify_client_token
-from nxctl.api.serializers import (
+from nxctl_api.auth import verify_admin_secret, verify_client_token
+from nxctl_api.serializers import (
     build_extend_availability,
     compute_remaining_seconds,
 )
-from nxctl.api.services import start_challenge_payload
+from nxctl_api.services import start_challenge_payload
 from nxctl.scripts.cli.base import get_services
 from nxctl.scripts.cli.lifecycle import (
     _start_available_exports,

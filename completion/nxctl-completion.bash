@@ -8,8 +8,17 @@ _nxctl_find_root() {
     fi
 
     if [[ -n "${script_dir}" ]]; then
+        if [[ -f "${script_dir}/../src/nxctl/app.py" ]]; then
+            (cd "${script_dir}/.." 2>/dev/null && pwd)
+            return 0
+        fi
         if [[ -f "${script_dir}/../app.py" ]]; then
-            (cd "${script_dir}/../.." 2>/dev/null && pwd)
+            if [[ "$(basename "$(cd "${script_dir}/.." 2>/dev/null && pwd)")" == "nxctl" ]] \
+                && [[ "$(basename "$(cd "${script_dir}/../.." 2>/dev/null && pwd)")" == "src" ]]; then
+                (cd "${script_dir}/../../.." 2>/dev/null && pwd)
+            else
+                (cd "${script_dir}/../.." 2>/dev/null && pwd)
+            fi
             return 0
         fi
         if [[ -f "${script_dir}/nxctl/app.py" ]]; then
@@ -19,6 +28,10 @@ _nxctl_find_root() {
     fi
 
     if [[ -f "./nxctl/app.py" ]]; then
+        pwd
+        return 0
+    fi
+    if [[ -f "./src/nxctl/app.py" ]]; then
         pwd
         return 0
     fi
@@ -39,7 +52,11 @@ _nxctl_get_challenges() {
     fi
 
     local python_bin="python3"
-    if [[ -f "${app_root}/nxctl/app.py" ]]; then
+    if [[ -f "${app_root}/src/nxctl/app.py" ]]; then
+        (cd "${app_root}" && PYTHONPATH="${app_root}/src${PYTHONPATH:+:${PYTHONPATH}}" "${python_bin}" -m nxctl.app list 2>/dev/null \
+            | awk 'BEGIN { seen = 0 } /^[[:space:]]*Name[[:space:]]+/ { seen = 1; next } seen && NF && $1 !~ /^-+$/ { print $1 }' \
+            | tr -d '\r')
+    elif [[ -f "${app_root}/nxctl/app.py" ]]; then
         (cd "${app_root}" && "${python_bin}" -m nxctl.app list 2>/dev/null \
             | awk 'BEGIN { seen = 0 } /^[[:space:]]*Name[[:space:]]+/ { seen = 1; next } seen && NF && $1 !~ /^-+$/ { print $1 }' \
             | tr -d '\r')

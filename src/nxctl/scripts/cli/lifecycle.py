@@ -436,7 +436,7 @@ def cmd_daemon(args) -> int:
 
             def run_api():
                 print(f"{blue('[api]')} Starting Web API on {host}:{port} (background)")
-                uvicorn.run("nxctl.api:app", host=host, port=port, log_level="warning")
+                uvicorn.run("nxctl_api:app", host=host, port=port, log_level="warning")
 
             api_thread = threading.Thread(target=run_api, daemon=True)
             api_thread.start()
@@ -534,7 +534,7 @@ def cmd_api(args) -> int:
         print(f"\n{blue('[api]')} Starting NXCTL Web API on {host}:{port}")
         print(f"{blue('[api]')} Swagger UI: http://{host}:{port}/docs")
 
-        uvicorn.run("nxctl.api:app", host=host, port=port, reload=False)
+        uvicorn.run("nxctl_api:app", host=host, port=port, reload=False)
         return 0
     except KeyboardInterrupt:
         return 0
