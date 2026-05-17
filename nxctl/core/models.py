@@ -18,6 +18,19 @@ class Challenge:
 
 
 @dataclass
+class ChallengePort:
+    """Published port for a challenge service."""
+    id: Optional[int] = None
+    challenge_id: int = 0
+    host_port: int = 0
+    internal_port: int = 0
+    service_type: str = "http"
+    service_name: str = ""
+    protocol: str = "tcp"
+    is_primary: bool = False
+
+
+@dataclass
 class RuntimeInstance:
     """Runtime instance model."""
     id: Optional[int] = None

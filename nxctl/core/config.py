@@ -34,6 +34,9 @@ class Config(BaseModel):
     enable_ngrok: bool = True
     enable_localtunnel: bool = True
     enable_pinggy: bool = True
+    local_port_start: int = 40000
+    local_port_end: int = 49999
+    randomize_local_ports: bool = True
 
     # TTL settings
     default_ttl_minutes: int = 15

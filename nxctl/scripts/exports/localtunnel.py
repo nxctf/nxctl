@@ -43,6 +43,22 @@ class LocaltunnelProvider(ExportProvider):
         match = re.search(r"https?://\S+", text or "")
         return match.group(0).strip() if match else ""
 
+    def _is_localtunnel_pid(self, pid: int, host_port: int) -> bool:
+        """Return True when PID is really the lt process for this port."""
+        if not (pid > 0 and is_pid_alive(pid)):
+            return False
+        try:
+            cmdline = psutil.Process(pid).cmdline()
+        except Exception:
+            return False
+
+        command = " ".join(cmdline).lower()
+        return (
+            "lt" in command
+            and "--port" in cmdline
+            and str(host_port) in cmdline
+        )
+
     def start(self, challenge_name: str, host_port: int, protocol: str = "http") -> ExportResult:
         """Start localtunnel.
 
@@ -65,9 +81,11 @@ class LocaltunnelProvider(ExportProvider):
             state_pid = int(state.get("pid", 0))
             state_url = str(state.get("public_url", ""))
 
-            if state_pid and state_url and is_pid_alive(state_pid):
+            if state_pid and state_url and self._is_localtunnel_pid(state_pid, host_port):
                 logger.info(f"Reusing existing localtunnel from state: {state_url}")
                 return ExportResult(url=state_url, pid=state_pid)
+            logger.info("Ignoring stale localtunnel state for port %s", host_port)
+            delete_state_file(self._get_state_file(host_port))
 
         # Fallback: check system processes for any 'lt' running on this port
         # This prevents race conditions between CLI and Daemon
@@ -80,7 +98,7 @@ class LocaltunnelProvider(ExportProvider):
                     # or just let it be and start new. Better: kill and fresh start to ensure we get a URL.
                     try:
                         os.kill(proc.info['pid'], 9)
-                    except:
+                    except Exception:
                         pass
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
@@ -101,48 +119,37 @@ class LocaltunnelProvider(ExportProvider):
 
         # Start localtunnel process. Keep stdout/stderr attached to a log file so
         # the detached process does not die later from writing to a closed pipe.
-        try:
-            log_path = self._get_log_file(host_port)
-            log_file = open(log_path, "w", encoding="utf-8")
+        timeout = int(getattr(self.config, "localtunnel_startup_timeout", 20) or 20)
+        attempts = int(getattr(self.config, "localtunnel_startup_retries", 3) or 3)
+        last_error = ""
+
+        for attempt in range(1, attempts + 1):
+            proc = None
             try:
-                proc = subprocess.Popen(
-                    ["lt", "--port", str(host_port)],
-                    stdin=subprocess.DEVNULL,
-                    stdout=log_file,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    start_new_session=True,
-                )
-            finally:
-                log_file.close()
+                log_path = self._get_log_file(host_port)
+                log_path.write_text("", encoding="utf-8")
+                log_file = open(log_path, "a", encoding="utf-8")
+                try:
+                    proc = subprocess.Popen(
+                        ["lt", "--port", str(host_port)],
+                        stdin=subprocess.DEVNULL,
+                        stdout=log_file,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        start_new_session=True,
+                    )
+                finally:
+                    log_file.close()
 
-            # Read the log to get URL
-            deadline = time.time() + 10
-            position = 0
-            while time.time() < deadline:
-                if proc.poll() is not None:
-                    content = log_path.read_text(encoding="utf-8", errors="ignore") if log_path.exists() else ""
-                    public_url = self._extract_url(content)
-                    if public_url:
-                        save_state_file(
-                            self._get_state_file(host_port),
-                            {
-                                "pid": proc.pid,
-                                "public_url": public_url,
-                                "host_port": host_port,
-                                "log_file": str(log_path),
-                                "started_at": int(time.time()),
-                            }
-                        )
-                        logger.info(f"Localtunnel started: {public_url}")
-                        return ExportResult(url=public_url, pid=proc.pid)
-                    raise RuntimeError(f"localtunnel process exited without returning a URL: {content.strip()}")
-
-                if log_path.exists():
-                    with open(log_path, "r", encoding="utf-8", errors="ignore") as fh:
-                        fh.seek(position)
-                        content = fh.read()
-                        position = fh.tell()
+                deadline = time.time() + timeout
+                position = 0
+                while time.time() < deadline:
+                    content = ""
+                    if log_path.exists():
+                        with open(log_path, "r", encoding="utf-8", errors="ignore") as fh:
+                            fh.seek(position)
+                            content = fh.read()
+                            position = fh.tell()
 
                     public_url = self._extract_url(content)
                     if public_url:
@@ -159,12 +166,44 @@ class LocaltunnelProvider(ExportProvider):
                         logger.info(f"Localtunnel started: {public_url}")
                         return ExportResult(url=public_url, pid=proc.pid)
 
-                time.sleep(0.2)
+                    if proc.poll() is not None:
+                        full_log = log_path.read_text(encoding="utf-8", errors="ignore") if log_path.exists() else ""
+                        public_url = self._extract_url(full_log)
+                        if public_url:
+                            save_state_file(
+                                self._get_state_file(host_port),
+                                {
+                                    "pid": proc.pid,
+                                    "public_url": public_url,
+                                    "host_port": host_port,
+                                    "log_file": str(log_path),
+                                    "started_at": int(time.time()),
+                                }
+                            )
+                            logger.info(f"Localtunnel started: {public_url}")
+                            return ExportResult(url=public_url, pid=proc.pid)
 
-            raise RuntimeError("Timed out waiting for localtunnel URL")
+                        last_error = full_log.strip() or "localtunnel exited before printing a URL"
+                        logger.info("localtunnel attempt %s/%s failed: %s", attempt, attempts, last_error)
+                        break
 
-        except Exception as e:
-            raise RuntimeError(f"Failed to start localtunnel: {str(e)}")
+                    time.sleep(0.2)
+
+                else:
+                    last_error = f"timed out after {timeout}s waiting for localtunnel URL"
+                    if proc and proc.poll() is None:
+                        kill_process(proc.pid)
+                    logger.info("localtunnel attempt %s/%s failed: %s", attempt, attempts, last_error)
+
+            except Exception as e:
+                last_error = str(e)
+                if proc and proc.poll() is None:
+                    kill_process(proc.pid)
+                logger.info("localtunnel attempt %s/%s failed: %s", attempt, attempts, last_error)
+
+            time.sleep(0.7)
+
+        raise RuntimeError(f"Failed to start localtunnel after {attempts} attempts: {last_error}")
 
     def stop(self, challenge_name: str, host_port: int) -> bool:
         """Stop localtunnel."""
@@ -176,7 +215,7 @@ class LocaltunnelProvider(ExportProvider):
         state = load_state_file(self._get_state_file(host_port))
         if state:
             pid = int(state.get("pid", 0))
-            if pid and is_pid_alive(pid):
+            if pid and self._is_localtunnel_pid(pid, host_port):
                 if kill_process(pid):
                     stopped = True
 
@@ -194,13 +233,6 @@ class LocaltunnelProvider(ExportProvider):
         pid = int(state.get("pid", 0))
         url = state.get("public_url", "")
 
-        if not (pid > 0 and is_pid_alive(pid) and bool(url)):
+        if not (pid > 0 and bool(url)):
             return False
-
-        try:
-            proc = psutil.Process(pid)
-            cmdline = proc.cmdline()
-            command = " ".join(cmdline).lower()
-            return "lt" in command and "--port" in cmdline and str(host_port) in cmdline
-        except Exception:
-            return False
+        return self._is_localtunnel_pid(pid, host_port)

@@ -6,6 +6,7 @@ import re
 import subprocess
 import time
 
+import psutil
 from pathlib import Path
 from typing import Optional
 
@@ -36,6 +37,9 @@ class NgrokProvider(ExportProvider):
 
     def _get_state_file(self, host_port: int) -> Path:
         return self.state_dir / f"ngrok_{host_port}.json"
+
+    def _get_token_config_file(self, host_port: int, token_id: str) -> Path:
+        return self.state_dir / f"ngrok_{host_port}_{token_id}.yml"
 
     def _configured_tokens(self) -> list[tuple[str, str]]:
         tokens = []
@@ -69,31 +73,48 @@ class NgrokProvider(ExportProvider):
 
     def _select_token(self) -> Optional[tuple[str, str, str]]:
         tokens = self._configured_tokens()
-        used_token_ids = self._used_token_ids()
+        used_token_counts = self._used_token_counts()
+        max_sessions = self._max_sessions_per_token()
 
         if not tokens:
             if not self._has_existing_ngrok_config():
                 return None
             config_token_id = self._token_id("existing-ngrok-config")
-            if config_token_id in used_token_ids:
+            if used_token_counts.get(config_token_id, 0) >= max_sessions:
                 return None
             return "", config_token_id, "existing ngrok config"
 
-        unused = [
+        available = [
             (token, self._token_id(token), source)
             for token, source in tokens
-            if self._token_id(token) not in used_token_ids
+            if used_token_counts.get(self._token_id(token), 0) < max_sessions
         ]
-        if not unused:
+        if not available:
             return None
 
-        return random.choice(unused)
+        lowest_count = min(used_token_counts.get(token_id, 0) for _, token_id, _ in available)
+        least_used = [
+            item for item in available
+            if used_token_counts.get(item[1], 0) == lowest_count
+        ]
+        return random.choice(least_used)
+
+    def _max_sessions_per_token(self) -> int:
+        try:
+            value = int(getattr(self.config, "ngrok_max_sessions_per_token", 3) or 3)
+            return max(1, value)
+        except Exception:
+            return 3
 
     def _token_id(self, token: str) -> str:
         return hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
 
     def _used_token_ids(self) -> set[str]:
-        used = set()
+        return set(self._used_token_counts())
+
+    def _used_token_counts(self) -> dict[str, int]:
+        used: dict[str, int] = {}
+        counted_pids: set[int] = set()
 
         for path in self.state_dir.glob("ngrok_*.json"):
             state = load_state_file(path)
@@ -102,10 +123,44 @@ class NgrokProvider(ExportProvider):
 
             pid = int(state.get("pid", 0) or 0)
             token_id = str(state.get("token_id", "")).strip()
-            if pid and token_id and is_pid_alive(pid):
-                used.add(token_id)
+            if pid and token_id and self._is_ngrok_pid(pid):
+                used[token_id] = used.get(token_id, 0) + 1
+                counted_pids.add(pid)
+
+        try:
+            for proc in psutil.process_iter(["pid", "cmdline"]):
+                pid = int(proc.info.get("pid") or 0)
+                if not pid or pid in counted_pids:
+                    continue
+
+                cmdline = proc.info.get("cmdline") or []
+                if not self._is_ngrok_cmdline(cmdline):
+                    continue
+
+                token_id = self._token_id_from_cmdline(cmdline)
+                if token_id:
+                    used[token_id] = used.get(token_id, 0) + 1
+        except Exception:
+            pass
 
         return used
+
+    def _is_ngrok_cmdline(self, cmdline: list[str]) -> bool:
+        return any(Path(part).name == "ngrok" for part in cmdline if part)
+
+    def _token_id_from_cmdline(self, cmdline: list[str]) -> Optional[str]:
+        joined = " ".join(cmdline)
+        match = re.search(r"ngrok_\d+_([0-9a-f]{16})\.yml", joined)
+        return match.group(1) if match else None
+
+    def _is_ngrok_pid(self, pid: int) -> bool:
+        if not (pid > 0 and is_pid_alive(pid)):
+            return False
+        try:
+            cmdline = psutil.Process(pid).cmdline()
+        except Exception:
+            return False
+        return self._is_ngrok_cmdline(cmdline)
 
     def _extract_public_url(self, log_text: str) -> Optional[str]:
         """Extract the public HTTPS URL from this process log."""
@@ -115,6 +170,65 @@ class NgrokProvider(ExportProvider):
 
         matches = re.findall(r"https://[^\s]+", log_text or "")
         return matches[-1].strip().strip('"') if matches else None
+
+    def _summarize_error(self, logs: str) -> str:
+        """Extract a compact ngrok failure from noisy agent logs."""
+        text = logs or ""
+        if "ERR_NGROK_108" in text:
+            return (
+                "ngrok account session limit reached (ERR_NGROK_108): "
+                "your account allows only 3 simultaneous agent sessions"
+            )
+
+        error_lines = []
+        for line in text.splitlines():
+            clean = line.strip()
+            if not clean:
+                continue
+            if clean.startswith("ERROR:"):
+                clean = clean.replace("ERROR:", "", 1).strip()
+                if clean:
+                    error_lines.append(clean)
+            elif "err=" in clean.lower() and "err=nil" not in clean.lower():
+                error_lines.append(clean)
+            elif "authentication failed" in clean.lower():
+                error_lines.append(clean)
+
+        if error_lines:
+            return error_lines[0]
+
+        non_info_lines = [
+            line.strip()
+            for line in text.splitlines()
+            if line.strip() and "lvl=info" not in line.lower()
+        ]
+        if non_info_lines:
+            return non_info_lines[-1]
+
+        return "ngrok exited before a public URL was ready; check the ngrok log in data/exports"
+
+    def _write_token_config(self, host_port: int, token: str, token_id: str) -> Optional[Path]:
+        """Write a per-process ngrok config so the selected token is actually used."""
+        if not token:
+            return None
+
+        config_path = self._get_token_config_file(host_port, token_id)
+        config_path.write_text(
+            'version: "2"\n'
+            f'authtoken: "{token}"\n',
+            encoding="utf-8",
+        )
+        return config_path
+
+    def _delete_token_config(self, path_text: str | None) -> None:
+        if not path_text:
+            return
+        try:
+            path = Path(path_text)
+            if path.exists() and path.parent == self.state_dir:
+                path.unlink()
+        except Exception:
+            pass
 
     def _has_existing_ngrok_config(self) -> bool:
         candidates = [
@@ -153,12 +267,14 @@ class NgrokProvider(ExportProvider):
             pid = int(state.get("pid", 0))
             public_url = str(state.get("public_url", ""))
 
-            if pid and public_url and is_pid_alive(pid):
+            if pid and public_url and self._is_ngrok_pid(pid):
                 logger.info(
                     f"Reusing existing ngrok tunnel: "
                     f"{public_url}"
                 )
                 return ExportResult(url=public_url, pid=pid)
+            logger.info("Ignoring stale ngrok state for port %s", host_port)
+            delete_state_file(self._get_state_file(host_port))
 
         try:
             from pyngrok import conf as ngrok_conf
@@ -187,17 +303,39 @@ class NgrokProvider(ExportProvider):
             else:
                 logger.info(f"Using {token_source}")
 
+            used_count = self._used_token_counts().get(token_id, 0)
+            logger.info(
+                "Ngrok token sessions for %s: %s/%s before start",
+                token_source,
+                used_count,
+                self._max_sessions_per_token(),
+            )
+
             env = os.environ.copy()
 
             if token:
                 env["NGROK_AUTHTOKEN"] = token
+                env.pop("NGROK_CONFIG", None)
+
+            token_config = self._write_token_config(host_port, token, token_id)
+            if token_config:
+                logger.info(f"Using ngrok config: {token_config}")
 
             cmd = [
                 str(ngrok_path),
+            ]
+
+            if token_config:
+                cmd.extend([
+                    "--config",
+                    str(token_config),
+                ])
+
+            cmd.extend([
                 proto,
                 str(host_port),
                 "--log=stdout",
-            ]
+            ])
 
             logger.info(f"Starting ngrok: {' '.join(cmd)}")
 
@@ -235,9 +373,8 @@ class NgrokProvider(ExportProvider):
                     except Exception:
                         logs = "unable read ngrok logs"
 
-                    raise RuntimeError(
-                        f"ngrok exited unexpectedly\n{logs}"
-                    )
+                    self._delete_token_config(str(token_config) if token_config else None)
+                    raise RuntimeError(self._summarize_error(logs))
 
                 try:
                     log_file.flush()
@@ -262,6 +399,7 @@ class NgrokProvider(ExportProvider):
                 except Exception:
                     pass
 
+                self._delete_token_config(str(token_config) if token_config else None)
                 raise RuntimeError(
                     "Timed out waiting ngrok URL"
                 )
@@ -274,6 +412,7 @@ class NgrokProvider(ExportProvider):
                     "host_port": host_port,
                     "token_id": token_id,
                     "token_source": token_source,
+                    "token_config": str(token_config) if token_config else "",
                     "started_at": int(time.time()),
                 },
             )
@@ -315,7 +454,7 @@ class NgrokProvider(ExportProvider):
 
             pid = int(state.get("pid", 0))
 
-            if pid and is_pid_alive(pid):
+            if pid and self._is_ngrok_pid(pid):
 
                 if kill_process(pid):
                     stopped = True
@@ -323,6 +462,7 @@ class NgrokProvider(ExportProvider):
         delete_state_file(
             self._get_state_file(host_port)
         )
+        self._delete_token_config(str(state.get("token_config", "")) if state else "")
 
         return stopped
 
@@ -343,5 +483,5 @@ class NgrokProvider(ExportProvider):
 
         return (
             pid > 0
-            and is_pid_alive(pid)
+            and self._is_ngrok_pid(pid)
         )

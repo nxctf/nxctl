@@ -6,6 +6,7 @@ import re
 import sys
 import threading
 import time
+import logging
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Iterable, Sequence
@@ -114,7 +115,8 @@ def format_error(value: object, width: int = 180) -> str:
 
     important = [
         line for line in lines
-        if any(token in line.lower() for token in ("error", "failed", "unknown", "denied", "refused"))
+        if line.strip().lower() not in {"error:", "error"}
+        and any(token in line.lower() for token in ("error", "failed", "unknown", "denied", "refused", "limit"))
     ]
     summary = important[-1] if important else lines[0]
     first = lines[0]
@@ -187,7 +189,7 @@ def step_error(text: str) -> None:
 @contextmanager
 def spinner(label: str):
     """Small terminal spinner for long blocking operations."""
-    if not sys.stdout.isatty():
+    if not sys.stdout.isatty() or logging.getLogger().getEffectiveLevel() <= logging.INFO:
         print(f"{gray(ELLIPSIS)} {label}")
         yield
         return
@@ -277,6 +279,7 @@ def export_rows(exports: Iterable[dict], detailed: bool = False) -> list[list[ob
             exp.get("provider") or "-",
             exp.get("type") or "-",
             status_text(status),
+            exp.get("port_label") or exp.get("port") or "-",
             exp.get("url") or exp.get("endpoint") or "-",
             exp.get("pid") or "-",
         ]
@@ -289,8 +292,8 @@ def export_rows(exports: Iterable[dict], detailed: bool = False) -> list[list[ob
 def exports_table(exports: Sequence[dict], detailed: bool = False) -> str:
     if not exports:
         return gray("No active exports")
-    headers = ["", "Provider", "Type", "Status", "URL", "PID"]
-    widths = [2, 14, 8, 10, 64, 8]
+    headers = ["", "Provider", "Type", "Status", "Port", "URL", "PID"]
+    widths = [2, 14, 8, 10, 12, 64, 8]
     if detailed:
         headers.append("Created")
         widths.append(20)

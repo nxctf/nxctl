@@ -28,6 +28,13 @@ from nxctl.scripts.cli.render import (
 logger = logging.getLogger(__name__)
 
 
+def _ports_text(challenge_service, challenge) -> str:
+    ports = challenge_service.list_challenge_ports(challenge.name)
+    if ports:
+        return ", ".join(f"{p.host_port}:{p.internal_port}/{p.service_type}" for p in ports)
+    return f"{challenge.service_port}/{challenge.service_type}"
+
+
 def cmd_sync(args) -> int:
     try:
         config, challenge_service, _, _ = get_services()
@@ -42,7 +49,7 @@ def cmd_sync(args) -> int:
         challenges = challenge_service.sync_challenges(git_repo)
         print(f"{green(OK)} Synced {len(challenges)} challenges\n")
         for challenge in challenges:
-            print(f"  {BULLET} {challenge.name} ({challenge.service_type}:{challenge.service_port})")
+            print(f"  {BULLET} {challenge.name} ({_ports_text(challenge_service, challenge)})")
         print()
         return 0
     except GitError as e:
@@ -65,12 +72,13 @@ def cmd_list(args) -> int:
             return 0
 
         print(f"\n{bold('Challenges')}")
-        print(f"{'-' * 100}")
-        print(f"{'Name':28} {'Type':8} {'Port':8} {'Path'}")
-        print(f"{'-' * 100}")
+        print(f"{'-' * 124}")
+        print(f"{'Name':28} {'Primary':16} {'Ports':46} {'Path'}")
+        print(f"{'-' * 124}")
         for challenge in challenges:
-            print(f"{challenge.name:28} {challenge.service_type:8} {str(challenge.service_port):8} {challenge.path}")
-        print(f"{'-' * 100}\n")
+            primary = f"{challenge.service_port}/{challenge.service_type}"
+            print(f"{challenge.name:28} {primary:16} {_ports_text(challenge_service, challenge):46} {challenge.path}")
+        print(f"{'-' * 124}\n")
         return 0
     except Exception as e:
         print(f"\n{red(ERR)} List failed: {str(e)}\n")
@@ -86,18 +94,20 @@ def cmd_inspect(args) -> int:
             return 1
 
         container_port = get_container_port(config, challenge)
+        ports = challenge_service.list_challenge_ports(args.name)
+        ports_text = ", ".join(f"{p.host_port}:{p.internal_port}/{p.service_type}" for p in ports) or f"{challenge.service_port}:{container_port}/{challenge.service_type}"
         runtime = runtime_service.status(args.name)
         cooldown = runtime_service.check_restart_cooldown(args.name)
         exports = export_manager.list_exports(args.name, check_health=True)
         ttl_text, ttl_ok = ttl_remaining(runtime.expires_at)
         protocol = str(challenge.service_type or "-").upper()
-        configured_provider = (
-            runtime.tunnel_provider
-            or getattr(config, "default_tunnel", "")
-            or export_manager.default_providers_for(challenge.service_type)[0]
-        )
         base_ip = str(getattr(config, "base_ip", "") or "").strip() or "Not configured"
-        ngrok_status = green("Available") if export_manager.ngrok_available() else yellow("Unavailable")
+        base_ip_status = green(base_ip) if base_ip != "Not configured" else yellow(base_ip)
+        ngrok_status = green("Available") if export_manager.ngrok_available() else yellow("No token/config")
+        if not getattr(config, "enable_ngrok", True):
+            ngrok_status = red("Disabled")
+        localtunnel_status = green("Enabled") if getattr(config, "enable_localtunnel", True) else red("Disabled")
+        pinggy_status = green("Enabled") if getattr(config, "enable_pinggy", True) else red("Disabled")
         restart_cd = yellow(f"{format_duration(cooldown)} left") if cooldown else green("Ready")
         ttl_value = green(ttl_text) if ttl_ok and ttl_text != "-" else red("Expired") if ttl_text != "-" else "-"
 
@@ -109,6 +119,7 @@ def cmd_inspect(args) -> int:
                 ("Type", protocol),
                 ("Internal Port", container_port),
                 ("Host Port", challenge.service_port),
+                ("Ports", ports_text),
                 ("Enabled", green("Yes") if challenge.enabled else red("No")),
                 ("Created", format_datetime(challenge.created_at)),
             ],
@@ -117,9 +128,10 @@ def cmd_inspect(args) -> int:
         print(panel(
             "Configuration",
             [
-                ("Tunnel Provider", configured_provider or "-"),
-                ("Base IP", base_ip),
+                ("Base IP", base_ip_status),
                 ("Ngrok", ngrok_status),
+                ("Localtunnel", localtunnel_status),
+                ("Pinggy", pinggy_status),
                 ("Auto Export", green("Enabled")),
                 ("Auto Heal", green("Enabled") if getattr(config, "auto_heal_exports", False) else red("Disabled")),
             ],

@@ -3,10 +3,10 @@
 import logging
 import os
 import time
+from types import SimpleNamespace
 from nxctl.core.constants import PROTOCOL_TCP, EXPORT_PROVIDER_PINGGY, EXPORT_PROVIDER_LOCALTUNNEL
 from nxctl.scripts.cli.base import (
     get_services,
-    get_container_port,
     green,
     red,
     yellow,
@@ -63,32 +63,66 @@ def _start_with_fallback(export_manager, challenge_name: str, challenge, provide
     raise RuntimeError("No export provider available")
 
 
-def _start_available_exports(export_manager, challenge_name: str, challenge) -> tuple[list[dict], list[dict]]:
+def _port_summary(ports) -> str:
+    if not ports:
+        return "-"
+    return ", ".join(f"{port.host_port}:{port.internal_port}/{port.service_type}" for port in ports)
+
+
+def _start_available_exports(export_manager, challenge_name: str, challenge, ports=None) -> tuple[list[dict], list[dict]]:
     """Start every auto-discovered export while preserving default tunnel selection."""
-    return export_manager.start_available_exports(
-        challenge_name,
-        challenge,
-        default_providers=_provider_priority(challenge.service_type),
-    )
+    all_exports: list[dict] = []
+    all_failures: list[dict] = []
+    export_ports = ports or [SimpleNamespace(
+        host_port=challenge.service_port,
+        service_port=challenge.service_port,
+        service_type=challenge.service_type,
+    )]
+
+    for port in export_ports:
+        port_challenge = SimpleNamespace(
+            service_port=int(getattr(port, "host_port", getattr(port, "service_port", challenge.service_port))),
+            service_type=str(getattr(port, "service_type", challenge.service_type)),
+        )
+        exports, failures = export_manager.start_available_exports(
+            challenge_name,
+            port_challenge,
+            default_providers=_provider_priority(port_challenge.service_type),
+        )
+        all_exports.extend(exports)
+        all_failures.extend(failures)
+
+    return all_exports, all_failures
 
 
 def _stop_challenge_completely(name: str, challenge_service, runtime_service, export_manager):
     """Stop both exports and container for a challenge."""
     challenge = challenge_service.get_challenge(name)
     if challenge:
-        # 1. Stop exports (kills process-based tunnels, ignores direct exports)
+        # Mark stopped first so the daemon cannot auto-heal tunnels during down.
+        try:
+            runtime_service.mark_stopped(name)
+        except Exception as e:
+            logger.warning(f"Failed to pre-mark runtime stopped for {name}: {e}")
+
+        # 1. Stop container
+        try:
+            runtime_service.stop(name)
+            logger.info(f"Stopped container for {name}")
+        except Exception as e:
+            logger.error(f"Failed to stop container for {name}: {e}")
+
+        # 2. Stop exports after runtime is no longer considered running.
         for export in export_manager.stop_all_exports(name):
             if export.get("error"):
                 logger.error(f"Failed to stop export {export['provider']} for {name}: {export['error']}")
             else:
                 logger.info(f"Stopped {export['provider']} export for {name}")
 
-        # 2. Stop container
-        try:
-            runtime_service.stop(name)
-            logger.info(f"Stopped container for {name}")
-        except Exception as e:
-            logger.error(f"Failed to stop container for {name}: {e}")
+        # One more pass catches tunnels created by an overlapping daemon tick.
+        for export in export_manager.stop_all_exports(name):
+            if export.get("error"):
+                logger.error(f"Failed to stop late export {export['provider']} for {name}: {export['error']}")
     else:
         # Fallback if challenge not in DB but maybe runtime exists
         try:
@@ -111,14 +145,15 @@ def cmd_up(args) -> int:
         with spinner("Starting Docker container"):
             runtime_service.start(args.name)
         challenge = challenge_service.get_challenge(args.name) or challenge
+        ports = challenge_service.list_challenge_ports(args.name)
         runtime = runtime_service.status(args.name)
-        step_ok(f"Allocated host port: {challenge.service_port}")
+        step_ok(f"Allocated host ports: {_port_summary(ports)}")
         step_ok("Docker container started")
         ttl_text, _ = ttl_remaining(runtime.expires_at)
         step_ok(f"TTL registered: {ttl_text}")
 
         with spinner("Creating exports"):
-            exports, failures = _start_available_exports(export_manager, args.name, challenge)
+            exports, failures = _start_available_exports(export_manager, args.name, challenge, ports)
 
         print()
         print(box("Exports", exports_table(exports), width=116))
@@ -214,7 +249,8 @@ def cmd_restart(args) -> int:
 
         # Re-start provider if needed
         if do_provider:
-            exports, failures = _start_available_exports(export_manager, args.name, challenge)
+            ports = challenge_service.list_challenge_ports(args.name)
+            exports, failures = _start_available_exports(export_manager, args.name, challenge, ports)
             for export in exports:
                 print(f"{green(f'  {BULLET} Export restarted via')} {export['provider']} ({export['type']})")
                 print(f"    URL: {export['url']}")
@@ -282,8 +318,8 @@ def cmd_status(args) -> int:
             for challenge in challenges:
                 runtime = runtime_service.status(challenge.name)
                 exports = export_manager.list_exports(challenge.name, check_health=True)
-                container_port = get_container_port(config, challenge)
-                port_mapping = f"{challenge.service_port}:{container_port}"
+                ports = challenge_service.list_challenge_ports(challenge.name)
+                port_mapping = _port_summary(ports)
                 ttl_text, ttl_ok = ttl_remaining(runtime.expires_at)
                 ttl_col = rgreen(ttl_text) if runtime.status == "running" and ttl_ok else rred("Expired") if runtime.status == "running" else "-"
                 challenge_col = f"{rgreen(OK) if runtime.status == 'running' else rred(ERR)} {challenge.name}"
@@ -313,7 +349,7 @@ def cmd_status(args) -> int:
                 print(table(
                     ["Challenge", "Runtime", "Port", "TTL", "Provider", "Type", "Export", "PID", "URL"],
                     status_rows,
-                    [28, 10, 12, 12, 14, 8, 10, 8, 58],
+                    [28, 10, 26, 12, 14, 8, 10, 8, 58],
                 ))
             print()
 
@@ -417,7 +453,10 @@ def cmd_daemon(args) -> int:
                     for name in running_names:
                         try:
                             challenge = challenge_service.get_challenge(name)
-                            _start_available_exports(export_manager, name, challenge)
+                            if runtime_service.status(name).status != "running":
+                                continue
+                            ports = challenge_service.list_challenge_ports(name)
+                            _start_available_exports(export_manager, name, challenge, ports)
                         except Exception as heal_err:
                             print(f"{red('[daemon]')} Heal failed for {name}: {heal_err}")
 

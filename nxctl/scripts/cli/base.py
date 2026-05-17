@@ -18,6 +18,14 @@ logger = logging.getLogger(__name__)
 
 def get_container_port(config, challenge) -> str:
     """Helper to extract container port using core utilities."""
+    try:
+        service = ChallengeService(config.db_file)
+        ports = service.list_challenge_ports(challenge.name)
+        if ports:
+            return str(ports[0].internal_port)
+    except Exception:
+        pass
+
     challenge_dir = get_challenge_dir(challenge.path)
     docker_compose = challenge_dir / "docker-compose.yml"
     return str(extract_port_from_compose(docker_compose))

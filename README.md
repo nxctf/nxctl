@@ -176,7 +176,9 @@ access_token: ${GITHUB_TOKEN}
 
 db_file: ./data/nxctl.db
 base_ip: "203.0.113.10"
-default_tunnel: localtunnel
+enable_ngrok: true
+enable_localtunnel: true
+enable_pinggy: true
 
 default_ttl_minutes: 15
 extend_time_minutes: 10

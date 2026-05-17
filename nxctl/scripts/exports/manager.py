@@ -90,7 +90,7 @@ class ExportManager:
 
     def start_direct_export(self, challenge_name: str, host_port: int, protocol: str) -> dict:
         """Record a direct base_ip export when configured."""
-        base_ip = str(getattr(self.config, "base_ip", "") or "").strip().rstrip("/")
+        base_ip = self._configured_base_ip()
         if not base_ip:
             raise RuntimeError("base_ip is not configured")
 
@@ -129,7 +129,7 @@ class ExportManager:
         host_port = int(challenge.service_port)
         protocol = challenge.service_type
 
-        if str(getattr(self.config, "base_ip", "") or "").strip():
+        if self._configured_base_ip():
             attempted.add(EXPORT_PROVIDER_BASE_IP)
             try:
                 exports.append(self.start_direct_export(challenge_name, host_port, protocol))
@@ -183,7 +183,7 @@ class ExportManager:
     def stop_export(self, challenge_name: str, provider_name: str, host_port: int = 0) -> bool:
         """Stop an export."""
         if provider_name == EXPORT_PROVIDER_BASE_IP:
-            self._mark_export_inactive(challenge_name, provider_name)
+            self._mark_export_inactive(challenge_name, provider_name, host_port)
             return True
 
         provider = self.get_provider(provider_name)
@@ -194,14 +194,14 @@ class ExportManager:
         stopped = provider.stop(challenge_name, host_port)
 
         # Mark as inactive in database
-        self._mark_export_inactive(challenge_name, provider_name)
+        self._mark_export_inactive(challenge_name, provider_name, host_port)
 
         return stopped
 
     def stop_all_exports(self, challenge_name: str) -> list[dict]:
         """Stop every active export for a challenge."""
         stopped_exports = []
-        for export in self.list_exports(challenge_name, check_health=False):
+        for export in self.list_exports(challenge_name, check_health=False, latest_only=False):
             provider_name = export["provider"]
             try:
                 stopped = self.stop_export(
@@ -283,40 +283,75 @@ class ExportManager:
 
         return provider.is_pid_running(pid)
 
-    def list_exports(self, challenge_name: Optional[str] = None, check_health: bool = True) -> list:
+    def list_exports(
+        self,
+        challenge_name: Optional[str] = None,
+        check_health: bool = True,
+        latest_only: bool = True,
+    ) -> list:
         """List all active exports."""
+        self._deactivate_direct_exports_if_unconfigured()
         self._backfill_direct_exports(challenge_name)
 
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
 
         try:
+            latest_clause = ""
+            if latest_only:
+                latest_clause = """
+                    AND ri.id = (
+                        SELECT id
+                        FROM runtime_instances
+                        WHERE challenge_id = c.id
+                        ORDER BY created_at DESC, id DESC
+                        LIMIT 1
+                    )
+                """
+
             if challenge_name:
-                cursor.execute("""
-                    SELECT ce.id, c.name, ri.status AS runtime_status, ce.provider, ce.export_type, ce.protocol, ce.target_port, ce.public_endpoint, ce.pid, ce.status, ce.created_at
+                cursor.execute(f"""
+                    SELECT ce.id, c.name, ri.status AS runtime_status, cp.internal_port,
+                           ce.provider, ce.export_type, ce.protocol, ce.target_port,
+                           ce.public_endpoint, ce.pid, ce.status, ce.created_at
                     FROM challenge_exports ce
                     JOIN runtime_instances ri ON ce.runtime_id = ri.id
                     JOIN challenges c ON c.id = ri.challenge_id
+                    LEFT JOIN challenge_ports cp
+                      ON cp.challenge_id = c.id
+                     AND cp.host_port = ce.target_port
                     WHERE c.name = ? AND ce.status = 'active'
+                    {latest_clause}
                     ORDER BY CASE WHEN ce.provider = 'base_ip' THEN 0 ELSE 1 END, ce.created_at ASC
                 """, (challenge_name,))
             else:
-                cursor.execute("""
-                    SELECT ce.id, c.name, ri.status AS runtime_status, ce.provider, ce.export_type, ce.protocol, ce.target_port, ce.public_endpoint, ce.pid, ce.status, ce.created_at
+                cursor.execute(f"""
+                    SELECT ce.id, c.name, ri.status AS runtime_status, cp.internal_port,
+                           ce.provider, ce.export_type, ce.protocol, ce.target_port,
+                           ce.public_endpoint, ce.pid, ce.status, ce.created_at
                     FROM challenge_exports ce
                     JOIN runtime_instances ri ON ce.runtime_id = ri.id
                     JOIN challenges c ON c.id = ri.challenge_id
+                    LEFT JOIN challenge_ports cp
+                      ON cp.challenge_id = c.id
+                     AND cp.host_port = ce.target_port
                     WHERE ce.status = 'active'
+                    {latest_clause}
                     ORDER BY c.name ASC, CASE WHEN ce.provider = 'base_ip' THEN 0 ELSE 1 END, ce.created_at ASC
                 """)
 
             exports = []
             for row in cursor.fetchall():
+                if row["provider"] == EXPORT_PROVIDER_BASE_IP and not self._configured_base_ip():
+                    continue
+
                 export_data = {
                     'id': row['id'],
                     'challenge': row['name'],
                     'id': row['id'],
                     'runtime_status': row['runtime_status'],
+                    'internal_port': row['internal_port'],
+                    'port_label': f"{row['target_port']}:{row['internal_port']}" if row['internal_port'] else str(row['target_port']),
                     'created_at': row['created_at'],
                 } | self._export_dict(
                     challenge_name=row['name'],
@@ -344,8 +379,8 @@ class ExportManager:
             close_db_connection(conn)
 
     def reconcile_exports(self) -> int:
-        """Check all active exports and mark those with dead PIDs as inactive."""
-        exports = self.list_exports(check_health=True)
+        """Check active exports and mark dead/stopped-runtime records inactive."""
+        exports = self.list_exports(check_health=True, latest_only=False)
         dead_count = 0
 
         conn = get_db_connection(self.db_path)
@@ -353,7 +388,25 @@ class ExportManager:
 
         try:
             for export in exports:
-                if export['status'] == 'dead':
+                if export.get("runtime_status") != "running":
+                    if export.get("provider") != EXPORT_PROVIDER_BASE_IP:
+                        try:
+                            provider = self.get_provider(export["provider"])
+                            if provider:
+                                provider.stop(
+                                    export.get("challenge") or "",
+                                    int(export.get("port") or 0),
+                                )
+                        except Exception as exc:
+                            logger.warning(
+                                "Failed stopping orphaned %s export for %s: %s",
+                                export.get("provider"),
+                                export.get("challenge"),
+                                exc,
+                            )
+                    cursor.execute("UPDATE challenge_exports SET status = 'inactive' WHERE id = ?", (export['id'],))
+                    dead_count += 1
+                elif export['status'] == 'dead':
                     cursor.execute("UPDATE challenge_exports SET status = 'inactive' WHERE id = ?", (export['id'],))
                     dead_count += 1
 
@@ -446,6 +499,14 @@ class ExportManager:
         }.get(provider_name)
         return bool(getattr(self.config, attr, True)) if attr else True
 
+    def _configured_base_ip(self) -> str:
+        base_ip = str(getattr(self.config, "base_ip", "") or "").strip().rstrip("/")
+        if not base_ip:
+            return ""
+        if base_ip.lower() in {"none", "null", "false", "off", "-", "0"}:
+            return ""
+        return base_ip
+
     def _direct_endpoint(self, base_ip: str, host_port: int, protocol: str) -> str:
         base_ip = str(base_ip or "").strip().rstrip("/")
         if protocol == PROTOCOL_TCP:
@@ -457,7 +518,7 @@ class ExportManager:
 
     def _backfill_direct_exports(self, challenge_name: Optional[str] = None) -> None:
         """Ensure running challenges show direct base_ip exports in status/export views."""
-        base_ip = str(getattr(self.config, "base_ip", "") or "").strip().rstrip("/")
+        base_ip = self._configured_base_ip()
         if not base_ip:
             return
 
@@ -471,7 +532,7 @@ class ExportManager:
                 params.append(challenge_name)
 
             cursor.execute(f"""
-                SELECT ri.id AS runtime_id, c.name, c.service_port, c.service_type
+                SELECT ri.id AS runtime_id, c.id AS challenge_id, c.name, c.service_port, c.service_type
                 FROM challenges c
                 JOIN runtime_instances ri ON ri.id = (
                     SELECT id
@@ -486,33 +547,60 @@ class ExportManager:
 
             rows = cursor.fetchall()
             for row in rows:
-                cursor.execute("""
-                    SELECT id
-                    FROM challenge_exports
-                    WHERE runtime_id = ?
-                    AND provider = ?
-                    AND status = 'active'
-                    LIMIT 1
-                """, (row["runtime_id"], EXPORT_PROVIDER_BASE_IP))
-                if cursor.fetchone():
-                    continue
+                port_rows = self._export_ports_for_challenge(cursor, int(row["challenge_id"]))
+                if not port_rows:
+                    port_rows = [{
+                        "host_port": row["service_port"],
+                        "service_type": row["service_type"],
+                    }]
 
-                endpoint = self._direct_endpoint(base_ip, int(row["service_port"]), row["service_type"])
-                cursor.execute("""
-                    INSERT INTO challenge_exports
-                    (runtime_id, provider, export_type, protocol, target_port, public_endpoint, pid, status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    row["runtime_id"],
-                    EXPORT_PROVIDER_BASE_IP,
-                    "direct",
-                    row["service_type"],
-                    int(row["service_port"]),
-                    endpoint,
-                    None,
-                    "active",
-                ))
+                for port in port_rows:
+                    host_port = int(port["host_port"])
+                    service_type = str(port["service_type"])
+                    cursor.execute("""
+                        SELECT id
+                        FROM challenge_exports
+                        WHERE runtime_id = ?
+                        AND provider = ?
+                        AND target_port = ?
+                        AND status = 'active'
+                        LIMIT 1
+                    """, (row["runtime_id"], EXPORT_PROVIDER_BASE_IP, host_port))
+                    if cursor.fetchone():
+                        continue
 
+                    endpoint = self._direct_endpoint(base_ip, host_port, service_type)
+                    cursor.execute("""
+                        INSERT INTO challenge_exports
+                        (runtime_id, provider, export_type, protocol, target_port, public_endpoint, pid, status)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        row["runtime_id"],
+                        EXPORT_PROVIDER_BASE_IP,
+                        "direct",
+                        service_type,
+                        host_port,
+                        endpoint,
+                        None,
+                        "active",
+                    ))
+
+            conn.commit()
+        finally:
+            close_db_connection(conn)
+
+    def _deactivate_direct_exports_if_unconfigured(self) -> None:
+        if self._configured_base_ip():
+            return
+
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                UPDATE challenge_exports
+                SET status = 'inactive'
+                WHERE provider = ? AND status = 'active'
+            """, (EXPORT_PROVIDER_BASE_IP,))
             conn.commit()
         finally:
             close_db_connection(conn)
@@ -592,13 +680,28 @@ class ExportManager:
             "error": str(exc),
         }
 
-    def _mark_export_inactive(self, challenge_name: str, provider: str) -> None:
+    def _export_ports_for_challenge(self, cursor, challenge_id: int) -> list[dict]:
+        cursor.execute("""
+            SELECT host_port, service_type
+            FROM challenge_ports
+            WHERE challenge_id = ?
+            ORDER BY is_primary DESC, id ASC
+        """, (challenge_id,))
+        return [dict(row) for row in cursor.fetchall()]
+
+    def _mark_export_inactive(self, challenge_name: str, provider: str, host_port: int = 0) -> None:
         """Mark export records as inactive."""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
 
         try:
-            cursor.execute("""
+            port_filter = ""
+            params: list[Any] = [provider, challenge_name]
+            if host_port:
+                port_filter = "AND target_port = ?"
+                params.append(host_port)
+
+            cursor.execute(f"""
                 UPDATE challenge_exports
                 SET status = 'inactive'
                 WHERE provider = ? AND runtime_id IN (
@@ -606,7 +709,8 @@ class ExportManager:
                     JOIN challenges c ON c.id = ri.challenge_id
                     WHERE c.name = ?
                 ) AND status = 'active'
-            """, (provider, challenge_name))
+                {port_filter}
+            """, params)
 
             conn.commit()
 

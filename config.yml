@@ -7,9 +7,8 @@ access_token: ${GITHUB_TOKEN}
 cache_dir: ./data/chall
 build_dir: ./data/build
 db_file: ./data/nxctl.db
-base_ip: "192.168.56.101"
 
-default_tunnel: localtunnel
+# base_ip: "192.168.56.101"
 enable_ngrok: true
 enable_localtunnel: true
 enable_pinggy: true
@@ -29,5 +28,9 @@ ngrok_tokens:
   - ${NGROK_TOKEN_4}
   - ${NGROK_TOKEN_5}
   - ${NGROK_TOKEN_6}
+  - ${NGROK_TOKEN_7}
+  - ${NGROK_TOKEN_8}
+  - ${NGROK_TOKEN_9}
+  - ${NGROK_TOKEN_10}
 
 pinggy_token: ${PINGGY_TOKEN}

@@ -8,11 +8,13 @@ cache_dir: ./data/chall
 build_dir: ./data/build
 db_file: ./data/nxctl.db
 base_ip: ""
-
-default_tunnel: localtunnel
 enable_ngrok: true
 enable_localtunnel: true
 enable_pinggy: true
+ngrok_max_sessions_per_token: 3
+local_port_start: 40000
+local_port_end: 49999
+randomize_local_ports: true
 
 # TTL settings
 default_ttl_minutes: 15
@@ -22,5 +24,14 @@ extend_cooldown_seconds: 30
 
 ngrok_tokens:
   - ${NGROK_TOKEN_1}
+  - ${NGROK_TOKEN_2}
+  - ${NGROK_TOKEN_3}
+  # - ${NGROK_TOKEN_4}
+  # - ${NGROK_TOKEN_5}
+  # - ${NGROK_TOKEN_6}
+  # - ${NGROK_TOKEN_7}
+  # - ${NGROK_TOKEN_8}
+  # - ${NGROK_TOKEN_9}
+  # - ${NGROK_TOKEN_10}
 
 pinggy_token: ${PINGGY_TOKEN}
