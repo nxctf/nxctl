@@ -25,6 +25,7 @@ class Config(BaseModel):
     cache_dir: str = "./data/chall"
     build_dir: str = "./data/build"
     db_file: str = "./data/nxctl.db"
+    base_ip: str = ""
 
     ngrok_tokens: list[str] = Field(default_factory=list)
     pinggy_token: str = ""

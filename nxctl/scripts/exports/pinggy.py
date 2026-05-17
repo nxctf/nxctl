@@ -7,9 +7,9 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from src.scripts.exports.base import ExportProvider, ExportResult
-from src.core.utils import is_pid_alive, load_state_file, save_state_file, delete_state_file, kill_process
-from src.core.constants import PROTOCOL_TCP
+from nxctl.scripts.exports.base import ExportProvider, ExportResult
+from nxctl.core.utils import is_pid_alive, load_state_file, save_state_file, delete_state_file, kill_process
+from nxctl.core.constants import PROTOCOL_TCP
 
 logger = logging.getLogger(__name__)
 

@@ -7,11 +7,10 @@ import re
 import psutil
 import os
 from pathlib import Path
-from typing import Optional
 
-from src.scripts.exports.base import ExportProvider, ExportResult
-from src.core.utils import is_pid_alive, load_state_file, save_state_file, delete_state_file, kill_process
-from src.core.constants import PROTOCOL_HTTP
+from nxctl.scripts.exports.base import ExportProvider, ExportResult
+from nxctl.core.utils import is_pid_alive, load_state_file, save_state_file, delete_state_file, kill_process
+from nxctl.core.constants import PROTOCOL_HTTP
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +33,10 @@ class LocaltunnelProvider(ExportProvider):
     def _get_state_file(self, host_port: int) -> Path:
         """Get state file path for a host port."""
         return self.state_dir / f"localtunnel_{host_port}.json"
+
+    def _get_log_file(self, host_port: int) -> Path:
+        """Get log file path for a host port."""
+        return self.state_dir / f"localtunnel_{host_port}.log"
 
     def _extract_url(self, text: str) -> str:
         """Extract URL from localtunnel output."""
@@ -96,42 +99,67 @@ class LocaltunnelProvider(ExportProvider):
         except FileNotFoundError:
             raise RuntimeError("localtunnel (lt) not installed. Run 'npm install -g localtunnel'")
 
-        # Start localtunnel process
+        # Start localtunnel process. Keep stdout/stderr attached to a log file so
+        # the detached process does not die later from writing to a closed pipe.
         try:
-            proc = subprocess.Popen(
-                ["lt", "--port", str(host_port)],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                start_new_session=True,
-            )
+            log_path = self._get_log_file(host_port)
+            log_file = open(log_path, "w", encoding="utf-8")
+            try:
+                proc = subprocess.Popen(
+                    ["lt", "--port", str(host_port)],
+                    stdin=subprocess.DEVNULL,
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    start_new_session=True,
+                )
+            finally:
+                log_file.close()
 
-            if proc.stdout is None:
-                raise RuntimeError("Failed to read localtunnel output")
-
-            # Read output to get URL
+            # Read the log to get URL
             deadline = time.time() + 10
+            position = 0
             while time.time() < deadline:
-                line = proc.stdout.readline()
-                if not line:
-                    if proc.poll() is not None:
-                        raise RuntimeError("localtunnel process exited without returning a URL")
-                    time.sleep(0.1)
-                    continue
+                if proc.poll() is not None:
+                    content = log_path.read_text(encoding="utf-8", errors="ignore") if log_path.exists() else ""
+                    public_url = self._extract_url(content)
+                    if public_url:
+                        save_state_file(
+                            self._get_state_file(host_port),
+                            {
+                                "pid": proc.pid,
+                                "public_url": public_url,
+                                "host_port": host_port,
+                                "log_file": str(log_path),
+                                "started_at": int(time.time()),
+                            }
+                        )
+                        logger.info(f"Localtunnel started: {public_url}")
+                        return ExportResult(url=public_url, pid=proc.pid)
+                    raise RuntimeError(f"localtunnel process exited without returning a URL: {content.strip()}")
 
-                public_url = self._extract_url(line)
-                if public_url:
-                    save_state_file(
-                        self._get_state_file(host_port),
-                        {
-                            "pid": proc.pid,
-                            "public_url": public_url,
-                            "host_port": host_port,
-                            "started_at": int(time.time()),
-                        }
-                    )
-                    logger.info(f"Localtunnel started: {public_url}")
-                    return ExportResult(url=public_url, pid=proc.pid)
+                if log_path.exists():
+                    with open(log_path, "r", encoding="utf-8", errors="ignore") as fh:
+                        fh.seek(position)
+                        content = fh.read()
+                        position = fh.tell()
+
+                    public_url = self._extract_url(content)
+                    if public_url:
+                        save_state_file(
+                            self._get_state_file(host_port),
+                            {
+                                "pid": proc.pid,
+                                "public_url": public_url,
+                                "host_port": host_port,
+                                "log_file": str(log_path),
+                                "started_at": int(time.time()),
+                            }
+                        )
+                        logger.info(f"Localtunnel started: {public_url}")
+                        return ExportResult(url=public_url, pid=proc.pid)
+
+                time.sleep(0.2)
 
             raise RuntimeError("Timed out waiting for localtunnel URL")
 
@@ -166,4 +194,13 @@ class LocaltunnelProvider(ExportProvider):
         pid = int(state.get("pid", 0))
         url = state.get("public_url", "")
 
-        return pid > 0 and is_pid_alive(pid) and bool(url)
+        if not (pid > 0 and is_pid_alive(pid) and bool(url)):
+            return False
+
+        try:
+            proc = psutil.Process(pid)
+            cmdline = proc.cmdline()
+            command = " ".join(cmdline).lower()
+            return "lt" in command and "--port" in cmdline and str(host_port) in cmdline
+        except Exception:
+            return False

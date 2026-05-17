@@ -51,6 +51,7 @@ def init_database(db_path: str) -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             runtime_id INTEGER NOT NULL,
             provider TEXT NOT NULL,
+            export_type TEXT DEFAULT 'tunnel',
             protocol TEXT,
             target_port INTEGER,
             public_endpoint TEXT,
@@ -66,6 +67,13 @@ def init_database(db_path: str) -> None:
     # Migration: Add pid column if it doesn't exist
     try:
         cursor.execute("ALTER TABLE challenge_exports ADD COLUMN pid INTEGER")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+    # Migration: Add export_type column for direct vs tunnel exports
+    try:
+        cursor.execute("ALTER TABLE challenge_exports ADD COLUMN export_type TEXT DEFAULT 'tunnel'")
         conn.commit()
     except sqlite3.OperationalError:
         pass

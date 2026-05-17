@@ -40,6 +40,7 @@ class ChallengeExport:
     id: Optional[int] = None
     runtime_id: int = 0
     provider: str = ""
+    export_type: str = "tunnel"
     protocol: str = ""
     target_port: int = 0
     public_endpoint: str = ""

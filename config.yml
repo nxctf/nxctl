@@ -7,6 +7,7 @@ access_token: ${GITHUB_TOKEN}
 cache_dir: ./data/chall
 build_dir: ./data/build
 db_file: ./data/nxctl.db
+base_ip: "192.168.56.101"
 
 default_tunnel: localtunnel
 enable_ngrok: true

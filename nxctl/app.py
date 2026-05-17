@@ -40,7 +40,7 @@ if env_path.exists():
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
     format="%(message)s"
 )
 logger = logging.getLogger(__name__)
@@ -69,6 +69,19 @@ from nxctl.scripts.cli.exports import (
 )
 
 
+def add_debug_flag(parser: argparse.ArgumentParser, *, default=False) -> None:
+    """Add a debug/verbose flag that can be used before or after commands."""
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        "--debug",
+        dest="debug",
+        action="store_true",
+        default=default,
+        help="Show raw debug logs",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build flat command parser."""
     parser = argparse.ArgumentParser(
@@ -86,22 +99,27 @@ Examples:
   nxctl unexport web/sqli         Stop all exports
         """.strip()
     )
+    add_debug_flag(parser, default=False)
 
     subparsers = parser.add_subparsers(dest="command", help="Commands")
 
     # ======== DATA MANAGEMENT ========
     sync_cmd = subparsers.add_parser("sync", help="Sync challenges from repository")
+    add_debug_flag(sync_cmd, default=argparse.SUPPRESS)
     sync_cmd.set_defaults(func=cmd_sync)
 
     list_cmd = subparsers.add_parser("list", help="List all challenges")
+    add_debug_flag(list_cmd, default=argparse.SUPPRESS)
     list_cmd.add_argument("-a", "--all", action="store_true", help="Show full details")
     list_cmd.set_defaults(func=cmd_list)
 
     inspect_cmd = subparsers.add_parser("inspect", help="Show challenge details")
+    add_debug_flag(inspect_cmd, default=argparse.SUPPRESS)
     inspect_cmd.add_argument("name", help="Challenge name")
     inspect_cmd.set_defaults(func=cmd_inspect)
 
     add_cmd = subparsers.add_parser("add", help="Add challenge manually")
+    add_debug_flag(add_cmd, default=argparse.SUPPRESS)
     add_cmd.add_argument("name", help="Challenge name (e.g., web/sqli)")
     add_cmd.add_argument("path", help="Path in repo (e.g., web/sqli)")
     add_cmd.add_argument("port", type=int, help="Service port")
@@ -109,34 +127,42 @@ Examples:
     add_cmd.set_defaults(func=cmd_add)
 
     remove_cmd = subparsers.add_parser("remove", help="Remove challenge")
+    add_debug_flag(remove_cmd, default=argparse.SUPPRESS)
     remove_cmd.add_argument("name", help="Challenge name")
     remove_cmd.set_defaults(func=cmd_remove)
 
     # ======== LIFECYCLE ========
     up_cmd = subparsers.add_parser("up", help="Build + start + auto-export")
+    add_debug_flag(up_cmd, default=argparse.SUPPRESS)
     up_cmd.add_argument("name", help="Challenge name")
     up_cmd.set_defaults(func=cmd_up)
 
     down_cmd = subparsers.add_parser("down", help="Stop container + exports")
-    down_cmd.add_argument("name", help="Challenge name")
+    add_debug_flag(down_cmd, default=argparse.SUPPRESS)
+    down_cmd.add_argument("name", nargs="?", help="Challenge name")
+    down_cmd.add_argument("--all", action="store_true", help="Stop all running challenges and tunnel processes")
     down_cmd.set_defaults(func=cmd_down)
 
     restart_cmd = subparsers.add_parser("restart", help="Restart (down + up)")
+    add_debug_flag(restart_cmd, default=argparse.SUPPRESS)
     restart_cmd.add_argument("name", help="Challenge name")
     restart_cmd.add_argument("--container", action="store_true", help="Restart only the docker container")
     restart_cmd.add_argument("--provider", action="store_true", help="Restart only the tunnel provider")
     restart_cmd.set_defaults(func=cmd_restart)
 
     status_cmd = subparsers.add_parser("status", help="Show running challenges + exports")
+    add_debug_flag(status_cmd, default=argparse.SUPPRESS)
     status_cmd.add_argument("name", nargs="?", help="Optional challenge name filter")
     status_cmd.add_argument("-w", "--watch", action="store_true", help="Watch status in real-time (every 15s)")
     status_cmd.set_defaults(func=cmd_status)
 
     extend_cmd = subparsers.add_parser("extend", help="Extend challenge runtime")
+    add_debug_flag(extend_cmd, default=argparse.SUPPRESS)
     extend_cmd.add_argument("name", help="Challenge name")
     extend_cmd.set_defaults(func=cmd_extend)
 
     daemon_cmd = subparsers.add_parser("daemon", help="Run background monitor daemon")
+    add_debug_flag(daemon_cmd, default=argparse.SUPPRESS)
     daemon_cmd.add_argument("--interval", type=int, help="Check interval in seconds")
     daemon_cmd.add_argument("--with-api", action="store_true", help="Also start the Web API server")
     daemon_cmd.add_argument("--host", default="0.0.0.0", help="API listen host")
@@ -144,21 +170,25 @@ Examples:
     daemon_cmd.set_defaults(func=cmd_daemon)
 
     api_cmd = subparsers.add_parser("api", help="Run Web API server")
+    add_debug_flag(api_cmd, default=argparse.SUPPRESS)
     api_cmd.add_argument("--host", default="0.0.0.0", help="Listen host")
     api_cmd.add_argument("--port", type=int, default=8000, help="Listen port")
     api_cmd.set_defaults(func=cmd_api)
 
     # ======== EXPORT MANAGEMENT ========
     export_cmd = subparsers.add_parser("export", help="Manual tunnel, or auto-pick if provider omitted")
+    add_debug_flag(export_cmd, default=argparse.SUPPRESS)
     export_cmd.add_argument("target", help="Challenge name, or provider name if followed by a challenge name")
     export_cmd.add_argument("name", nargs="?", help="Challenge name when provider is specified")
     export_cmd.set_defaults(func=cmd_export)
 
     unexport_cmd = subparsers.add_parser("unexport", help="Stop all exports for a challenge")
+    add_debug_flag(unexport_cmd, default=argparse.SUPPRESS)
     unexport_cmd.add_argument("name", help="Challenge name")
     unexport_cmd.set_defaults(func=cmd_unexport)
 
     exports_cmd = subparsers.add_parser("exports", help="List active exports/tunnels")
+    add_debug_flag(exports_cmd, default=argparse.SUPPRESS)
     exports_cmd.add_argument("--all", action="store_true", help="Show all history")
     exports_cmd.set_defaults(func=cmd_exports)
 
@@ -169,6 +199,8 @@ def main():
     """Main entry point."""
     parser = build_parser()
     args = parser.parse_args()
+    if getattr(args, "debug", False) or os.getenv("NXCTL_DEBUG"):
+        logging.getLogger().setLevel(logging.INFO)
 
     if not args.command:
         parser.print_help()
@@ -181,10 +213,10 @@ def main():
             parser.print_help()
             return 0
     except KeyboardInterrupt:
-        print("\n✗ Cancelled by user")
+        print("\nCancelled by user")
         return 130
     except Exception as e:
-        print(f"\n✗ Error: {str(e)}")
+        print(f"\nError: {str(e)}")
         logger.exception("Unhandled exception:")
         return 1
 

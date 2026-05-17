@@ -13,6 +13,22 @@ from nxctl.scripts.cli.base import (
     blue,
     bold,
 )
+from nxctl.scripts.cli.render import (
+    BULLET,
+    ERR,
+    OK,
+    box,
+    exports_table,
+    format_error,
+    green as rgreen,
+    red as rred,
+    spinner,
+    status_text,
+    step_ok,
+    step_warn,
+    table,
+    ttl_remaining,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,18 +63,25 @@ def _start_with_fallback(export_manager, challenge_name: str, challenge, provide
     raise RuntimeError("No export provider available")
 
 
+def _start_available_exports(export_manager, challenge_name: str, challenge) -> tuple[list[dict], list[dict]]:
+    """Start every auto-discovered export while preserving default tunnel selection."""
+    return export_manager.start_available_exports(
+        challenge_name,
+        challenge,
+        default_providers=_provider_priority(challenge.service_type),
+    )
+
+
 def _stop_challenge_completely(name: str, challenge_service, runtime_service, export_manager):
     """Stop both exports and container for a challenge."""
     challenge = challenge_service.get_challenge(name)
     if challenge:
-        # 1. Stop exports (kills PIDs)
-        exports = export_manager.list_exports(name)
-        for export in exports:
-            try:
-                export_manager.stop_export(name, export["provider"], challenge.service_port)
+        # 1. Stop exports (kills process-based tunnels, ignores direct exports)
+        for export in export_manager.stop_all_exports(name):
+            if export.get("error"):
+                logger.error(f"Failed to stop export {export['provider']} for {name}: {export['error']}")
+            else:
                 logger.info(f"Stopped {export['provider']} export for {name}")
-            except Exception as e:
-                logger.error(f"Failed to stop export {export['provider']} for {name}: {e}")
 
         # 2. Stop container
         try:
@@ -70,55 +93,98 @@ def _stop_challenge_completely(name: str, challenge_service, runtime_service, ex
         # Fallback if challenge not in DB but maybe runtime exists
         try:
             runtime_service.stop(name)
-        except:
+        except Exception:
             pass
 
 
 def cmd_up(args) -> int:
     try:
-        config, challenge_service, runtime_service, export_manager = get_services()
+        _, challenge_service, runtime_service, export_manager = get_services()
+        print(f"\n{bold(f'Starting challenge: {args.name}')}\n")
+
         challenge = challenge_service.get_challenge(args.name)
         if not challenge:
-            print(f"\n{red('✗')} Challenge not found: {args.name}\n")
+            print(f"\n{red(ERR)} Challenge not found: {args.name}\n")
             return 1
+        step_ok("Loaded challenge config")
 
-        print(f"\n{blue('Starting...')}")
-        runtime_service.start(args.name)
+        with spinner("Starting Docker container"):
+            runtime_service.start(args.name)
         challenge = challenge_service.get_challenge(args.name) or challenge
-        print(f"{green('✓')} Started")
+        runtime = runtime_service.status(args.name)
+        step_ok(f"Allocated host port: {challenge.service_port}")
+        step_ok("Docker container started")
+        ttl_text, _ = ttl_remaining(runtime.expires_at)
+        step_ok(f"TTL registered: {ttl_text}")
 
-        print(f"{blue('Auto-exporting...')}")
-        provider, endpoint = _start_with_fallback(export_manager, args.name, challenge)
+        with spinner("Creating exports"):
+            exports, failures = _start_available_exports(export_manager, args.name, challenge)
 
-        print(f"{green('✓')} Exported via {provider}")
-        print(f"  Endpoint: {endpoint}")
         print()
+        print(box("Exports", exports_table(exports), width=116))
+        for failure in failures:
+            step_warn(f"{failure['provider']} export failed: {format_error(failure['error'])}")
+
+        print(f"\n{green(OK)} Challenge is running.")
+        print(f"Expires in: {ttl_text}\n")
         return 0
     except Exception as e:
-        print(f"\n{red('✗')} Up failed: {str(e)}\n")
+        print(f"\n{red(ERR)} Up failed: {str(e)}\n")
         return 1
 
 
 def cmd_down(args) -> int:
     try:
         _, challenge_service, runtime_service, export_manager = get_services()
+
+        if getattr(args, "all", False):
+            print(f"\n{blue('Stopping all challenges...')}")
+            stopped_count = 0
+
+            for challenge in challenge_service.list_challenges():
+                runtime = runtime_service.status(challenge.name)
+                exports = export_manager.list_exports(challenge.name, check_health=False)
+                if runtime.status != "running" and not exports:
+                    continue
+
+                print(f"{blue(f'  {BULLET}')} {challenge.name}")
+                _stop_challenge_completely(
+                    challenge.name,
+                    challenge_service,
+                    runtime_service,
+                    export_manager,
+                )
+                stopped_count += 1
+
+            killed = export_manager.kill_all_tunnel_processes()
+            export_manager.mark_all_exports_inactive()
+
+            print(f"{green(OK)} Down complete")
+            print(f"  Challenges handled: {stopped_count}")
+            print(f"  Tunnel processes killed: {killed}\n")
+            return 0
+
+        if not args.name:
+            print(f"\n{red(ERR)} Please provide a challenge name or use --all\n")
+            return 1
+
         print(f"\n{blue('Stopping...')}")
         _stop_challenge_completely(args.name, challenge_service, runtime_service, export_manager)
-        print(f"{green('✓')} Down complete\n")
+        print(f"{green(OK)} Down complete\n")
         return 0
     except Exception as e:
-        print(f"\n{red('✗')} Down failed: {str(e)}\n")
+        print(f"\n{red(ERR)} Down failed: {str(e)}\n")
         return 1
 
 
 def cmd_restart(args) -> int:
     try:
-        config, challenge_service, runtime_service, export_manager = get_services()
+        _, challenge_service, runtime_service, export_manager = get_services()
 
         # 1. Check Cooldown
         remaining = runtime_service.check_restart_cooldown(args.name)
         if remaining:
-            print(f"\n{red('✗')} Restart denied: Cooldown active. Please wait {remaining}s.\n")
+            print(f"\n{red(ERR)} Restart denied: Cooldown active. Please wait {remaining}s.\n")
             return 1
 
         # 2. Determine what to restart
@@ -128,17 +194,15 @@ def cmd_restart(args) -> int:
 
         challenge = challenge_service.get_challenge(args.name)
         if not challenge:
-            print(f"\n{red('✗')} Challenge not found: {args.name}\n")
+            print(f"\n{red(ERR)} Challenge not found: {args.name}\n")
             return 1
 
         print(f"\n{blue('Restarting...')}")
 
         # Handle Provider Stop
         if do_provider:
-            exports = export_manager.list_exports(args.name)
-            for export in exports:
-                export_manager.stop_export(args.name, export["provider"], challenge.service_port)
-                print(f"{blue('  • Stopped export:')} {export['provider']}")
+            for export in export_manager.stop_all_exports(args.name):
+                print(f"{blue(f'  {BULLET} Stopped export:')} {export['provider']}")
 
         # Handle Container Restart
         if do_container:
@@ -146,21 +210,24 @@ def cmd_restart(args) -> int:
             runtime_service.start(args.name)
             # Re-fetch challenge for updated data
             challenge = challenge_service.get_challenge(args.name)
-            print(f"{green('  • Container restarted')}")
+            print(f"{green(f'  {BULLET} Container restarted')}")
 
         # Re-start provider if needed
         if do_provider:
-            provider, endpoint = _start_with_fallback(export_manager, args.name, challenge)
-            print(f"{green('  • Export restarted via')} {provider}")
-            print(f"    Endpoint: {endpoint}")
+            exports, failures = _start_available_exports(export_manager, args.name, challenge)
+            for export in exports:
+                print(f"{green(f'  {BULLET} Export restarted via')} {export['provider']} ({export['type']})")
+                print(f"    URL: {export['url']}")
+            for failure in failures:
+                print(f"{yellow(f'  {BULLET} Export failed:')} {failure['provider']} - {format_error(failure['error'])}")
 
         # 3. Update last_restart time
         runtime_service.update_restart_time(args.name)
 
-        print(f"\n{green('✓')} Restart complete\n")
+        print(f"\n{green(OK)} Restart complete\n")
         return 0
     except Exception as e:
-        print(f"\n{red('✗')} Restart failed: {str(e)}\n")
+        print(f"\n{red(ERR)} Restart failed: {str(e)}\n")
         return 1
 
 
@@ -172,7 +239,6 @@ def cmd_status(args) -> int:
 
         while True:
             # 1. Handle auto-shutdown for expired runtimes
-            import sqlite3
             from nxctl.core.db import get_db_connection, close_db_connection
             conn = get_db_connection(config.db_file)
             cursor = conn.cursor()
@@ -211,76 +277,45 @@ def cmd_status(args) -> int:
             else:
                 print(f"\n{bold('Status')}")
 
-            print(f"{'-' * 160}")
-            print(f"{'Challenge':30} | {'Port (L:C)':12} | {'Export':8} | {'Provider':12} | {'Endpoint':50} | {'PID':8} | {'Remaining':12}")
-            print(f"{'-' * 160}")
+            status_rows = []
 
             for challenge in challenges:
                 runtime = runtime_service.status(challenge.name)
                 exports = export_manager.list_exports(challenge.name, check_health=True)
-
-                # Runtime indicators
-                is_running = runtime.status == 'running'
-                challenge_icon = green('✓') if is_running else red('✗')
-
-                name_padding = " " * max(0, 28 - len(challenge.name))
-                challenge_col = f"{challenge_icon} {challenge.name}{name_padding}"
-
-                # Export indicators
-                export_active = any(e['status'] == 'active' for e in exports)
-                if export_active:
-                    export_status_icon = f"  {green('✓')}     "
-                elif exports:
-                    export_status_icon = f"  {yellow('⚠')}     "
-                else:
-                    export_status_icon = f"  {red('✗')}     "
-
-                # Port mapping
                 container_port = get_container_port(config, challenge)
                 port_mapping = f"{challenge.service_port}:{container_port}"
-                port_col = f"{port_mapping:12}"
+                ttl_text, ttl_ok = ttl_remaining(runtime.expires_at)
+                ttl_col = rgreen(ttl_text) if runtime.status == "running" and ttl_ok else rred("Expired") if runtime.status == "running" else "-"
+                challenge_col = f"{rgreen(OK) if runtime.status == 'running' else rred(ERR)} {challenge.name}"
 
-                # Provider, PID and Endpoint
-                raw_provider = exports[0]["provider"] if exports else "-"
-                raw_pid = str(exports[0]["pid"]) if exports and exports[0]["pid"] else "-"
-                raw_endpoint = exports[0]["endpoint"] if exports else "-"
+                export_rows = exports or [{
+                    "provider": "-",
+                    "type": "-",
+                    "pid": None,
+                    "endpoint": "-",
+                    "status": "-"
+                }]
 
-                # Coloring and truncation
-                is_dead = exports and exports[0]['status'] == 'dead'
+                for index, export in enumerate(export_rows):
+                    status_rows.append([
+                        challenge_col if index == 0 else "",
+                        status_text(runtime.status) if index == 0 else "",
+                        port_mapping if index == 0 else "",
+                        ttl_col if index == 0 else "",
+                        export.get("provider") or "-",
+                        export.get("type") or "-",
+                        status_text(export.get("status")),
+                        export.get("pid") or "-",
+                        export.get("url") or export.get("endpoint") or "-",
+                    ])
 
-                if is_dead:
-                    provider_col = red(f"{raw_provider:12}")
-                    pid_col = red(f"{raw_pid:8}")
-                    endpoint_label = red("[DEAD]") + f" {raw_endpoint}"
-                else:
-                    provider_col = f"{raw_provider:12}"
-                    pid_col = f"{raw_pid:8}"
-                    endpoint_label = raw_endpoint
-
-                display_endpoint = endpoint_label
-                if len(raw_endpoint) > 50:
-                    display_endpoint = endpoint_label[:47] + "..."
-
-                # Remaining time
-                remaining_col = "-"
-                if runtime.status == 'running' and runtime.expires_at:
-                    from datetime import datetime
-                    remaining = runtime.expires_at - datetime.now()
-                    rem_seconds = remaining.total_seconds()
-                    if rem_seconds > 0:
-                        mins = int(rem_seconds // 60)
-                        secs = int(rem_seconds % 60)
-                        remaining_str = f"{mins}m {secs}s"
-                        if mins < config.extend_threshold_minutes:
-                            remaining_col = yellow(f"{remaining_str:12}")
-                        else:
-                            remaining_col = green(f"{remaining_str:12}")
-                    else:
-                        remaining_col = red(f"{'EXPIRED':12}")
-
-                print(f"{challenge_col} | {port_col} | {export_status_icon} | {provider_col} | {display_endpoint:50} | {pid_col} | {remaining_col}")
-
-            print(f"{'-' * 160}\n")
+            if status_rows:
+                print(table(
+                    ["Challenge", "Runtime", "Port", "TTL", "Provider", "Type", "Export", "PID", "URL"],
+                    status_rows,
+                    [28, 10, 12, 12, 14, 8, 10, 8, 58],
+                ))
+            print()
 
             if not watch_mode:
                 break
@@ -291,7 +326,7 @@ def cmd_status(args) -> int:
     except KeyboardInterrupt:
         return 0
     except Exception as e:
-        print(f"\n{red('✗')} Status failed: {str(e)}\n")
+        print(f"\n{red(ERR)} Status failed: {str(e)}\n")
         return 1
 
 
@@ -305,12 +340,12 @@ def cmd_extend(args) -> int:
         mins = int(remaining.total_seconds() // 60)
         secs = int(remaining.total_seconds() % 60)
 
-        print(f"\n{green('✓')} Extended {args.name}")
+        print(f"\n{green(OK)} Extended {args.name}")
         print(f"  New expiry: {runtime.expires_at.strftime('%H:%M:%S')}")
         print(f"  Time remaining: {mins}m {secs}s\n")
         return 0
     except Exception as e:
-        print(f"\n{red('✗')} Extend failed: {str(e)}\n")
+        print(f"\n{red(ERR)} Extend failed: {str(e)}\n")
         return 1
 
 def cmd_daemon(args) -> int:
@@ -320,7 +355,7 @@ def cmd_daemon(args) -> int:
         interval = getattr(args, "interval", None) or config.daemon_interval
         with_api = getattr(args, "with_api", False)
 
-        print(f"\n{blue('[daemon]')} Starting CTF Orchestrator Daemon")
+        print(f"\n{blue('[daemon]')} Starting NXCTL Daemon")
         print(f"{blue('[daemon]')} Interval: {interval}s")
 
         if with_api:
@@ -331,7 +366,7 @@ def cmd_daemon(args) -> int:
 
             def run_api():
                 print(f"{blue('[api]')} Starting Web API on {host}:{port} (background)")
-                uvicorn.run("src.api:app", host=host, port=port, log_level="warning")
+                uvicorn.run("nxctl.api:app", host=host, port=port, log_level="warning")
 
             api_thread = threading.Thread(target=run_api, daemon=True)
             api_thread.start()
@@ -341,7 +376,6 @@ def cmd_daemon(args) -> int:
         while True:
             try:
                 # 1. Fetch data from DB
-                import sqlite3
                 from nxctl.core.db import get_db_connection, close_db_connection
                 conn = get_db_connection(config.db_file)
                 cursor = conn.cursor()
@@ -381,15 +415,11 @@ def cmd_daemon(args) -> int:
                 # 4. Auto-heal missing exports for running challenges
                 if config.auto_heal_exports:
                     for name in running_names:
-                        active_exports = export_manager.list_exports(name, check_health=False)
-                        # After reconcile, if no active exports exist, it means the tunnel died
-                        if not active_exports:
-                            print(f"{blue('[daemon]')} Healing missing export for: {name}")
-                            try:
-                                challenge = challenge_service.get_challenge(name)
-                                _start_with_fallback(export_manager, name, challenge)
-                            except Exception as heal_err:
-                                print(f"{red('[daemon]')} Heal failed for {name}: {heal_err}")
+                        try:
+                            challenge = challenge_service.get_challenge(name)
+                            _start_available_exports(export_manager, name, challenge)
+                        except Exception as heal_err:
+                            print(f"{red('[daemon]')} Heal failed for {name}: {heal_err}")
 
             except Exception as e:
                 print(f"{red('[daemon] Error:')} {e}")
@@ -412,10 +442,10 @@ def cmd_api(args) -> int:
         print(f"\n{blue('[api]')} Starting NXCTL Web API on {host}:{port}")
         print(f"{blue('[api]')} Swagger UI: http://{host}:{port}/docs")
 
-        uvicorn.run("src.api:app", host=host, port=port, reload=False)
+        uvicorn.run("nxctl.api:app", host=host, port=port, reload=False)
         return 0
     except KeyboardInterrupt:
         return 0
     except Exception as e:
-        print(f"\n{red('✗')} API failed: {str(e)}\n")
+        print(f"\n{red(ERR)} API failed: {str(e)}\n")
         return 1

@@ -5,11 +5,24 @@ from nxctl.core.git import GitRepository, GitError
 from nxctl.scripts.challenge_service import ChallengeDiscoveryError
 from nxctl.scripts.cli.base import (
     get_services,
+    get_container_port,
     green,
     red,
     yellow,
     blue,
     bold,
+)
+from nxctl.scripts.cli.render import (
+    BULLET,
+    ERR,
+    OK,
+    box,
+    exports_table,
+    format_datetime,
+    format_duration,
+    panel,
+    status_text,
+    ttl_remaining,
 )
 
 logger = logging.getLogger(__name__)
@@ -27,19 +40,19 @@ def cmd_sync(args) -> int:
 
         print(f"\n{blue('Syncing challenges...')}")
         challenges = challenge_service.sync_challenges(git_repo)
-        print(f"{green('✓')} Synced {len(challenges)} challenges\n")
+        print(f"{green(OK)} Synced {len(challenges)} challenges\n")
         for challenge in challenges:
-            print(f"  • {challenge.name} ({challenge.service_type}:{challenge.service_port})")
+            print(f"  {BULLET} {challenge.name} ({challenge.service_type}:{challenge.service_port})")
         print()
         return 0
     except GitError as e:
-        print(f"\n{red('✗')} Sync failed: {str(e)}\n")
+        print(f"\n{red(ERR)} Sync failed: {str(e)}\n")
         return 1
     except ChallengeDiscoveryError as e:
-        print(f"\n{red('✗')} Sync failed: {str(e)}\n")
+        print(f"\n{red(ERR)} Sync failed: {str(e)}\n")
         return 1
     except Exception as e:
-        print(f"\n{red('✗')} Sync failed: {str(e)}\n")
+        print(f"\n{red(ERR)} Sync failed: {str(e)}\n")
         return 1
 
 
@@ -60,7 +73,7 @@ def cmd_list(args) -> int:
         print(f"{'-' * 100}\n")
         return 0
     except Exception as e:
-        print(f"\n{red('✗')} List failed: {str(e)}\n")
+        print(f"\n{red(ERR)} List failed: {str(e)}\n")
         return 1
 
 
@@ -69,61 +82,66 @@ def cmd_inspect(args) -> int:
         config, challenge_service, runtime_service, export_manager = get_services()
         challenge = challenge_service.get_challenge(args.name)
         if not challenge:
-            print(f"\n{red('✗')} Challenge not found: {args.name}\n")
+            print(f"\n{red(ERR)} Challenge not found: {args.name}\n")
             return 1
 
-        print(f"\n{bold(f'Challenge: {challenge.name}')}\n{'-' * 80}")
-        print(f"{'Path:':12} {challenge.path}")
-        print(f"{'Port:':12} {challenge.service_port}")
-        print(f"{'Type:':12} {challenge.service_type}")
-        print(f"{'Enabled:':12} {green('Yes') if challenge.enabled else red('No')}")
-        print(f"{'Created:':12} {challenge.created_at}")
-
-        # Runtime Info
+        container_port = get_container_port(config, challenge)
         runtime = runtime_service.status(args.name)
-        print(f"\n{bold('Runtime Status')}")
-        print(f"{'-' * 40}")
-        status_col = green(runtime.status) if runtime.status == 'running' else red(runtime.status)
-        print(f"{'Status:':12} {status_col}")
-
-        if runtime.status == 'running':
-            print(f"{'Container:':12} {runtime.container_id or '-'}")
-            print(f"{'Started At:':12} {runtime.started_at or '-'}")
-
-            if runtime.expires_at:
-                from datetime import datetime
-                remaining = runtime.expires_at - datetime.now()
-                rem_seconds = remaining.total_seconds()
-                if rem_seconds > 0:
-                    rem_str = f"{int(rem_seconds // 60)}m {int(rem_seconds % 60)}s"
-                    print(f"{'Expires At:':12} {runtime.expires_at} ({rem_str} left)")
-                else:
-                    print(f"{'Expires At:':12} {runtime.expires_at} ({red('EXPIRED')})")
-
-        # Cooldown Info
         cooldown = runtime_service.check_restart_cooldown(args.name)
-        if cooldown:
-            print(f"{'Restart CD:':12} {yellow(f'In cooldown ({cooldown}s left)')}")
-        elif runtime.status == 'running':
-            print(f"{'Restart CD:':12} {green('Ready')}")
-
-        # Exports Info
         exports = export_manager.list_exports(args.name, check_health=True)
-        print(f"\n{bold('Active Exports')}")
-        print(f"{'-' * 40}")
-        if not exports:
-            print("  None")
-        for exp in exports:
-            exp_status = green('✓ active') if exp['status'] == 'active' else red(f"✗ {exp['status']}")
-            print(f"  • {bold(exp['provider']):10} [{exp_status}]")
-            print(f"    Endpoint:  {exp['endpoint']}")
-            print(f"    PID:       {exp['pid']}")
-            print(f"    Created:   {exp['created_at']}")
+        ttl_text, ttl_ok = ttl_remaining(runtime.expires_at)
+        protocol = str(challenge.service_type or "-").upper()
+        configured_provider = (
+            runtime.tunnel_provider
+            or getattr(config, "default_tunnel", "")
+            or export_manager.default_providers_for(challenge.service_type)[0]
+        )
+        base_ip = str(getattr(config, "base_ip", "") or "").strip() or "Not configured"
+        ngrok_status = green("Available") if export_manager.ngrok_available() else yellow("Unavailable")
+        restart_cd = yellow(f"{format_duration(cooldown)} left") if cooldown else green("Ready")
+        ttl_value = green(ttl_text) if ttl_ok and ttl_text != "-" else red("Expired") if ttl_text != "-" else "-"
 
-        print(f"\n{'-' * 80}\n")
+        print()
+        print(panel(
+            f"Challenge: {challenge.name}",
+            [
+                ("Path", challenge.path),
+                ("Type", protocol),
+                ("Internal Port", container_port),
+                ("Host Port", challenge.service_port),
+                ("Enabled", green("Yes") if challenge.enabled else red("No")),
+                ("Created", format_datetime(challenge.created_at)),
+            ],
+        ))
+        print()
+        print(panel(
+            "Configuration",
+            [
+                ("Tunnel Provider", configured_provider or "-"),
+                ("Base IP", base_ip),
+                ("Ngrok", ngrok_status),
+                ("Auto Export", green("Enabled")),
+                ("Auto Heal", green("Enabled") if getattr(config, "auto_heal_exports", False) else red("Disabled")),
+            ],
+        ))
+        print()
+        print(panel(
+            "Runtime",
+            [
+                ("Status", status_text(runtime.status)),
+                ("Container", runtime.container_id or "-"),
+                ("Started At", format_datetime(runtime.started_at)),
+                ("Expires At", format_datetime(runtime.expires_at)),
+                ("TTL Remaining", ttl_value),
+                ("Restart CD", restart_cd),
+            ],
+        ))
+        print()
+        print(box("Active Exports", exports_table(exports, detailed=True), width=116))
+        print()
         return 0
     except Exception as e:
-        print(f"\n{red('✗')} Inspect failed: {str(e)}\n")
+        print(f"\n{red(ERR)} Inspect failed: {str(e)}\n")
         return 1
 
 
@@ -131,10 +149,10 @@ def cmd_add(args) -> int:
     try:
         _, challenge_service, _, _ = get_services()
         challenge = challenge_service.add_challenge(args.name, args.path, args.port, args.type)
-        print(f"\n{green('✓')} Added challenge: {challenge.name}\n")
+        print(f"\n{green(OK)} Added challenge: {challenge.name}\n")
         return 0
     except Exception as e:
-        print(f"\n{red('✗')} Add failed: {str(e)}\n")
+        print(f"\n{red(ERR)} Add failed: {str(e)}\n")
         return 1
 
 
@@ -142,10 +160,10 @@ def cmd_remove(args) -> int:
     try:
         _, challenge_service, _, _ = get_services()
         if not challenge_service.remove_challenge(args.name):
-            print(f"\n{red('✗')} Challenge not found: {args.name}\n")
+            print(f"\n{red(ERR)} Challenge not found: {args.name}\n")
             return 1
-        print(f"\n{green('✓')} Removed challenge: {args.name}\n")
+        print(f"\n{green(OK)} Removed challenge: {args.name}\n")
         return 0
     except Exception as e:
-        print(f"\n{red('✗')} Remove failed: {str(e)}\n")
+        print(f"\n{red(ERR)} Remove failed: {str(e)}\n")
         return 1

@@ -27,3 +27,4 @@ redis>=4.5.0
 fastapi>=0.100.0
 uvicorn>=0.22.0
 python-dotenv>=1.0.0
+pyngrok>=7.0.0

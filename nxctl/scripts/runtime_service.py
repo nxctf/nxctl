@@ -68,7 +68,7 @@ class RuntimeService:
                        public_url, started_at, expires_at, last_activity, last_revert, last_restart, created_at
                 FROM runtime_instances
                 WHERE challenge_id = ?
-                ORDER BY created_at DESC
+                ORDER BY created_at DESC, id DESC
                 LIMIT 1
             """, (challenge_id,))
 
@@ -483,7 +483,7 @@ class RuntimeService:
                 WHERE id = (
                     SELECT id FROM runtime_instances
                     WHERE challenge_id = ?
-                    ORDER BY created_at DESC
+                    ORDER BY created_at DESC, id DESC
                     LIMIT 1
                 )
             """, (status, challenge_id))

@@ -9,7 +9,7 @@ from fastapi.security import APIKeyHeader
 from nxctl.scripts.cli.base import get_services
 from nxctl.scripts.cli.lifecycle import (
     _stop_challenge_completely,
-    _start_with_fallback
+    _start_available_exports,
 )
 
 app = FastAPI(
@@ -155,8 +155,11 @@ def safe_exports(export_manager, name: str, health: bool = False):
 
         for e in exports:
             results.append({
+                "type": e.get("type"),
                 "provider": e.get("provider"),
-                "endpoint": e.get("endpoint"),
+                "url": e.get("url") or e.get("endpoint"),
+                "endpoint": e.get("url") or e.get("endpoint"),
+                "port": e.get("port"),
                 "status": e.get("status"),
                 "pid": e.get("pid")
             })
@@ -165,8 +168,11 @@ def safe_exports(export_manager, name: str, health: bool = False):
 
     except Exception as e:
         return [{
+            "type": "unknown",
             "provider": "unknown",
+            "url": None,
             "endpoint": None,
+            "port": None,
             "status": "error",
             "pid": None,
             "error": str(e)
@@ -386,16 +392,14 @@ async def up_challenge(name: str):
 
         challenge = challenge_service.get_challenge(name)
 
-        provider, endpoint = _start_with_fallback(
-            export_manager,
-            name,
-            challenge
-        )
+        exports, failures = _start_available_exports(export_manager, name, challenge)
 
         return {
-            "message": f"Challenge {name} is up",
-            "provider": provider,
-            "endpoint": endpoint
+            "challenge": name,
+            "status": "running",
+            "port": challenge.service_port,
+            "exports": exports,
+            "export_failures": failures,
         }
 
     except HTTPException:
@@ -495,14 +499,7 @@ async def restart_challenge(
 
         # Stop provider
         if do_provider:
-            exports = export_manager.list_exports(name)
-
-            for export in exports:
-                export_manager.stop_export(
-                    name,
-                    export["provider"],
-                    challenge.service_port
-                )
+            export_manager.stop_all_exports(name)
 
         # Restart container
         if do_container:
@@ -513,11 +510,9 @@ async def restart_challenge(
 
         # Start provider
         if do_provider:
-            _start_with_fallback(
-                export_manager,
-                name,
-                challenge
-            )
+            exports, failures = _start_available_exports(export_manager, name, challenge)
+        else:
+            exports, failures = [], []
 
         runtime_service.update_restart_time(name)
 
@@ -530,7 +525,9 @@ async def restart_challenge(
                     "container"
                     if container
                     else "provider"
-                )
+                ),
+            "exports": exports,
+            "export_failures": failures,
         }
 
     except HTTPException:

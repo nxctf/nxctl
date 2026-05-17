@@ -81,6 +81,46 @@ NXCTL includes a safety mechanism to prevent challenges from running indefinitel
 nxctl extend web/sqli
 ```
 
+## Automatic Exports
+
+`nxctl up <challenge>` keeps the simple one-command flow and automatically creates every available export:
+
+- `base_ip` direct URL when `base_ip` is configured.
+- Ngrok tunnel for HTTP challenges when an ngrok token is configured or `NGROK_AUTHTOKEN` exists.
+- The default protocol-based tunnel as before: Localtunnel for HTTP, Pinggy for TCP.
+
+If one export fails, NXCTL keeps the challenge running and continues with the others. When no optional export is available, the default tunnel behavior remains the same as previous releases.
+
+Example response shape from the API:
+
+```json
+{
+  "challenge": "web/sqli",
+  "status": "running",
+  "port": 30001,
+  "exports": [
+    {
+      "type": "direct",
+      "provider": "base_ip",
+      "url": "http://203.0.113.10:30001",
+      "status": "running"
+    },
+    {
+      "type": "tunnel",
+      "provider": "ngrok",
+      "url": "https://example.ngrok-free.app",
+      "status": "running"
+    },
+    {
+      "type": "tunnel",
+      "provider": "localtunnel",
+      "url": "https://example.loca.lt",
+      "status": "running"
+    }
+  ]
+}
+```
+
 ## Command Reference
 
 ### Monitoring
@@ -98,6 +138,7 @@ nxctl extend web/sqli
 | --- | --- | --- |
 | `nxctl up` | Build, start, and auto-export a challenge | `nxctl up web/sqli` |
 | `nxctl down` | Stop container and active tunnels | `nxctl down web/sqli` |
+| `nxctl down --all` | Stop all running challenges and tunnel processes | `nxctl down --all` |
 | `nxctl restart` | Restart a challenge | `nxctl restart web/sqli` |
 | `nxctl extend` | Add time to a running challenge | `nxctl extend web/sqli` |
 
@@ -134,6 +175,7 @@ branch: main
 access_token: ${GITHUB_TOKEN}
 
 db_file: ./data/nxctl.db
+base_ip: "203.0.113.10"
 default_tunnel: localtunnel
 
 default_ttl_minutes: 15
@@ -143,6 +185,9 @@ extend_cooldown_seconds: 30
 daemon_interval: 10
 auto_heal_exports: true
 ```
+
+Ngrok tokens can be provided with `ngrok_tokens` in `config.yml`, with `NGROK_AUTHTOKEN`, or through an existing ngrok config file.
+When multiple HTTP challenges run at the same time, NXCTL uses a separate ngrok local API port per export and avoids reusing tokens that are already attached to active ngrok exports. If no unused token is available, the ngrok export fails cleanly while other exports continue.
 
 ## Quick Examples
 
