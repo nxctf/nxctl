@@ -1,12 +1,12 @@
-# CTF Challenge Orchestration Engine Configuration
+# NXCTL configuration
 
-github_repo: https://github.com/ariafatah0711/ctfc_chall
+github_repo: https://github.com/nxctf/nxctl-challenges
 branch: main
 access_token: ${GITHUB_TOKEN}
 
 cache_dir: ./data/chall
 build_dir: ./data/build
-db_file: ./data/ctf-orch.db
+db_file: ./data/nxctl.db
 
 default_tunnel: localtunnel
 enable_ngrok: true

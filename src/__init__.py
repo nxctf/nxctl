@@ -1,3 +1,12 @@
-"""CTF Challenge Orchestration Engine - Refactored."""
+"""Deprecated compatibility package for the previous generic src path."""
 
-__version__ = "2.0.0"
+from __future__ import annotations
+
+import importlib
+
+_nxctl = importlib.import_module("nxctl")
+__path__ = _nxctl.__path__
+
+
+def __getattr__(name: str):
+    return getattr(_nxctl, name)

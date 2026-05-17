@@ -1,12 +1,12 @@
 [Unit]
-Description=CTF Orchestrator Daemon & API
+Description=NXCTL Daemon and API
 After=docker.service
 
 [Service]
 Type=simple
 User=root
 # We use --with-api to run both monitoring and API in one service
-ExecStart=/usr/local/bin/ctfc daemon --interval 10 --with-api
+ExecStart=/usr/local/bin/nxctl daemon --interval 10 --with-api
 Restart=always
 RestartSec=10
 

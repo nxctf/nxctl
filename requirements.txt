@@ -1,4 +1,4 @@
-# Python dependencies for CTF Orchestration Engine
+# Python dependencies for NXCTL
 psutil
 
 # CLI

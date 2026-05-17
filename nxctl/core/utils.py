@@ -7,7 +7,7 @@ import time
 from typing import Optional
 from pathlib import Path
 import json
-from src.core.config import get_config
+from nxctl.core.config import get_config
 
 COLOR_GREEN = "\033[32m"
 COLOR_RED = "\033[31m"

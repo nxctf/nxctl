@@ -1,9 +1,9 @@
 <div align="center">
 
-# 🚩 ctfc - CTF Challenge Orchestrator
+# NXCTL - CTF Challenge Orchestrator
 
 <p align="center">
-  <strong>A powerful, modular engine for orchestrating CTF challenges with automated tunneling and TTL management</strong>
+  <strong>Modern tooling for running containerized CTF challenges with automated tunnels, TTL controls, and a practical CLI.</strong>
 </p>
 
 <p align="center">
@@ -16,161 +16,148 @@
 
 ---
 
-## 🎯 Overview
+## Overview
 
-**ctfc** (CTF Container) is a comprehensive orchestration platform designed for CTF organizers and players. It simplifies the lifecycle of containerized challenges—from automated builds and dynamic port assignment to public exposure via multiple tunneling providers. Featuring a built-in **TTL (Time-To-Live)** system, it ensures resources are never wasted by automatically shutting down expired challenges.
+NXCTF builds modern tools for Capture The Flag (CTF) competitions and cybersecurity training. We focus on creating an ecosystem that makes it easier to build, run, and scale CTF events — from small local competitions to large online challenges.
 
-### ✨ Key Features
+Our projects are designed with simplicity, performance, and real-world use in mind.
 
-- 🐳 **Docker Native** - Seamlessly manages `docker-compose` based challenges.
-- ⏳ **Smart TTL System** - Auto-shutdown challenges after 15 minutes with manual extension.
-- 🌐 **Multi-Tunnel Support** - Instant public URLs via **Pinggy**, **Localtunnel**, or **Ngrok**.
-- 🔌 **Dynamic Port Mapping** - Automatically avoids port conflicts on the host.
-- 💻 **Modular CLI** - Clean, fast, and interactive command-line interface.
-- ⌨️ **Bash Completion** - Instant Tab-completion for commands and challenge names (SQLite powered).
-- 🛠️ **Easy Setup** - Interactive installation script with global command registration.
+NXCTF is developed openly by the community. Contribute, build challenges, or help shape the ecosystem.
 
----
+NXCTF is built by the community 🇮🇩 for the global cybersecurity ecosystem.
 
-## 📁 Project Structure
+NXCTL is the command-line orchestrator in the NXCTF ecosystem. It simplifies the lifecycle of containerized challenges, from automated builds and dynamic port assignment to public exposure through Pinggy, Localtunnel, or Ngrok. Its TTL system automatically shuts down expired challenges so event infrastructure stays tidy.
 
+## Key Features
+
+- Docker-native challenge lifecycle management.
+- Smart TTL and extension controls.
+- Public tunnel support for Pinggy, Localtunnel, and Ngrok.
+- Dynamic host-port mapping to avoid conflicts.
+- Fast modular CLI for challenge, runtime, and export operations.
+- Bash completion for commands and challenge names.
+- Optional FastAPI service for remote orchestration.
+
+## Project Structure
+
+```text
+nxctl/
+|-- setup.sh                    # Interactive installer/uninstaller
+|-- nxctl/                      # Main Python package
+|   |-- app.py                  # CLI entry point
+|   |-- api.py                  # FastAPI app
+|   |-- core/                   # Config, Docker, Git, DB, models
+|   |-- scripts/                # CLI handlers and service logic
+|   `-- completion/             # Bash completion scripts
+|-- src/                        # Deprecated compatibility launcher path
+|-- data/                       # Persistent data, builds, logs
+|-- config.yml                  # Local configuration
+`-- requirements.txt            # Python dependencies
 ```
-📦 CTFS_Back/
-┣ 🚀 setup.sh                   # Interactive installer/uninstaller
-┣ 📂 src/
-┃ ┣ 🎯 app.py                   # Main CLI entry point
-┃ ┣ 📂 core/                    # ⚙️ Core Logic (Docker, Git, DB, Models)
-┃ ┣ 📂 scripts/
-┃ ┃ ┣ 📂 cli/                    # 💻 CLI Handlers (Status, Lifecycle, Exports)
-┃ ┃ ┗ 📂 exports/                # 🌐 Tunneling Providers Logic
-┃ ┗ 📂 completion/               # ⌨️ Bash completion scripts
-┣ 📂 data/                      # 💾 Persistent data (Challenges, DB, Logs)
-┣ 📋 config.yml                 # 🔧 Main Configuration
-┗ 📋 requirements.txt           # Python dependencies
-```
 
----
+## Installation
 
-## 🚀 Quick Setup
-
-### 🔧 Installation
-
-The easiest way to install **ctfc** is using the automated setup script. This will install dependencies, register the global `ctfc` command, and setup bash completion.
+The setup script installs dependencies, registers the global `nxctl` command, and configures bash completion.
 
 ```bash
-# Clone the repository
-git clone https://github.com/ariafatah0711/ctfc
-cd ctfc
+git clone https://github.com/nxctf/nxctl
+cd nxctl
 
-# Run interactive installer
 sudo ./setup.sh install
 sudo ./setup.sh enable-service
 
-# 🔄 IMPORTANT: Restart your shell or run
 source ~/.bashrc
 ```
 
----
+## TTL and Extension System
 
-## ⏳ TTL & Extension System
+NXCTL includes a safety mechanism to prevent challenges from running indefinitely:
 
-**ctfc** includes a built-in safety mechanism to prevent challenges from running indefinitely:
-
-1.  **Default TTL**: Challenges automatically expire after **15 minutes**.
-2.  **Auto-Shutdown**: When a challenge expires, both the container and the tunnel (PID) are killed.
-3.  **Extend**: You can add **+10 minutes** to a running challenge, but only when it has **less than 5 minutes** remaining.
+1. Challenges automatically expire after the configured default TTL.
+2. Expired challenges have both their container and active tunnel stopped.
+3. Running challenges can be extended only inside the configured extension window.
 
 ```bash
-# Extend a challenge
-ctfc extend web/sqli
+nxctl extend web/sqli
 ```
 
----
+## Command Reference
 
-## 🛠 Command Reference
-
-### 📊 **Monitoring**
+### Monitoring
 
 | Command | Description | Example |
-|---------|-------------|---------|
-| 📋 `ctfc list` | List all available challenges | `ctfc list` |
-| 📈 `ctfc status` | Show running challenges, endpoints, and TTL | `ctfc status` |
-| 🔎 `ctfc inspect`| Show detailed challenge configuration | `ctfc inspect web/sqli` |
-| 🌐 `ctfc exports`| List all active tunnel exports | `ctfc exports` |
+| --- | --- | --- |
+| `nxctl list` | List all available challenges | `nxctl list` |
+| `nxctl status` | Show running challenges, endpoints, and TTL | `nxctl status` |
+| `nxctl inspect` | Show detailed challenge configuration | `nxctl inspect web/sqli` |
+| `nxctl exports` | List all active tunnel exports | `nxctl exports` |
 
-### 🏃 **Lifecycle**
-
-| Command | Description | Example |
-|---------|-------------|---------|
-| 🚀 `ctfc up` | Build, start, and auto-export a challenge | `ctfc up web/sqli` |
-| 📏 `ctfc down` | Stop container and all active tunnels | `ctfc down web/sqli` |
-| 🔄 `ctfc restart` | Restart (Down + Up) | `ctfc restart web/sqli` |
-| ⏳ `ctfc extend` | Add time to a running challenge | `ctfc extend web/sqli` |
-
-### 🌐 **Tunnels**
+### Lifecycle
 
 | Command | Description | Example |
-|---------|-------------|---------|
-| 📤 `ctfc export` | Manually start a tunnel | `ctfc export ngrok web/sqli` |
-| 📥 `ctfc unexport`| Stop tunnels for a challenge | `ctfc unexport web/sqli` |
+| --- | --- | --- |
+| `nxctl up` | Build, start, and auto-export a challenge | `nxctl up web/sqli` |
+| `nxctl down` | Stop container and active tunnels | `nxctl down web/sqli` |
+| `nxctl restart` | Restart a challenge | `nxctl restart web/sqli` |
+| `nxctl extend` | Add time to a running challenge | `nxctl extend web/sqli` |
 
-### 🌐 **Web API**
+### Tunnels
 
 | Command | Description | Example |
-|---------|-------------|---------|
-| 🔌 `ctfc api` | Run the FastAPI web server | `ctfc api --port 8000` |
+| --- | --- | --- |
+| `nxctl export` | Manually start a tunnel | `nxctl export ngrok web/sqli` |
+| `nxctl unexport` | Stop tunnels for a challenge | `nxctl unexport web/sqli` |
 
----
+### Web API
 
-### 🌐 Web API Reference
-The API is secured via `X-CTFC-Token` header.
+| Command | Description | Example |
+| --- | --- | --- |
+| `nxctl api` | Run the FastAPI web server | `nxctl api --port 8000` |
+
+The API is secured with the `X-NXCTL-Token` header. Set the token with `NXCTL_API_TOKEN`.
 
 | Endpoint | Method | Description |
-| :--- | :--- | :--- |
-| `/status` | GET | Comprehensive status of all challenges (JSON) |
+| --- | --- | --- |
+| `/status` | GET | Comprehensive status of all challenges |
 | `/up/{name}` | POST | Start a challenge |
 | `/down/{name}` | POST | Stop a challenge |
-| `/restart/{name}` | POST | Restart (supports `?container=true`) |
+| `/restart/{name}` | POST | Restart a challenge, with optional scope |
 | `/extend/{name}` | POST | Add more time to a running challenge |
 
----
+## Configuration
 
-### 🛠️ Configuration (`config.yml`)
-Key settings for orchestration:
+Key settings in `config.yml`:
+
 ```yaml
-default_ttl_minutes: 15       # Initial time for challenges
-restart_cooldown_seconds: 300 # Anti-spam restart protection
-daemon_interval: 10           # How often daemon checks status
-auto_heal_exports: true       # Auto-restart dead tunnels
+github_repo: https://github.com/nxctf/nxctl-challenges
+branch: main
+access_token: ${GITHUB_TOKEN}
+
+db_file: ./data/nxctl.db
+default_tunnel: localtunnel
+
+default_ttl_minutes: 15
+extend_time_minutes: 10
+extend_threshold_minutes: 5
+extend_cooldown_seconds: 30
+daemon_interval: 10
+auto_heal_exports: true
 ```
 
----
-
-## 🎨 Quick Examples
+## Quick Examples
 
 ```bash
-# 🚀 Start a challenge with auto-tunnel
-ctfc up web/sqli
-
-# 📈 Watch status in real-time (with colors!)
-ctfc status --watch
-
-# ⏳ Add time when sisa waktu < 5m
-ctfc extend web/sqli
-
-# 🌐 Export using a specific provider
-ctfc export pinggy web/sqli
-
-# 🧹 Full stop
-ctfc down web/sqli
+nxctl sync
+nxctl up web/sqli
+nxctl status --watch
+nxctl extend web/sqli
+nxctl export pinggy web/sqli
+nxctl down web/sqli
 ```
 
----
-
-## 🗑️ Uninstall
+## Uninstall
 
 ```bash
-# Remove global command and completion
 sudo ./setup.sh uninstall
 ```
 
@@ -178,6 +165,6 @@ sudo ./setup.sh uninstall
 
 <div align="center">
 
-**🚩 Made with ❤️ for CTF Players and Organizers**
+**Built by the NXCTF community for the global cybersecurity ecosystem.**
 
 </div>

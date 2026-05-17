@@ -3,8 +3,8 @@
 import logging
 import os
 import time
-from src.core.constants import PROTOCOL_TCP, EXPORT_PROVIDER_PINGGY, EXPORT_PROVIDER_LOCALTUNNEL
-from src.scripts.cli.base import (
+from nxctl.core.constants import PROTOCOL_TCP, EXPORT_PROVIDER_PINGGY, EXPORT_PROVIDER_LOCALTUNNEL
+from nxctl.scripts.cli.base import (
     get_services,
     get_container_port,
     green,
@@ -173,7 +173,7 @@ def cmd_status(args) -> int:
         while True:
             # 1. Handle auto-shutdown for expired runtimes
             import sqlite3
-            from src.core.db import get_db_connection, close_db_connection
+            from nxctl.core.db import get_db_connection, close_db_connection
             conn = get_db_connection(config.db_file)
             cursor = conn.cursor()
             try:
@@ -342,7 +342,7 @@ def cmd_daemon(args) -> int:
             try:
                 # 1. Fetch data from DB
                 import sqlite3
-                from src.core.db import get_db_connection, close_db_connection
+                from nxctl.core.db import get_db_connection, close_db_connection
                 conn = get_db_connection(config.db_file)
                 cursor = conn.cursor()
                 try:
@@ -409,7 +409,7 @@ def cmd_api(args) -> int:
         host = getattr(args, "host", "0.0.0.0")
         port = getattr(args, "port", 8000)
 
-        print(f"\n{blue('[api]')} Starting ctfc Web API on {host}:{port}")
+        print(f"\n{blue('[api]')} Starting NXCTL Web API on {host}:{port}")
         print(f"{blue('[api]')} Swagger UI: http://{host}:{port}/docs")
 
         uvicorn.run("src.api:app", host=host, port=port, reload=False)

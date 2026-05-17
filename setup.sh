@@ -1,57 +1,53 @@
 #!/usr/bin/env bash
 set -e
 
-# setup.sh - Interactive setup for CTF Orchestration Engine (ctfc)
-# Modeled after HPone setup style - NO VENV MODE
+# setup.sh - Interactive setup for NXCTL
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COMPLETION_SRC="$PROJECT_DIR/src/completion/ctfs-back-completion.bash"
-BIN_TARGET="/usr/local/bin/ctfc"
+COMPLETION_SRC="$PROJECT_DIR/nxctl/completion/nxctl-completion.bash"
+NXCTL_BIN_TARGET="/usr/local/bin/nxctl"
 REQUIREMENTS="$PROJECT_DIR/requirements.txt"
+SYSTEMD_DIR="/etc/systemd/system"
+SERVICE_NAME="nxctl-daemon"
 
-# Colors for output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 check_dependencies() {
     echo -e "${GREEN}[*] Checking dependencies...${NC}"
 
-    # Python3
     if ! command -v python3 >/dev/null 2>&1; then
-        echo -e "${RED}❌ Python3 not found.${NC}"
-        read -p "👉 Do you want to install it now? (y/n): " yn
+        echo -e "${RED}[x] Python3 not found.${NC}"
+        read -p "Do you want to install it now? (y/n): " yn
         case $yn in
             [Yy]*) sudo apt update && sudo apt install -y python3 python3-pip ;;
-            *) echo "❌ Failed: Python3 is required."; exit 1 ;;
+            *) echo "[x] Failed: Python3 is required."; exit 1 ;;
         esac
     fi
 
-    # Pip3
     if ! command -v pip3 >/dev/null 2>&1; then
-        echo -e "${RED}❌ pip3 not found.${NC}"
-        read -p "👉 Do you want to install it now? (y/n): " yn
+        echo -e "${RED}[x] pip3 not found.${NC}"
+        read -p "Do you want to install it now? (y/n): " yn
         case $yn in
             [Yy]*) sudo apt update && sudo apt install -y python3-pip ;;
-            *) echo "❌ Failed: pip3 is required."; exit 1 ;;
+            *) echo "[x] Failed: pip3 is required."; exit 1 ;;
         esac
     fi
 
-    # Node.js (for localtunnel)
     if ! command -v npm >/dev/null 2>&1; then
         echo -e "${YELLOW}[!] npm not found. Required for localtunnel.${NC}"
-        read -p "👉 Do you want to install it now? (y/n): " yn
+        read -p "Do you want to install it now? (y/n): " yn
         case $yn in
             [Yy]*) sudo apt update && sudo apt install -y npm ;;
-            *) echo "⚠️ Skipping npm/localtunnel." ;;
+            *) echo "[!] Skipping npm/localtunnel." ;;
         esac
     fi
 
-    # Docker
     if ! command -v docker >/dev/null 2>&1; then
-        echo -e "${RED}❌ Docker not found.${NC}"
-        read -p "👉 Do you want to install it now? (y/n): " yn
+        echo -e "${RED}[x] Docker not found.${NC}"
+        read -p "Do you want to install it now? (y/n): " yn
         case $yn in
             [Yy]*)
                 curl -fsSL https://get.docker.com -o get-docker.sh
@@ -60,20 +56,19 @@ check_dependencies() {
                 echo -e "${YELLOW}[!] Added $USER to docker group. Restart may be needed.${NC}"
                 rm get-docker.sh
                 ;;
-            *) echo "❌ Failed: Docker is required."; exit 1 ;;
+            *) echo "[x] Failed: Docker is required."; exit 1 ;;
         esac
     fi
 
-    # Docker Compose
     if ! docker compose version >/dev/null 2>&1; then
         HAS_LEGACY=false
         if command -v docker-compose >/dev/null 2>&1; then
             HAS_LEGACY=true
-            echo -e "${YELLOW}[!] Found legacy 'docker-compose' but 'docker compose' (plugin) is missing.${NC}"
-            read -p "👉 Do you want to install the modern Docker Compose plugin? (y/n): " yn
+            echo -e "${YELLOW}[!] Found legacy 'docker-compose' but 'docker compose' is missing.${NC}"
+            read -p "Do you want to install the modern Docker Compose plugin? (y/n): " yn
         else
             echo -e "${YELLOW}[!] Docker Compose not found.${NC}"
-            read -p "👉 Do you want to install it now? (y/n): " yn
+            read -p "Do you want to install it now? (y/n): " yn
         fi
 
         case $yn in
@@ -93,7 +88,7 @@ check_dependencies() {
                 ;;
             *)
                 if [ "$HAS_LEGACY" = false ]; then
-                    echo -e "${RED}❌ Failed: Docker Compose is required.${NC}"
+                    echo -e "${RED}[x] Failed: Docker Compose is required.${NC}"
                     exit 1
                 else
                     echo -e "${YELLOW}[!] Proceeding with legacy 'docker-compose' as fallback.${NC}"
@@ -103,63 +98,52 @@ check_dependencies() {
     fi
 }
 
-install_ctfc() {
+install_nxctl() {
     check_dependencies
 
-    # Install Python Requirements (System Wide)
     if [ -f "$REQUIREMENTS" ]; then
-        echo -e "${GREEN}[*] Installing Python requirements (System)...${NC}"
-        # We use --break-system-packages for newer Debian/Ubuntu that block system-wide pip
+        echo -e "${GREEN}[*] Installing Python requirements (system-wide)...${NC}"
         sudo pip3 install --upgrade pip || true
         sudo pip3 install -r "$REQUIREMENTS" --break-system-packages || sudo pip3 install -r "$REQUIREMENTS"
     fi
 
-    # Install External Tools
     echo -e "${GREEN}[*] Installing tunneling tools...${NC}"
 
-    # Localtunnel
     if command -v npm >/dev/null 2>&1; then
         if ! command -v lt >/dev/null 2>&1; then
             sudo npm install -g localtunnel || true
         fi
     fi
 
-    # Pinggy
     if ! command -v pinggy >/dev/null 2>&1; then
         echo -e "${GREEN}[*] Downloading Pinggy binary...${NC}"
         sudo wget -q "https://github.com/Pinggy-io/cli-js/releases/download/v0.4.7/pinggy-linux-x64" -O /usr/local/bin/pinggy
         sudo chmod +x /usr/local/bin/pinggy
     fi
 
-    # Create Data Directories
     mkdir -p "$PROJECT_DIR/data/chall" "$PROJECT_DIR/data/build" "$PROJECT_DIR/data/logs"
 
-    # Create Binary Symlink
-    echo -e "${GREEN}[*] Installing ctfc command...${NC}"
-
-    # Simple wrapper without venv
-    WRAPPER="#!/bin/bash
+    echo -e "${GREEN}[*] Installing nxctl command...${NC}"
+    NXCTL_WRAPPER="#!/bin/bash
 export PYTHONPATH=\$PYTHONPATH:$PROJECT_DIR
-python3 $PROJECT_DIR/src/app.py \"\$@\"
+python3 -m nxctl.app \"\$@\"
 "
-    echo "$WRAPPER" | sudo tee "$BIN_TARGET" > /dev/null
-    sudo chmod +x "$BIN_TARGET"
-    echo -e "  -> Created $BIN_TARGET"
+    echo "$NXCTL_WRAPPER" | sudo tee "$NXCTL_BIN_TARGET" > /dev/null
+    sudo chmod +x "$NXCTL_BIN_TARGET"
+    echo -e "  -> Created $NXCTL_BIN_TARGET"
 
-    # Install Bash Completion
     if [ -f "$COMPLETION_SRC" ]; then
         echo -e "${GREEN}[*] Installing bash completion...${NC}"
-        # Ensure correct line endings
         sed -i 's/\r$//' "$COMPLETION_SRC" 2>/dev/null || true
+        sed -i "\|ctfs-back-completion.bash|d" "$HOME/.bashrc" 2>/dev/null || true
 
         if ! grep -q "source $COMPLETION_SRC" "$HOME/.bashrc"; then
-            echo -e "\n# CTF Container Completion" >> "$HOME/.bashrc"
+            echo -e "\n# NXCTL completion" >> "$HOME/.bashrc"
             echo "source $COMPLETION_SRC" >> "$HOME/.bashrc"
             echo -e "  -> Added to ~/.bashrc"
         fi
     fi
 
-    # Config Check
     if [ ! -f "$PROJECT_DIR/config.yml" ]; then
         if [ -f "$PROJECT_DIR/config.example.yml" ]; then
             cp "$PROJECT_DIR/config.example.yml" "$PROJECT_DIR/config.yml"
@@ -167,17 +151,17 @@ python3 $PROJECT_DIR/src/app.py \"\$@\"
         fi
     fi
 
-    echo -e "\n${GREEN}✅ ctfc installed successfully (System-wide)!${NC}"
+    echo -e "\n${GREEN}[ok] NXCTL installed successfully (system-wide).${NC}"
     echo -e "Restart your shell or run: ${YELLOW}source ~/.bashrc${NC}"
-    echo -e "Try it with: ${YELLOW}ctfc status${NC}\n"
+    echo -e "Try it with: ${YELLOW}nxctl status${NC}\n"
 }
 
-uninstall_ctfc() {
-    echo -e "${YELLOW}[*] Uninstalling ctfc...${NC}"
+uninstall_nxctl() {
+    echo -e "${YELLOW}[*] Uninstalling NXCTL...${NC}"
 
-    if [ -f "$BIN_TARGET" ]; then
-        sudo rm -f "$BIN_TARGET"
-        echo "  -> Removed $BIN_TARGET"
+    if [ -f "$NXCTL_BIN_TARGET" ]; then
+        sudo rm -f "$NXCTL_BIN_TARGET"
+        echo "  -> Removed $NXCTL_BIN_TARGET"
     fi
 
     if grep -q "source $COMPLETION_SRC" "$HOME/.bashrc"; then
@@ -185,59 +169,56 @@ uninstall_ctfc() {
         echo "  -> Removed completion from ~/.bashrc"
     fi
 
-    echo -e "${GREEN}✅ ctfc uninstalled.${NC}\n"
+    echo -e "${GREEN}[ok] NXCTL uninstalled.${NC}\n"
 }
 
 enable_service() {
-    echo -e "${YELLOW}[*] Enabling ctfc-daemon systemd service...${NC}"
-    SERVICE_FILE="ctfc-daemon.service"
-    SYSTEMD_DIR="/etc/systemd/system"
+    echo -e "${YELLOW}[*] Enabling $SERVICE_NAME systemd service...${NC}"
+    SERVICE_FILE="$SERVICE_NAME.service"
     CURRENT_USER=$(whoami)
     PROJECT_PATH=$(pwd)
 
     if [ ! -f "$SERVICE_FILE" ]; then
-        echo -e "${RED}❌ Error: $SERVICE_FILE not found in current directory.${NC}"
+        echo -e "${RED}[x] Error: $SERVICE_FILE not found in current directory.${NC}"
         exit 1
     fi
 
-    # Create a temporary copy to modify
-    TEMP_SERVICE="/tmp/ctfc-daemon.service"
+    TEMP_SERVICE="/tmp/$SERVICE_FILE"
     cp "$SERVICE_FILE" "$TEMP_SERVICE"
 
-    # Inject current user and working directory
     sed -i "s/User=root/User=$CURRENT_USER/" "$TEMP_SERVICE"
-    # Add WorkingDirectory after User line
     sed -i "/User=$CURRENT_USER/a WorkingDirectory=$PROJECT_PATH" "$TEMP_SERVICE"
 
     echo "  -> Configuring service for user: $CURRENT_USER"
     echo "  -> Project path: $PROJECT_PATH"
 
-    sudo cp "$TEMP_SERVICE" "$SYSTEMD_DIR/ctfc-daemon.service"
+    sudo cp "$TEMP_SERVICE" "$SYSTEMD_DIR/$SERVICE_FILE"
     sudo systemctl daemon-reload
-    sudo systemctl enable ctfc-daemon
-    sudo systemctl restart ctfc-daemon
+    sudo systemctl enable "$SERVICE_NAME"
+    sudo systemctl restart "$SERVICE_NAME"
 
     rm -f "$TEMP_SERVICE"
 
-    echo -e "${GREEN}✅ Service enabled and started as user $CURRENT_USER!${NC}"
-    echo -e "Check status with: ${YELLOW}sudo systemctl status ctfc-daemon${NC}\n"
+    echo -e "${GREEN}[ok] Service enabled and started as user $CURRENT_USER.${NC}"
+    echo -e "Check status with: ${YELLOW}sudo systemctl status $SERVICE_NAME${NC}\n"
 }
 
 disable_service() {
-    echo -e "${YELLOW}[*] Disabling ctfc-daemon systemd service...${NC}"
-    sudo systemctl stop ctfc-daemon
-    sudo systemctl disable ctfc-daemon
-    sudo rm -f "$SYSTEMD_DIR/ctfc-daemon.service"
+    echo -e "${YELLOW}[*] Disabling $SERVICE_NAME systemd service...${NC}"
+    sudo systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+    sudo systemctl disable "$SERVICE_NAME" 2>/dev/null || true
+    sudo rm -f "$SYSTEMD_DIR/$SERVICE_NAME.service"
+
     sudo systemctl daemon-reload
-    echo -e "${GREEN}✅ Service disabled and removed.${NC}\n"
+    echo -e "${GREEN}[ok] Service disabled and removed.${NC}\n"
 }
 
 case "$1" in
     install)
-        install_ctfc
+        install_nxctl
         ;;
     uninstall)
-        uninstall_ctfc
+        uninstall_nxctl
         ;;
     enable-service)
         enable_service

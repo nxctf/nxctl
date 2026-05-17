@@ -1,4 +1,4 @@
-"""Configuration management for CTF orchestration engine."""
+"""Configuration management for NXCTL."""
 
 import os
 import re
@@ -24,7 +24,7 @@ class Config(BaseModel):
 
     cache_dir: str = "./data/chall"
     build_dir: str = "./data/build"
-    db_file: str = "./data/ctf-orch.db"
+    db_file: str = "./data/nxctl.db"
 
     ngrok_tokens: list[str] = Field(default_factory=list)
     pinggy_token: str = ""

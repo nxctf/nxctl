@@ -1,9 +1,9 @@
 """CLI command handlers for challenge management."""
 
 import logging
-from src.core.git import GitRepository, GitError
-from src.scripts.challenge_service import ChallengeDiscoveryError
-from src.scripts.cli.base import (
+from nxctl.core.git import GitRepository, GitError
+from nxctl.scripts.challenge_service import ChallengeDiscoveryError
+from nxctl.scripts.cli.base import (
     get_services,
     green,
     red,

@@ -1,4 +1,4 @@
-"""Constants for the CTF orchestration engine."""
+"""Constants for NXCTL."""
 
 # Service types
 SERVICE_TYPE_HTTP = "http"

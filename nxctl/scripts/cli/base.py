@@ -1,17 +1,17 @@
 """Shared base utilities for CLI command handlers."""
 
 import logging
-from src.core.config import get_config
-from src.core.db import init_database
-from src.core.utils import (
+from nxctl.core.config import get_config
+from nxctl.core.db import init_database
+from nxctl.core.utils import (
     green, red, yellow, blue, bold,
     get_git_cache_path,
     get_challenge_dir
 )
-from src.core.yaml import extract_port_from_compose
-from src.scripts.challenge_service import ChallengeService
-from src.scripts.runtime_service import RuntimeService
-from src.scripts.exports.manager import ExportManager
+from nxctl.core.yaml import extract_port_from_compose
+from nxctl.scripts.challenge_service import ChallengeService
+from nxctl.scripts.runtime_service import RuntimeService
+from nxctl.scripts.exports.manager import ExportManager
 
 logger = logging.getLogger(__name__)
 

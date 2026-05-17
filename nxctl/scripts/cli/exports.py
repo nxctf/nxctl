@@ -1,8 +1,8 @@
 """CLI command handlers for challenge export management."""
 
 import logging
-from src.core.constants import EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_LOCALTUNNEL, EXPORT_PROVIDER_PINGGY, EXPORT_PROVIDERS
-from src.scripts.cli.base import (
+from nxctl.core.constants import EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_LOCALTUNNEL, EXPORT_PROVIDER_PINGGY, EXPORT_PROVIDERS
+from nxctl.scripts.cli.base import (
     get_services,
     green,
     red,
@@ -10,7 +10,7 @@ from src.scripts.cli.base import (
     blue,
     bold,
 )
-from src.scripts.cli.lifecycle import _start_with_fallback
+from nxctl.scripts.cli.lifecycle import _start_with_fallback
 
 logger = logging.getLogger(__name__)
 

@@ -4,10 +4,10 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from src.core.models import Challenge
-from src.core.db import get_db_connection, close_db_connection
-from src.core.git import GitRepository
-from src.core.yaml import extract_port_from_compose, detect_service_type_from_compose
+from nxctl.core.models import Challenge
+from nxctl.core.db import get_db_connection, close_db_connection
+from nxctl.core.git import GitRepository
+from nxctl.core.yaml import extract_port_from_compose, detect_service_type_from_compose
 
 logger = logging.getLogger(__name__)
 

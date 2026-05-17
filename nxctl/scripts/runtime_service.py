@@ -6,10 +6,10 @@ from typing import Optional
 import yaml
 from datetime import datetime, timedelta
 
-from src.core.models import Challenge, RuntimeInstance
-from src.core.db import get_db_connection, close_db_connection
-from src.core.docker import run_docker_compose_build, run_docker_compose_up, run_docker_compose_down_with_cleanup, DockerError
-from src.core.utils import is_port_in_use, find_free_port
+from nxctl.core.models import Challenge, RuntimeInstance
+from nxctl.core.db import get_db_connection, close_db_connection
+from nxctl.core.docker import run_docker_compose_build, run_docker_compose_up, run_docker_compose_down_with_cleanup, DockerError
+from nxctl.core.utils import is_port_in_use, find_free_port
 
 logger = logging.getLogger(__name__)
 

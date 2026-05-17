@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CTF Orchestration Engine - Launcher Entry Point (Similar to HPone)."""
+"""NXCTL launcher entry point."""
 
 import os
 import sys
@@ -12,7 +12,7 @@ from pathlib import Path
 PREFIX_INFO = f"\033[32mINFO\033[0m"
 PREFIX_ERROR = f"\033[31m[ERROR]\033[0m"
 
-PROJECT_PATH = Path(__file__).resolve().parent / "src"
+PROJECT_PATH = Path(__file__).resolve().parent / "nxctl"
 
 def disable_input():
     """Disable input terminal temporarily."""
@@ -50,8 +50,7 @@ def main():
     # Disable input user
     old_settings = disable_input()
     try:
-        # Run app.py from src
-        result = subprocess.run([sys.executable, "-m", "src.app"] + args)
+        result = subprocess.run([sys.executable, "-m", "nxctl.app"] + args)
         return result.returncode
     finally:
         # Restore input terminal
