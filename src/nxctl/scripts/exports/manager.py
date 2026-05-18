@@ -1,5 +1,6 @@
 """Export/tunnel management orchestrator."""
 
+from contextlib import contextmanager
 import logging
 import os
 import re
@@ -20,6 +21,7 @@ from nxctl.core.constants import (
     EXPORT_PROVIDER_BASE_IP,
     PROTOCOL_TCP,
 )
+from nxctl.core.utils import is_pid_alive
 
 logger = logging.getLogger(__name__)
 
@@ -70,30 +72,95 @@ class ExportManager:
         if not provider.supports_protocol(protocol):
             raise RuntimeError(f"Provider {provider_name} does not support {protocol} protocol")
 
-        # Start the export
-        result = provider.start(challenge_name, host_port, protocol)
+        with self._export_start_lock(provider_name, host_port):
+            existing = self._existing_active_export(challenge_name, provider_name, host_port)
+            if existing and existing.get("status") != "dead":
+                return existing
 
-        # Save to database
-        self._save_export_to_db(
-            challenge_name,
-            provider_name,
-            protocol,
-            host_port,
-            result.url,
-            result.pid,
-            export_type="tunnel",
-        )
+            # Start the export
+            result = provider.start(challenge_name, host_port, protocol)
 
-        return self._export_dict(
-            challenge_name=challenge_name,
-            provider=provider_name,
-            export_type="tunnel",
-            protocol=protocol,
-            host_port=host_port,
-            endpoint=result.url,
-            pid=result.pid,
-            status="active",
-        )
+            # Save to database
+            self._save_export_to_db(
+                challenge_name,
+                provider_name,
+                protocol,
+                host_port,
+                result.url,
+                result.pid,
+                export_type="tunnel",
+            )
+
+            return self._export_dict(
+                challenge_name=challenge_name,
+                provider=provider_name,
+                export_type="tunnel",
+                protocol=protocol,
+                host_port=host_port,
+                endpoint=result.url,
+                pid=result.pid,
+                status="active",
+            )
+
+    @contextmanager
+    def _export_start_lock(self, provider_name: str, host_port: int):
+        """Cross-process lock so daemon/status/test cannot double-start a tunnel."""
+        locks_dir = Path(getattr(self.config, "exports_dir", Path(self.config.cache_dir) / "exports")) / "locks"
+        locks_dir.mkdir(parents=True, exist_ok=True)
+        safe_provider = re.sub(r"[^A-Za-z0-9_.-]+", "_", provider_name or "provider")
+        lock_path = locks_dir / f"{safe_provider}_{int(host_port)}.lock"
+        timeout = float(getattr(self.config, "export_start_lock_timeout_seconds", 60) or 60)
+        stale_after = float(getattr(self.config, "export_start_lock_stale_seconds", 180) or 180)
+        deadline = time.time() + timeout
+        owned = False
+
+        while True:
+            try:
+                fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(f"{os.getpid()} {int(time.time())}\n")
+                owned = True
+                break
+            except FileExistsError:
+                if self._is_stale_start_lock(lock_path, stale_after):
+                    try:
+                        lock_path.unlink()
+                        continue
+                    except OSError:
+                        pass
+                if time.time() >= deadline:
+                    raise RuntimeError(f"Timed out waiting for {provider_name}:{host_port} export start lock")
+                time.sleep(0.2)
+
+        try:
+            yield
+        finally:
+            if owned:
+                try:
+                    lock_path.unlink()
+                except OSError:
+                    pass
+
+    def _is_stale_start_lock(self, lock_path: Path, stale_after: float) -> bool:
+        try:
+            content = lock_path.read_text(encoding="utf-8", errors="ignore").strip().split()
+            pid = int(content[0]) if content else 0
+            created_at = float(content[1]) if len(content) > 1 else 0.0
+        except Exception:
+            return True
+
+        if created_at and time.time() - created_at > stale_after:
+            return True
+        return bool(pid and not is_pid_alive(pid))
+
+    def _existing_active_export(self, challenge_name: str, provider_name: str, host_port: int) -> Optional[dict]:
+        for export in self.list_exports(challenge_name, check_health=True):
+            if (
+                export.get("provider") == provider_name
+                and int(export.get("port") or 0) == int(host_port)
+            ):
+                return export
+        return None
 
     def start_direct_export(self, challenge_name: str, host_port: int, protocol: str) -> dict:
         """Record a direct base_ip export when configured."""
@@ -176,9 +243,6 @@ class ExportManager:
             except Exception as exc:
                 failures.append(self._failure_dict(provider_name, "tunnel", exc))
 
-        if not exports and failures:
-            raise RuntimeError("; ".join(f"{f['provider']}: {f['error']}" for f in failures))
-
         return exports, failures
 
     def default_providers_for(self, protocol: str) -> list[str]:
@@ -235,9 +299,11 @@ class ExportManager:
             return killed
 
         current_pid = os.getpid()
-        for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+        for proc in psutil.process_iter(["pid", "name", "cmdline", "status"]):
             try:
                 if proc.info["pid"] == current_pid:
+                    continue
+                if proc.info.get("status") == psutil.STATUS_ZOMBIE:
                     continue
 
                 cmdline = proc.info.get("cmdline") or []
@@ -284,9 +350,11 @@ class ExportManager:
         seen_keys: set[tuple[str, int]] = set()
         killed = 0
 
-        for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+        for proc in psutil.process_iter(["pid", "name", "cmdline", "status"]):
             try:
                 pid = int(proc.info.get("pid") or 0)
+                if proc.info.get("status") == psutil.STATUS_ZOMBIE:
+                    continue
                 cmdline = proc.info.get("cmdline") or []
                 parsed = self._parse_tunnel_process(proc.info.get("name") or "", cmdline)
                 if not parsed:
@@ -364,9 +432,12 @@ class ExportManager:
             if export.get("provider") != EXPORT_PROVIDER_BASE_IP
             and export.get("type") != "direct"
         ]
+        grace_seconds = int(getattr(self.config, "export_endpoint_check_grace_seconds", 120) or 120)
 
         results: list[dict] = []
         for export in exports:
+            if grace_seconds > 0 and self._export_age_seconds(export) < grace_seconds:
+                continue
             started = time.monotonic()
             ok, error = self._test_export_endpoint(export, timeout)
             latency_ms = int((time.monotonic() - started) * 1000)
@@ -400,6 +471,17 @@ class ExportManager:
                     pass
 
         return results
+
+    def _export_age_seconds(self, export: dict) -> float:
+        created_at = str(export.get("created_at") or "").strip()
+        if not created_at:
+            return 999999.0
+        try:
+            from datetime import datetime
+            created = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S")
+            return max(0.0, (datetime.now() - created).total_seconds())
+        except Exception:
+            return 999999.0
 
     def _test_export_endpoint(self, export: dict, timeout: float) -> tuple[bool, str]:
         endpoint = str(export.get("url") or export.get("endpoint") or "").strip()

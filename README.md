@@ -206,6 +206,8 @@ When multiple HTTP challenges run at the same time, NXCTL uses a separate ngrok 
 ## Quick Examples
 
 ```bash
+find . -type d -name "__pycache__" -exec rm -rf {} +
+
 nxctl sync
 nxctl up web/sqli
 nxctl status --watch

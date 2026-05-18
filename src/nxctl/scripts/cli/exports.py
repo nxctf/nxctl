@@ -109,48 +109,50 @@ def cmd_test(args) -> int:
             print(f"\n{red(ERR)} Challenge not found: {challenge_name}\n")
             return 1
 
+        do_heal = bool(getattr(args, "heal", False))
         export_manager.reconcile_exports()
-        results = export_manager.test_tunnel_exports(challenge_name, mark_unhealthy=True)
+        results = export_manager.test_tunnel_exports(challenge_name, mark_unhealthy=do_heal)
         killed = export_manager.sweep_orphan_tunnel_processes()
 
         healed_exports = []
         heal_failures = []
-        affected_names = {
-            result.get("challenge")
-            for result in results
-            if not result.get("reachable") and result.get("challenge")
-        }
-        if challenge_name:
-            affected_names.add(challenge_name)
-        else:
-            for challenge in challenge_service.list_challenges():
-                if runtime_service.status(challenge.name).status != "running":
-                    continue
-                active_exports = export_manager.list_exports(challenge.name, check_health=False)
-                has_tunnel = any(
-                    export.get("type") != "direct"
-                    and export.get("provider") != "base_ip"
-                    for export in active_exports
-                )
-                if not has_tunnel:
-                    affected_names.add(challenge.name)
+        if do_heal:
+            affected_names = {
+                result.get("challenge")
+                for result in results
+                if not result.get("reachable") and result.get("challenge")
+            }
+            if challenge_name:
+                affected_names.add(challenge_name)
+            else:
+                for challenge in challenge_service.list_challenges():
+                    if runtime_service.status(challenge.name).status != "running":
+                        continue
+                    active_exports = export_manager.list_exports(challenge.name, check_health=False)
+                    has_tunnel = any(
+                        export.get("type") != "direct"
+                        and export.get("provider") != "base_ip"
+                        for export in active_exports
+                    )
+                    if not has_tunnel:
+                        affected_names.add(challenge.name)
 
-        for name in sorted(affected_names):
-            try:
-                challenge = challenge_service.get_challenge(name)
-                if not challenge or runtime_service.status(name).status != "running":
-                    continue
-                ports = challenge_service.list_challenge_ports(name)
-                exports, failures = _start_available_exports(export_manager, name, challenge, ports)
-                for export in exports:
-                    export["challenge"] = name
-                healed_exports.extend(exports)
-                heal_failures.extend(failures)
-            except Exception as exc:
-                heal_failures.append({
-                    "provider": "auto-heal",
-                    "error": str(exc),
-                })
+            for name in sorted(affected_names):
+                try:
+                    challenge = challenge_service.get_challenge(name)
+                    if not challenge or runtime_service.status(name).status != "running":
+                        continue
+                    ports = challenge_service.list_challenge_ports(name)
+                    exports, failures = _start_available_exports(export_manager, name, challenge, ports)
+                    for export in exports:
+                        export["challenge"] = name
+                    healed_exports.extend(exports)
+                    heal_failures.extend(failures)
+                except Exception as exc:
+                    heal_failures.append({
+                        "provider": "auto-heal",
+                        "error": str(exc),
+                    })
 
         if not results and not healed_exports and not heal_failures:
             if killed:
@@ -190,6 +192,8 @@ def cmd_test(args) -> int:
             print(yellow("No existing tunnel exports to test; checking auto-heal candidates."))
         if killed:
             print(f"\n{yellow(f'Cleaned orphan tunnel processes: {killed}')}")
+        if not do_heal:
+            print(f"\n{yellow('Read-only test. Use nxctl test --heal to restart unhealthy exports.')}")
         if healed_exports:
             healed_rows = []
             for export in healed_exports:

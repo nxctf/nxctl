@@ -3,6 +3,8 @@
 import socket
 import os
 import signal
+import subprocess
+import threading
 import time
 from typing import Optional
 from pathlib import Path
@@ -58,9 +60,18 @@ def get_challenge_dir(challenge_path: str) -> Path:
 
 
 def is_pid_alive(pid: int) -> bool:
-    """Return True if PID exists and can receive signal 0."""
+    """Return True if PID exists and is not a zombie."""
     if pid <= 0:
         return False
+    try:
+        import psutil
+        proc = psutil.Process(pid)
+        return proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE
+    except ImportError:
+        pass
+    except Exception:
+        return False
+
     try:
         os.kill(pid, 0)
         return True
@@ -79,9 +90,18 @@ def load_state_file(state_path: Path) -> dict:
 
 
 def save_state_file(state_path: Path, state: dict) -> None:
-    """Persist state to disk as JSON."""
+    """Persist state to disk as JSON using an atomic replace."""
     state_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path.write_text(json.dumps(state, ensure_ascii=True, indent=2), encoding="utf-8")
+    tmp_path = state_path.with_name(f".{state_path.name}.{os.getpid()}.tmp")
+    try:
+        tmp_path.write_text(json.dumps(state, ensure_ascii=True, indent=2), encoding="utf-8")
+        os.replace(tmp_path, state_path)
+    finally:
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except Exception:
+            pass
 
 
 def delete_state_file(state_path: Path) -> None:
@@ -124,6 +144,29 @@ def kill_process(pid: int, timeout: float = 3.0) -> bool:
         return False
 
     try:
+        try:
+            import psutil
+            proc = psutil.Process(pid)
+            if proc.status() == psutil.STATUS_ZOMBIE:
+                return False
+            proc.terminate()
+            try:
+                proc.wait(timeout=timeout)
+                return True
+            except psutil.TimeoutExpired:
+                if proc.status() == psutil.STATUS_ZOMBIE:
+                    return True
+                proc.kill()
+                try:
+                    proc.wait(timeout=timeout)
+                except psutil.TimeoutExpired:
+                    return False
+                return True
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
         # Try SIGTERM first
         os.kill(pid, signal.SIGTERM)
 
@@ -142,6 +185,29 @@ def kill_process(pid: int, timeout: float = 3.0) -> bool:
         return True
     except Exception:
         return False
+
+
+def reap_subprocess(proc: subprocess.Popen) -> None:
+    """Reap a child process in the background when it eventually exits.
+
+    This prevents tunnel processes from sitting as defunct while a long-lived
+    NXCTL parent process, such as the API or daemon, is still running.
+    """
+    if proc.poll() is not None:
+        try:
+            proc.wait(timeout=0)
+        except Exception:
+            pass
+        return
+
+    def waiter() -> None:
+        try:
+            proc.wait()
+        except Exception:
+            pass
+
+    thread = threading.Thread(target=waiter, name=f"nxctl-reap-{proc.pid}", daemon=True)
+    thread.start()
 
 
 def probe_endpoint(url: str, timeout: float = 5.0) -> bool:

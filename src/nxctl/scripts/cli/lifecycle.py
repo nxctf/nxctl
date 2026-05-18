@@ -97,6 +97,7 @@ def _start_available_exports(export_manager, challenge_name: str, challenge, por
 
 def _stop_challenge_completely(name: str, challenge_service, runtime_service, export_manager):
     """Stop both exports and container for a challenge."""
+    stopped_exports = 0
     challenge = challenge_service.get_challenge(name)
     if challenge:
         # Mark stopped first so the daemon cannot auto-heal tunnels during down.
@@ -118,17 +119,22 @@ def _stop_challenge_completely(name: str, challenge_service, runtime_service, ex
                 logger.error(f"Failed to stop export {export['provider']} for {name}: {export['error']}")
             else:
                 logger.info(f"Stopped {export['provider']} export for {name}")
+                if export.get("stopped"):
+                    stopped_exports += 1
 
         # One more pass catches tunnels created by an overlapping daemon tick.
         for export in export_manager.stop_all_exports(name):
             if export.get("error"):
                 logger.error(f"Failed to stop late export {export['provider']} for {name}: {export['error']}")
+            elif export.get("stopped"):
+                stopped_exports += 1
     else:
         # Fallback if challenge not in DB but maybe runtime exists
         try:
             runtime_service.stop(name)
         except Exception:
             pass
+    return stopped_exports
 
 
 def _cmd_up_one(name: str, challenge_service, runtime_service, export_manager) -> bool:
@@ -209,6 +215,7 @@ def cmd_down(args) -> int:
         if getattr(args, "all", False):
             print(f"\n{blue('Stopping all challenges...')}")
             stopped_count = 0
+            stopped_export_count = 0
 
             for challenge in challenge_service.list_challenges():
                 runtime = runtime_service.status(challenge.name)
@@ -217,7 +224,7 @@ def cmd_down(args) -> int:
                     continue
 
                 print(f"{blue(f'  {BULLET}')} {challenge.name}")
-                _stop_challenge_completely(
+                stopped_export_count += _stop_challenge_completely(
                     challenge.name,
                     challenge_service,
                     runtime_service,
@@ -230,7 +237,8 @@ def cmd_down(args) -> int:
 
             print(f"{green(OK)} Down complete")
             print(f"  Challenges handled: {stopped_count}")
-            print(f"  Tunnel processes killed: {killed}\n")
+            print(f"  Exports stopped: {stopped_export_count}")
+            print(f"  Orphan tunnel processes killed: {killed}\n")
             return 0
 
         if not args.name:
@@ -442,9 +450,13 @@ def cmd_daemon(args) -> int:
             api_thread.start()
 
         print(f"{blue('[daemon]')} Monitoring challenges for auto-shutdown & auto-heal...\n")
-        last_endpoint_check = 0.0
+        last_endpoint_check = time.time()
+        last_auto_heal = time.time()
         endpoint_check_interval = int(
             getattr(config, "export_endpoint_check_interval_seconds", 120) or 120
+        )
+        auto_heal_interval = int(
+            getattr(config, "export_auto_heal_interval_seconds", 120) or 120
         )
 
         while True:
@@ -502,7 +514,12 @@ def cmd_daemon(args) -> int:
                             )
 
                 # 4. Auto-heal missing exports for running challenges
-                if config.auto_heal_exports:
+                if (
+                    config.auto_heal_exports
+                    and auto_heal_interval > 0
+                    and time.time() - last_auto_heal >= auto_heal_interval
+                ):
+                    last_auto_heal = time.time()
                     for name in running_names:
                         try:
                             challenge = challenge_service.get_challenge(name)

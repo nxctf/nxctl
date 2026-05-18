@@ -27,6 +27,9 @@ class Config(BaseModel):
     build_dir: str = "./data/build"
     db_file: str = "./data/nxctl.db"
     exports_dir: str = "./data/exports"
+    export_logs_dir: str = "./data/exports/logs"
+    export_active_logs_dir: str = "./data/exports/logs/active"
+    export_archive_logs_dir: str = "./data/exports/logs/archive"
     base_ip: str = ""
     api_token: str = ""
     api_admin_secret: str = ""
@@ -41,6 +44,7 @@ class Config(BaseModel):
     local_port_start: int = 40000
     local_port_end: int = 49999
     randomize_local_ports: bool = True
+    docker_start_port_retries: int = 5
 
     # TTL settings
     default_ttl_minutes: int = 15
@@ -50,8 +54,18 @@ class Config(BaseModel):
     daemon_interval: int = 10
     restart_cooldown_seconds: int = 300
     auto_heal_exports: bool = True
+    export_auto_heal_interval_seconds: int = 120
+    export_start_lock_timeout_seconds: int = 60
+    export_start_lock_stale_seconds: int = 180
     export_endpoint_check_interval_seconds: int = 120
     export_endpoint_check_timeout_seconds: int = 5
+    export_endpoint_check_grace_seconds: int = 120
+    pinggy_startup_retries: int = 3
+    pinggy_start_timeout_seconds: int = 30
+    pinggy_ready_probe_timeout_seconds: int = 2
+    pinggy_stability_seconds: int = 10
+    pinggy_start_probe_connect: bool = False
+    localtunnel_stability_seconds: int = 5
 
     class Config:
         extra = "allow"
@@ -88,6 +102,15 @@ class Config(BaseModel):
             or values.get("exports_path")
         )
         values["exports_dir"] = cls._normalize_path(exports_dir or str(Path(dir_app) / "exports"))
+        values["export_logs_dir"] = cls._normalize_path(
+            values.get("export_logs_dir") or str(Path(values["exports_dir"]) / "logs")
+        )
+        values["export_active_logs_dir"] = cls._normalize_path(
+            values.get("export_active_logs_dir") or str(Path(values["export_logs_dir"]) / "active")
+        )
+        values["export_archive_logs_dir"] = cls._normalize_path(
+            values.get("export_archive_logs_dir") or str(Path(values["export_logs_dir"]) / "archive")
+        )
 
         if not values.get("ngrok_tokens"):
             legacy_tunnels = values.get("tunnels", {}) or {}

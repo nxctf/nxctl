@@ -203,6 +203,7 @@ Examples:
     test_cmd = subparsers.add_parser("test", help="Actively test tunnel endpoints")
     add_debug_flag(test_cmd, default=argparse.SUPPRESS)
     test_cmd.add_argument("name", nargs="?", help="Optional challenge name filter")
+    test_cmd.add_argument("--heal", action="store_true", help="Restart unhealthy/missing exports")
     test_cmd.set_defaults(func=cmd_test)
 
     return parser

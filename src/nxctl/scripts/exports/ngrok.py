@@ -11,12 +11,14 @@ from pathlib import Path
 from typing import Optional
 
 from nxctl.scripts.exports.base import ExportProvider, ExportResult
+from nxctl.scripts.exports.logs import ExportLogStore
 from nxctl.core.utils import (
     is_pid_alive,
     load_state_file,
     save_state_file,
     delete_state_file,
     kill_process,
+    reap_subprocess,
 )
 
 from nxctl.core.constants import PROTOCOL_HTTP, PROTOCOL_TCP
@@ -34,12 +36,16 @@ class NgrokProvider(ExportProvider):
 
         self.state_dir = Path(getattr(config, "exports_dir", Path(config.cache_dir) / "exports"))
         self.state_dir.mkdir(parents=True, exist_ok=True)
+        self.logs = ExportLogStore(config)
 
     def _get_state_file(self, host_port: int) -> Path:
         return self.state_dir / f"ngrok_{host_port}.json"
 
     def _get_token_config_file(self, host_port: int, token_id: str) -> Path:
         return self.state_dir / f"ngrok_{host_port}_{token_id}.yml"
+
+    def _get_log_file(self, host_port: int) -> Path:
+        return self.logs.active_path(self.name, "port", host_port)
 
     def _configured_tokens(self) -> list[tuple[str, str]]:
         tokens = []
@@ -157,7 +163,10 @@ class NgrokProvider(ExportProvider):
         if not (pid > 0 and is_pid_alive(pid)):
             return False
         try:
-            cmdline = psutil.Process(pid).cmdline()
+            proc = psutil.Process(pid)
+            if proc.status() == psutil.STATUS_ZOMBIE:
+                return False
+            cmdline = proc.cmdline()
         except Exception:
             return False
         return self._is_ngrok_cmdline(cmdline)
@@ -274,6 +283,7 @@ class NgrokProvider(ExportProvider):
                 )
                 return ExportResult(url=public_url, pid=pid)
             logger.info("Ignoring stale ngrok state for port %s", host_port)
+            self.logs.archive(state.get("log_file") or self._get_log_file(host_port), self.name, "port", host_port, "stale")
             delete_state_file(self._get_state_file(host_port))
 
         try:
@@ -339,10 +349,11 @@ class NgrokProvider(ExportProvider):
 
             logger.info(f"Starting ngrok: {' '.join(cmd)}")
 
-            log_file = open(
-                self.state_dir / f"ngrok_{host_port}.log",
-                "w",
-            )
+            log_path = self._get_log_file(host_port)
+            self.logs.archive(log_path, self.name, "port", host_port, "previous")
+            log_file = open(log_path, "a", encoding="utf-8")
+            log_file.write(f"\n--- ngrok start {time.strftime('%Y-%m-%d %H:%M:%S')} port={host_port} ---\n")
+            log_file.flush()
 
             proc = subprocess.Popen(
                 cmd,
@@ -352,19 +363,18 @@ class NgrokProvider(ExportProvider):
                 env=env,
                 start_new_session=True,
             )
+            reap_subprocess(proc)
 
             deadline = time.time() + 20
 
             public_url = None
-            log_path = self.state_dir / f"ngrok_{host_port}.log"
-
             while time.time() < deadline:
 
                 if proc.poll() is not None:
 
                     try:
                         with open(
-                            self.state_dir / f"ngrok_{host_port}.log",
+                            log_path,
                             "r",
                         ) as f:
 
@@ -413,6 +423,7 @@ class NgrokProvider(ExportProvider):
                     "token_id": token_id,
                     "token_source": token_source,
                     "token_config": str(token_config) if token_config else "",
+                    "log_file": str(log_path),
                     "started_at": int(time.time()),
                 },
             )
@@ -429,6 +440,10 @@ class NgrokProvider(ExportProvider):
             )
 
         except Exception as e:
+            try:
+                self.logs.archive(self._get_log_file(host_port), self.name, "port", host_port, "failed")
+            except Exception:
+                pass
             raise RuntimeError(
                 f"Failed starting ngrok: {e}"
             )
@@ -458,6 +473,9 @@ class NgrokProvider(ExportProvider):
 
                 if kill_process(pid):
                     stopped = True
+            self.logs.archive(state.get("log_file") or self._get_log_file(host_port), self.name, "port", host_port, "stopped")
+        else:
+            self.logs.archive(self._get_log_file(host_port), self.name, "port", host_port, "stopped")
 
         delete_state_file(
             self._get_state_file(host_port)
