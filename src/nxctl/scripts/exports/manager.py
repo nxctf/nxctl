@@ -533,11 +533,28 @@ class ExportManager:
         if not endpoint:
             return False, "missing endpoint"
 
+        if export.get("provider") == EXPORT_PROVIDER_LOCALTUNNEL:
+            if export.get("status") == "dead":
+                return False, "process is not running"
+            return self._test_dns_endpoint(endpoint)
+
         protocol = str(export.get("protocol") or "").lower()
         if endpoint.startswith("tcp://") or protocol == PROTOCOL_TCP:
             return self._test_tcp_endpoint(endpoint, timeout)
 
         return self._test_http_endpoint(endpoint, timeout)
+
+    def _test_dns_endpoint(self, endpoint: str) -> tuple[bool, str]:
+        parsed = urlparse(endpoint if "://" in endpoint else f"http://{endpoint}")
+        host = parsed.hostname
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        if not host:
+            return False, "invalid endpoint"
+        try:
+            socket.getaddrinfo(host, port)
+            return True, ""
+        except Exception as exc:
+            return False, str(exc)
 
     def _test_http_endpoint(self, endpoint: str, timeout: float) -> tuple[bool, str]:
         try:
