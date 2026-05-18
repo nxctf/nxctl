@@ -109,7 +109,6 @@ def cmd_test(args) -> int:
             print(f"\n{red(ERR)} Challenge not found: {challenge_name}\n")
             return 1
 
-        export_manager.reconcile_exports()
         results = export_manager.test_tunnel_exports(challenge_name, mark_unhealthy=True)
         killed = export_manager.sweep_orphan_tunnel_processes()
 

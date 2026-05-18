@@ -387,7 +387,11 @@ class ExportManager:
             is_new = False
             try:
                 provider = self.get_provider(export.get("provider") or "")
-                if provider and hasattr(provider, "_load_state"):
+                if (
+                    export.get("provider") != EXPORT_PROVIDER_PINGGY
+                    and provider
+                    and hasattr(provider, "_load_state")
+                ):
                     if export.get("provider") == "localtunnel":
                         _, state = provider._load_state(int(export.get("port") or 0))
                     else:
@@ -400,6 +404,11 @@ class ExportManager:
                 pass
 
             if is_new:
+                endpoint = str(export.get("url") or export.get("endpoint") or "").strip()
+                if not endpoint:
+                    is_new = False
+
+            if is_new:
                 # Inside grace period: immediately report Reachable to preserve hostname
                 results.append({
                     "challenge": export.get("challenge") or "-",
@@ -409,7 +418,7 @@ class ExportManager:
                     "reachable": True,
                     "health": "reachable",
                     "latency_ms": 0,
-                    "url": export.get("public_endpoint") or export.get("public_url") or "-",
+                    "url": endpoint,
                     "error": None,
                 })
                 continue
@@ -503,10 +512,11 @@ class ExportManager:
                         if export.get("id"):
                             self._mark_id_inactive(int(export["id"]))
                     else:
-                        # Override liveness result to preserve the active status (prevents auto-heal recreation)
-                        result["reachable"] = True
-                        result["health"] = "reachable (cooldown)"
-                        result["error"] = f"unreachable: {error} (preserving)"
+                        if export.get("provider") != EXPORT_PROVIDER_PINGGY:
+                            # Override liveness result to preserve the active status (prevents auto-heal recreation)
+                            result["reachable"] = True
+                            result["health"] = "reachable (cooldown)"
+                            result["error"] = f"unreachable: {error} (preserving)"
 
                 except Exception as exc:
                     logger.warning(
