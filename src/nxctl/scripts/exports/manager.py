@@ -335,6 +335,20 @@ class ExportManager:
         if not provider:
             return False
 
+        # Apply a 45-second startup grace period during checks to let the tunnel fully register and stabilize
+        try:
+            if hasattr(provider, "_load_state"):
+                if export.get("provider") == "localtunnel":
+                    _, state = provider._load_state(int(export.get("port") or 0))
+                else:
+                    _, state = provider._load_state(export.get("challenge") or "", int(export.get("port") or 0))
+                if state:
+                    started_at = int(state.get("started_at", 0))
+                    if started_at > 0 and (time.time() - started_at) < 45:
+                        return True
+        except Exception:
+            pass
+
         try:
             return bool(provider.is_running(export.get("challenge") or "", int(export.get("port") or 0)))
         except Exception:
@@ -353,6 +367,8 @@ class ExportManager:
         mark_unhealthy: bool = False,
     ) -> list[dict]:
         """Actively test tunnel endpoints, not just provider PIDs."""
+        from nxctl.core.utils import is_port_in_use, load_state_file, save_state_file
+
         timeout = float(
             timeout
             if timeout is not None
@@ -367,6 +383,37 @@ class ExportManager:
 
         results: list[dict] = []
         for export in exports:
+            # Check startup grace period (45 seconds) before active liveness check probe
+            is_new = False
+            try:
+                provider = self.get_provider(export.get("provider") or "")
+                if provider and hasattr(provider, "_load_state"):
+                    if export.get("provider") == "localtunnel":
+                        _, state = provider._load_state(int(export.get("port") or 0))
+                    else:
+                        _, state = provider._load_state(export.get("challenge") or "", int(export.get("port") or 0))
+                    if state:
+                        started_at = int(state.get("started_at", 0))
+                        if started_at > 0 and (time.time() - started_at) < 45:
+                            is_new = True
+            except Exception:
+                pass
+
+            if is_new:
+                # Inside grace period: immediately report Reachable to preserve hostname
+                results.append({
+                    "challenge": export.get("challenge") or "-",
+                    "provider": export.get("provider") or "-",
+                    "type": export.get("type") or "-",
+                    "port_label": export.get("port_label") or export.get("port") or "-",
+                    "reachable": True,
+                    "health": "reachable",
+                    "latency_ms": 0,
+                    "url": export.get("public_endpoint") or export.get("public_url") or "-",
+                    "error": None,
+                })
+                continue
+
             started = time.monotonic()
             ok, error = self._test_export_endpoint(export, timeout)
             latency_ms = int((time.monotonic() - started) * 1000)
@@ -379,13 +426,88 @@ class ExportManager:
             })
             results.append(result)
 
+            if ok:
+                # Clear failure timestamp if it was previously set
+                try:
+                    provider = self.get_provider(export.get("provider") or "")
+                    if provider:
+                        if export.get("provider") == "localtunnel":
+                            state_path = provider._get_state_file(int(export.get("port") or 0))
+                        elif export.get("provider") == "pinggy":
+                            state_path = provider._get_state_file(export.get("challenge") or "", int(export.get("port") or 0))
+                        else:
+                            state_path = None
+
+                        if state_path and state_path.exists():
+                            state = load_state_file(state_path)
+                            if "first_failed_at" in state:
+                                del state["first_failed_at"]
+                                save_state_file(state_path, state)
+                except Exception:
+                    pass
+
             if mark_unhealthy and not ok:
                 try:
-                    self.stop_export(
-                        export.get("challenge") or "",
-                        export.get("provider") or "",
-                        int(export.get("port") or 0),
-                    )
+                    process_alive = self.check_export_alive(export)
+                    port_in_use = is_port_in_use(int(export.get("port") or 0))
+                    should_recreate = False
+
+                    if not process_alive:
+                        logger.info("Export process for %s (%s) is dead, marking unhealthy.", export.get("challenge"), export.get("provider"))
+                        should_recreate = True
+                    elif not port_in_use:
+                        logger.info("Local port %s for %s is not active, marking unhealthy.", export.get("port"), export.get("challenge"))
+                        should_recreate = True
+                    else:
+                        provider = self.get_provider(export.get("provider") or "")
+                        if provider:
+                            try:
+                                if export.get("provider") == "localtunnel":
+                                    state_path = provider._get_state_file(int(export.get("port") or 0))
+                                elif export.get("provider") == "pinggy":
+                                    state_path = provider._get_state_file(export.get("challenge") or "", int(export.get("port") or 0))
+                                else:
+                                    state_path = None
+
+                                if state_path and state_path.exists():
+                                    state = load_state_file(state_path)
+                                    first_failed = state.get("first_failed_at")
+                                    now = int(time.time())
+
+                                    if not first_failed:
+                                        state["first_failed_at"] = now
+                                        save_state_file(state_path, state)
+                                        logger.info("Export %s for %s failed active probe, starting cooldown...", export.get("provider"), export.get("challenge"))
+                                    else:
+                                        cooldown = int(getattr(self.config, "restart_cooldown_seconds", 300) or 300)
+                                        elapsed = now - int(first_failed)
+                                        if elapsed >= cooldown:
+                                            logger.info("Export %s for %s failed active probe beyond cooldown (%ss), marking unhealthy.", export.get("provider"), export.get("challenge"), elapsed)
+                                            should_recreate = True
+                                        else:
+                                            logger.info("Export %s for %s failed active probe, within cooldown (%ss/%ss). Preserving.", export.get("provider"), export.get("challenge"), elapsed, cooldown)
+                                else:
+                                    should_recreate = True
+                            except Exception as e:
+                                logger.warning("Error handling failure cooldown for %s: %s", export.get("challenge"), e)
+                                should_recreate = True
+                        else:
+                            should_recreate = True
+
+                    if should_recreate:
+                        self.stop_export(
+                            export.get("challenge") or "",
+                            export.get("provider") or "",
+                            int(export.get("port") or 0),
+                        )
+                        if export.get("id"):
+                            self._mark_id_inactive(int(export["id"]))
+                    else:
+                        # Override liveness result to preserve the active status (prevents auto-heal recreation)
+                        result["reachable"] = True
+                        result["health"] = "reachable (cooldown)"
+                        result["error"] = f"unreachable: {error} (preserving)"
+
                 except Exception as exc:
                     logger.warning(
                         "Failed stopping unhealthy %s export for %s: %s",
@@ -393,11 +515,6 @@ class ExportManager:
                         export.get("challenge"),
                         exc,
                     )
-                try:
-                    if export.get("id"):
-                        self._mark_id_inactive(int(export["id"]))
-                except Exception:
-                    pass
 
         return results
 
@@ -721,7 +838,7 @@ class ExportManager:
             except Exception:
                 return None
 
-        if "pinggy" in basenames or proc_name == "pinggy" or "tcp@free.pinggy.io" in command:
+        if "pinggy" in basenames or proc_name == "pinggy" or "pinggy.io" in command:
             match = re.search(r"-r0:localhost:(\d+)", command)
             if match:
                 return EXPORT_PROVIDER_PINGGY, int(match.group(1))
@@ -895,7 +1012,7 @@ class ExportManager:
         if "ngrok" in basenames or proc_name == "ngrok":
             return True
 
-        if "pinggy" in basenames or proc_name == "pinggy" or "tcp@free.pinggy.io" in command:
+        if "pinggy" in basenames or proc_name == "pinggy" or "pinggy.io" in command:
             return True
 
         if "lt" in basenames and "--port" in cmdline:

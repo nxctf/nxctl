@@ -71,28 +71,34 @@ def _port_summary(ports) -> str:
 
 def _start_available_exports(export_manager, challenge_name: str, challenge, ports=None) -> tuple[list[dict], list[dict]]:
     """Start every auto-discovered export while preserving default tunnel selection."""
-    all_exports: list[dict] = []
-    all_failures: list[dict] = []
-    export_ports = ports or [SimpleNamespace(
-        host_port=challenge.service_port,
-        service_port=challenge.service_port,
-        service_type=challenge.service_type,
-    )]
+    from nxctl.core.utils import ChallengeLock
+    from pathlib import Path
 
-    for port in export_ports:
-        port_challenge = SimpleNamespace(
-            service_port=int(getattr(port, "host_port", getattr(port, "service_port", challenge.service_port))),
-            service_type=str(getattr(port, "service_type", challenge.service_type)),
-        )
-        exports, failures = export_manager.start_available_exports(
-            challenge_name,
-            port_challenge,
-            default_providers=_provider_priority(port_challenge.service_type),
-        )
-        all_exports.extend(exports)
-        all_failures.extend(failures)
+    exports_dir = getattr(export_manager.config, "exports_dir", Path(export_manager.config.cache_dir) / "exports")
 
-    return all_exports, all_failures
+    with ChallengeLock(challenge_name, exports_dir):
+        all_exports: list[dict] = []
+        all_failures: list[dict] = []
+        export_ports = ports or [SimpleNamespace(
+            host_port=challenge.service_port,
+            service_port=challenge.service_port,
+            service_type=challenge.service_type,
+        )]
+
+        for port in export_ports:
+            port_challenge = SimpleNamespace(
+                service_port=int(getattr(port, "host_port", getattr(port, "service_port", challenge.service_port))),
+                service_type=str(getattr(port, "service_type", challenge.service_type)),
+            )
+            exports, failures = export_manager.start_available_exports(
+                challenge_name,
+                port_challenge,
+                default_providers=_provider_priority(port_challenge.service_type),
+            )
+            all_exports.extend(exports)
+            all_failures.extend(failures)
+
+        return all_exports, all_failures
 
 
 def _stop_challenge_completely(name: str, challenge_service, runtime_service, export_manager):

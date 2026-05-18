@@ -153,35 +153,62 @@ class LocaltunnelProvider(ExportProvider):
 
                     public_url = self._extract_url(content)
                     if public_url:
+                        # Extract leaf child PID if spawned via a shell/batch wrapper
+                        real_pid = proc.pid
+                        try:
+                            parent = psutil.Process(proc.pid)
+                            children = parent.children(recursive=True)
+                            for child in children:
+                                child_name = child.name().lower()
+                                child_cmd = " ".join(child.cmdline()).lower()
+                                if "node" in child_name or "lt" in child_cmd:
+                                    real_pid = child.pid
+                                    break
+                        except Exception:
+                            pass
+
                         save_state_file(
                             self._get_state_file(host_port),
                             {
-                                "pid": proc.pid,
+                                "pid": real_pid,
                                 "public_url": public_url,
                                 "host_port": host_port,
                                 "log_file": str(log_path),
                                 "started_at": int(time.time()),
                             }
                         )
-                        logger.info(f"Localtunnel started: {public_url}")
-                        return ExportResult(url=public_url, pid=proc.pid)
+                        logger.info(f"Localtunnel started: {public_url} (PID {real_pid})")
+                        return ExportResult(url=public_url, pid=real_pid)
 
                     if proc.poll() is not None:
                         full_log = log_path.read_text(encoding="utf-8", errors="ignore") if log_path.exists() else ""
                         public_url = self._extract_url(full_log)
                         if public_url:
+                            real_pid = proc.pid
+                            try:
+                                parent = psutil.Process(proc.pid)
+                                children = parent.children(recursive=True)
+                                for child in children:
+                                    child_name = child.name().lower()
+                                    child_cmd = " ".join(child.cmdline()).lower()
+                                    if "node" in child_name or "lt" in child_cmd:
+                                        real_pid = child.pid
+                                        break
+                            except Exception:
+                                pass
+
                             save_state_file(
                                 self._get_state_file(host_port),
                                 {
-                                    "pid": proc.pid,
+                                    "pid": real_pid,
                                     "public_url": public_url,
                                     "host_port": host_port,
                                     "log_file": str(log_path),
                                     "started_at": int(time.time()),
                                 }
                             )
-                            logger.info(f"Localtunnel started: {public_url}")
-                            return ExportResult(url=public_url, pid=proc.pid)
+                            logger.info(f"Localtunnel started: {public_url} (PID {real_pid})")
+                            return ExportResult(url=public_url, pid=real_pid)
 
                         last_error = full_log.strip() or "localtunnel exited before printing a URL"
                         logger.info("localtunnel attempt %s/%s failed: %s", attempt, attempts, last_error)

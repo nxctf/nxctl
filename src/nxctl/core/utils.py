@@ -186,3 +186,55 @@ def probe_endpoint(url: str, timeout: float = 5.0) -> bool:
             return resp.status < 500
     except Exception:
         return False
+
+
+class ChallengeLock:
+    """A cross-process file lock for a challenge to prevent race conditions between daemon and CLI."""
+    def __init__(self, challenge_name: str, exports_dir: str):
+        self.challenge_name = challenge_name
+        safe_name = challenge_name.replace("/", "_")
+        locks_dir = Path(exports_dir) / "locks"
+        locks_dir.mkdir(parents=True, exist_ok=True)
+        self.lock_file = locks_dir / f"{safe_name}.lock"
+        self.fd = None
+
+    def __enter__(self):
+        try:
+            self.fd = open(self.lock_file, "w")
+            if os.name == "nt":
+                import msvcrt
+                # Lock 1 byte exclusively and block until acquired
+                msvcrt.locking(self.fd.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self.fd.fileno(), fcntl.LOCK_EX)
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning("Failed to acquire lock for challenge %s: %s", self.challenge_name, e)
+            if self.fd:
+                try:
+                    self.fd.close()
+                except Exception:
+                    pass
+                self.fd = None
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.fd:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    self.fd.seek(0)
+                    msvcrt.locking(self.fd.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(self.fd.fileno(), fcntl.LOCK_UN)
+            except Exception:
+                pass
+            finally:
+                try:
+                    self.fd.close()
+                except Exception:
+                    pass
+                self.fd = None

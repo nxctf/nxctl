@@ -40,9 +40,9 @@ class PinggyProvider(ExportProvider):
     def _get_log_file(self, challenge_name: str, host_port: int) -> Path:
         """Get log file path for a challenge and port."""
         safe_name = challenge_name.replace("/", "_")
-        log_dir = Path("/tmp/pinggy")
+        log_dir = self.state_dir / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
-        return log_dir / f"{safe_name}_{host_port}.log"
+        return log_dir / f"pinggy_{safe_name}_{host_port}.log"
 
     def _is_pinggy_pid(self, pid: int, host_port: int) -> bool:
         """Return True when PID is the pinggy process for this local port."""
@@ -55,7 +55,8 @@ class PinggyProvider(ExportProvider):
         command = " ".join(cmdline).lower()
         return (
             "pinggy" in {Path(part).name.lower() for part in cmdline if part}
-            or "tcp@free.pinggy.io" in command
+            or "pinggy" in command
+            or "pinggy.io" in command
         ) and f"localhost:{host_port}" in command
 
     def _find_pinggy_pid(self, host_port: int) -> int:
@@ -67,7 +68,7 @@ class PinggyProvider(ExportProvider):
                 command = " ".join(cmdline).lower()
                 name = str(proc.info.get("name") or "").lower()
                 if (
-                    ("pinggy" in {Path(part).name.lower() for part in cmdline if part} or name == "pinggy" or "tcp@free.pinggy.io" in command)
+                    ("pinggy" in {Path(part).name.lower() for part in cmdline if part} or name == "pinggy" or "pinggy" in command or "pinggy.io" in command)
                     and f"localhost:{host_port}" in command
                 ):
                     return pid
@@ -134,43 +135,59 @@ class PinggyProvider(ExportProvider):
             logger.info("Killing orphan pinggy process for %s:%s before restart", challenge_name, host_port)
             kill_process(existing_pid)
 
-        # Start pinggy directly and read the endpoint from the log file.
-        log_handle = None
-        try:
-            log_file = self._get_log_file(challenge_name, host_port)
-            log_handle = open(log_file, "w", encoding="utf-8")
-            proc = subprocess.Popen(
-                ["pinggy", "-p", "443", f"-R0:localhost:{host_port}", "tcp@free.pinggy.io"],
-                stdin=subprocess.DEVNULL,
-                stdout=log_handle,
-                stderr=subprocess.STDOUT,
-                text=True,
-                start_new_session=True,
-            )
+        # Get startup configurations
+        timeout = int(getattr(self.config, "pinggy_startup_timeout", getattr(self.config, "export_endpoint_check_timeout_seconds", 20)) or 20)
+        attempts = int(getattr(self.config, "pinggy_startup_retries", 3) or 3)
+        last_error = ""
 
-            deadline = time.time() + 10
-            while time.time() < deadline:
+        for attempt in range(1, attempts + 1):
+            proc = None
+            try:
+                log_file = self._get_log_file(challenge_name, host_port)
+                log_file.write_text("", encoding="utf-8")
+                log_handle = open(log_file, "a", encoding="utf-8")
                 try:
-                    log_handle.flush()
-                except Exception:
-                    pass
+                    proc = subprocess.Popen(
+                        ["pinggy", "-p", "443", f"-R0:localhost:{host_port}", "tcp@free.pinggy.io"],
+                        stdin=subprocess.DEVNULL,
+                        stdout=log_handle,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        start_new_session=True,
+                    )
+                finally:
+                    log_handle.close()
 
-                if proc.poll() is not None:
-                    content = log_file.read_text(encoding="utf-8", errors="ignore") if log_file.exists() else ""
-                    raise RuntimeError(content.strip() or "pinggy exited before returning an endpoint")
+                deadline = time.time() + timeout
+                position = 0
+                while time.time() < deadline:
+                    content = ""
+                    if log_file.exists():
+                        with open(log_file, "r", encoding="utf-8", errors="ignore") as fh:
+                            fh.seek(position)
+                            content = fh.read()
+                            position = fh.tell()
 
-                if log_file.exists():
-                    content = log_file.read_text(encoding="utf-8", errors="ignore")
                     endpoint = self._extract_endpoint(content)
                     if endpoint:
+                        # Extract leaf child PID if spawned via a shell/batch wrapper
+                        real_pid = proc.pid
                         try:
-                            log_handle.close()
+                            parent = psutil.Process(proc.pid)
+                            children = parent.children(recursive=True)
+                            for child in children:
+                                child_name = child.name().lower()
+                                child_cmd = " ".join(child.cmdline()).lower()
+                                if "pinggy" in child_name or "ssh" in child_name or "pinggy" in child_cmd or "pinggy.io" in child_cmd:
+                                    real_pid = child.pid
+                                    break
                         except Exception:
                             pass
+
                         save_state_file(
                             self._get_state_file(challenge_name, host_port),
                             {
-                                "pid": proc.pid,
+                                "pid": real_pid,
                                 "public_endpoint": endpoint,
                                 "log_file": str(log_file),
                                 "challenge_name": challenge_name,
@@ -178,33 +195,61 @@ class PinggyProvider(ExportProvider):
                                 "started_at": int(time.time()),
                             }
                         )
-                        logger.info(f"Pinggy tunnel started: {endpoint}")
-                        return ExportResult(url=endpoint, pid=proc.pid)
+                        logger.info(f"Pinggy tunnel started: {endpoint} (PID {real_pid})")
+                        return ExportResult(url=endpoint, pid=real_pid)
 
-                time.sleep(0.2)
+                    if proc.poll() is not None:
+                        full_log = log_file.read_text(encoding="utf-8", errors="ignore") if log_file.exists() else ""
+                        endpoint = self._extract_endpoint(full_log)
+                        if endpoint:
+                            real_pid = proc.pid
+                            try:
+                                parent = psutil.Process(proc.pid)
+                                children = parent.children(recursive=True)
+                                for child in children:
+                                    child_name = child.name().lower()
+                                    child_cmd = " ".join(child.cmdline()).lower()
+                                    if "pinggy" in child_name or "ssh" in child_name or "pinggy" in child_cmd or "pinggy.io" in child_cmd:
+                                        real_pid = child.pid
+                                        break
+                            except Exception:
+                                pass
 
-            try:
-                log_handle.close()
-            except Exception:
-                pass
-            if proc.poll() is None:
-                kill_process(proc.pid)
-            raise RuntimeError(f"Timed out waiting for pinggy endpoint in {log_file}")
+                            save_state_file(
+                                self._get_state_file(challenge_name, host_port),
+                                {
+                                    "pid": real_pid,
+                                    "public_endpoint": endpoint,
+                                    "log_file": str(log_file),
+                                    "challenge_name": challenge_name,
+                                    "host_port": host_port,
+                                    "started_at": int(time.time()),
+                                }
+                            )
+                            logger.info(f"Pinggy tunnel started: {endpoint} (PID {real_pid})")
+                            return ExportResult(url=endpoint, pid=real_pid)
 
-        except FileNotFoundError:
-            if log_handle:
-                try:
-                    log_handle.close()
-                except Exception:
-                    pass
-            raise RuntimeError("pinggy not installed. Install from https://pinggy.io/")
-        except Exception as e:
-            if log_handle:
-                try:
-                    log_handle.close()
-                except Exception:
-                    pass
-            raise RuntimeError(f"Failed to start pinggy: {str(e)}")
+                        last_error = full_log.strip() or "pinggy exited before returning an endpoint"
+                        logger.info("pinggy attempt %s/%s failed: %s", attempt, attempts, last_error)
+                        break
+
+                    time.sleep(0.2)
+
+                else:
+                    last_error = f"timed out after {timeout}s waiting for pinggy endpoint"
+                    if proc and proc.poll() is None:
+                        kill_process(proc.pid)
+                    logger.info("pinggy attempt %s/%s failed: %s", attempt, attempts, last_error)
+
+            except Exception as e:
+                last_error = str(e)
+                if proc and proc.poll() is None:
+                    kill_process(proc.pid)
+                logger.info("pinggy attempt %s/%s failed: %s", attempt, attempts, last_error)
+
+            time.sleep(1.0)
+
+        raise RuntimeError(f"Failed to start pinggy after {attempts} attempts: {last_error}")
 
     def stop(self, challenge_name: str, host_port: int = 0) -> bool:
         """Stop pinggy tunnel."""

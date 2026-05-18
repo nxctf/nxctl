@@ -235,3 +235,26 @@ API_TOKEN=client123 API_ADMIN_SECRET=aria123 CHALLENGE=simplee ./test_api.sh
 START_API=1 API_TOKEN=client123 API_ADMIN_SECRET=aria123 ./test_api.sh
 RUN_SYNC=1 RUN_ADMIN_GLOBAL=1 API_TOKEN=client123 API_ADMIN_SECRET=aria123 GLOBAL_CURL_TIMEOUT=600 ./test_api.sh
 ```
+
+
+```bash
+pkill -9 -f pinggy
+pkill -9 -f "lt --port"
+pkill -9 -f ngrok
+
+sleep 2
+
+# kill parent dari zombie pinggy/ngrok
+ps -eo pid,ppid,stat,cmd | \
+awk '$3 ~ /Z/ && $4 ~ /(pinggy|ngrok)/ {print $2}' | \
+sort -u | \
+xargs -r kill -9
+
+sleep 1
+
+ps aux | grep -E '[p]inggy|[n]grok|lt --port'
+
+find . -type d -name "__pycache__" -exec rm -rf {} +
+
+rm -rf data/exports/*
+```
