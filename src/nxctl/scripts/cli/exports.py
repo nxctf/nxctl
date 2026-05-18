@@ -1,5 +1,12 @@
 """CLI command handlers for challenge export management."""
 
+import os
+import shutil
+import signal
+import subprocess
+import time
+from pathlib import Path
+
 from nxctl.core.constants import EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_LOCALTUNNEL, EXPORT_PROVIDER_PINGGY
 from nxctl.scripts.cli.base import (
     get_services,
@@ -216,4 +223,140 @@ def cmd_test(args) -> int:
         return 1 if failed else 0
     except Exception as e:
         print(f"\n{red(ERR)} Endpoint test failed: {str(e)}\n")
+        return 1
+
+
+def _list_tunnel_processes() -> str:
+    result = subprocess.run(
+        ["ps", "aux"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return (result.stderr or "").strip()
+
+    lines = [
+        line
+        for line in result.stdout.splitlines()
+        if "pinggy" in line or "ngrok" in line or "lt --port" in line
+    ]
+    return "\n".join(lines)
+
+
+def _kill_by_pattern(pattern: str) -> None:
+    subprocess.run(
+        ["pkill", "-9", "-f", pattern],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+
+
+def _kill_zombie_parents() -> int:
+    killed = 0
+    result = subprocess.run(
+        ["ps", "-eo", "pid,ppid,stat,cmd"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return killed
+
+    parent_pids: set[int] = set()
+    for line in result.stdout.splitlines()[1:]:
+        parts = line.split(None, 3)
+        if len(parts) < 4:
+            continue
+        _, ppid, stat, cmd = parts
+        if "Z" in stat and ("pinggy" in cmd or "ngrok" in cmd):
+            try:
+                parent_pid = int(ppid)
+            except ValueError:
+                continue
+            if parent_pid > 1 and parent_pid != os.getpid():
+                parent_pids.add(parent_pid)
+
+    for parent_pid in parent_pids:
+        try:
+            os.kill(parent_pid, signal.SIGKILL)
+            killed += 1
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            pass
+        except Exception:
+            pass
+
+    return killed
+
+
+def _remove_pycache_dirs(root: Path) -> int:
+    removed = 0
+    for path in sorted(root.rglob("__pycache__"), key=lambda item: len(item.parts), reverse=True):
+        if not path.is_dir():
+            continue
+        try:
+            shutil.rmtree(path)
+            removed += 1
+        except Exception:
+            pass
+    return removed
+
+
+def _clear_exports_dir(exports_dir: Path) -> int:
+    if not exports_dir.exists() or not exports_dir.is_dir():
+        return 0
+
+    removed = 0
+    for child in exports_dir.iterdir():
+        try:
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+            removed += 1
+        except Exception:
+            pass
+    return removed
+
+
+def cmd_ps(args) -> int:
+    try:
+        config, _, _, export_manager = get_services()
+
+        if getattr(args, "kill", False):
+            _kill_by_pattern("pinggy")
+            _kill_by_pattern("lt --port")
+            _kill_by_pattern("ngrok")
+            time.sleep(2)
+
+            zombie_parents = _kill_zombie_parents()
+            time.sleep(1)
+
+            try:
+                export_manager.mark_all_exports_inactive()
+            except Exception:
+                pass
+
+            pycache_count = _remove_pycache_dirs(Path("."))
+            exports_count = _clear_exports_dir(Path(config.exports_dir))
+
+            step_ok("Killed pinggy/ngrok/localtunnel processes")
+            if zombie_parents:
+                step_ok(f"Killed zombie parent processes: {zombie_parents}")
+            step_ok(f"Removed __pycache__ directories: {pycache_count}")
+            step_ok(f"Cleared export state entries: {exports_count}")
+
+        output = _list_tunnel_processes()
+        print()
+        if output:
+            print(output)
+        else:
+            print(yellow("No pinggy/ngrok/localtunnel processes found"))
+        print()
+        return 0
+    except Exception as e:
+        print(f"\n{red(ERR)} Process check failed: {str(e)}\n")
         return 1

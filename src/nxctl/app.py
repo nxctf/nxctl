@@ -73,6 +73,7 @@ from nxctl.scripts.cli.exports import (
     cmd_unexport,
     cmd_exports,
     cmd_test,
+    cmd_ps,
 )
 
 
@@ -104,6 +105,7 @@ Examples:
   nxctl status                    Show running challenges + exports
   nxctl export ngrok web/sqli     Manual ngrok tunnel
   nxctl unexport web/sqli         Stop all exports
+  nxctl ps                        Show tunnel provider processes
         """.strip()
     )
     add_debug_flag(parser, default=False)
@@ -204,6 +206,11 @@ Examples:
     add_debug_flag(test_cmd, default=argparse.SUPPRESS)
     test_cmd.add_argument("name", nargs="?", help="Optional challenge name filter")
     test_cmd.set_defaults(func=cmd_test)
+
+    ps_cmd = subparsers.add_parser("ps", help="Show or kill tunnel provider processes")
+    add_debug_flag(ps_cmd, default=argparse.SUPPRESS)
+    ps_cmd.add_argument("--kill", action="store_true", help="Kill tunnel processes and clear export state")
+    ps_cmd.set_defaults(func=cmd_ps)
 
     return parser
 

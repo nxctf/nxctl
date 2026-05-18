@@ -71,7 +71,7 @@ _nxctl_completion() {
     prev="${COMP_WORDS[COMP_CWORD-1]}"
     cmd="${COMP_WORDS[1]}"
 
-    local commands="sync list inspect add remove up down restart status extend daemon api export unexport exports test"
+    local commands="sync list inspect add remove up down restart status extend daemon api export unexport exports test ps"
     local provider_names="ngrok localtunnel pinggy"
 
     if [[ ${COMP_CWORD} -eq 1 ]]; then
@@ -143,6 +143,9 @@ _nxctl_completion() {
             fi
             ;;
         exports)
+            ;;
+        ps)
+            COMPREPLY=( $(compgen -W "--kill" -- "${cur}") )
             ;;
     esac
 
