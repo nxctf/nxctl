@@ -110,12 +110,21 @@ class CloudflareConfig(BaseModel):
         extra = "allow"
 
 
+class BoreConfig(BaseModel):
+    enabled: bool = True
+    server: str = "bore.pub"
+
+    class Config:
+        extra = "allow"
+
+
 class TunnelsConfig(BaseModel):
     default: str = "localtunnel"
     ngrok: NgrokConfig = Field(default_factory=NgrokConfig)
     localtunnel: LocalTunnelConfig = Field(default_factory=LocalTunnelConfig)
     pinggy: PinggyConfig = Field(default_factory=PinggyConfig)
     cloudflare: CloudflareConfig = Field(default_factory=CloudflareConfig)
+    bore: BoreConfig = Field(default_factory=BoreConfig)
 
     class Config:
         extra = "allow"
@@ -201,6 +210,14 @@ class Config(BaseModel):
     @property
     def enable_cloudflare(self) -> bool:
         return self.tunnels.cloudflare.enabled
+
+    @property
+    def enable_bore(self) -> bool:
+        return self.tunnels.bore.enabled
+
+    @property
+    def bore_server(self) -> str:
+        return self.tunnels.bore.server
 
     @property
     def local_port_start(self) -> int:
@@ -398,6 +415,8 @@ class Config(BaseModel):
             "enable_localtunnel": ("tunnels", "localtunnel", "enabled"),
             "enable_pinggy": ("tunnels", "pinggy", "enabled"),
             "enable_cloudflare": ("tunnels", "cloudflare", "enabled"),
+            "enable_bore": ("tunnels", "bore", "enabled"),
+            "bore_server": ("tunnels", "bore", "server"),
             "ngrok_tokens": ("tunnels", "ngrok", "tokens"),
             "ngrok_max_sessions_per_token": ("tunnels", "ngrok", "max_sessions_per_token"),
         }

@@ -70,7 +70,7 @@ def cmd_list(args) -> int:
             print(f"{yellow('No challenges found')}")
             return 0
 
-        
+
         print(f"{'-' * 124}")
         print(f"{'Name':28} {'Primary':16} {'Ports':46} {'Path'}")
         print(f"{'-' * 124}")
@@ -107,6 +107,8 @@ def cmd_inspect(args) -> int:
             ngrok_status = red("Disabled")
         localtunnel_status = green("Enabled") if getattr(config, "enable_localtunnel", True) else red("Disabled")
         pinggy_status = green("Enabled") if getattr(config, "enable_pinggy", True) else red("Disabled")
+        cloudflare_status = green("Enabled") if getattr(config, "enable_cloudflare", False) else red("Disabled")
+        bore_status = green("Enabled") if getattr(config, "enable_bore", True) else red("Disabled")
         restart_cd = yellow(f"{format_duration(cooldown)} left") if cooldown else green("Ready")
         ttl_value = green(ttl_text) if ttl_ok and ttl_text != "-" else red("Expired") if ttl_text != "-" else "-"
         print(panel(
@@ -128,6 +130,8 @@ def cmd_inspect(args) -> int:
                 ("Ngrok", ngrok_status),
                 ("Localtunnel", localtunnel_status),
                 ("Pinggy", pinggy_status),
+                ("Cloudflare", cloudflare_status),
+                ("Bore", bore_status),
                 ("Auto Export", green("Enabled")),
                 ("Auto Heal", green("Enabled") if getattr(config, "auto_heal_exports", False) else red("Disabled")),
             ],

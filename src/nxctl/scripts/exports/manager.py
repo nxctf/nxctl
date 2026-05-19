@@ -18,6 +18,7 @@ from nxctl.core.constants import (
     EXPORT_PROVIDER_LOCALTUNNEL,
     EXPORT_PROVIDER_PINGGY,
     EXPORT_PROVIDER_CLOUDFLARE,
+    EXPORT_PROVIDER_BORE,
     EXPORT_PROVIDER_BASE_IP,
     PROTOCOL_TCP,
 )
@@ -39,12 +40,14 @@ class ExportManager:
             from nxctl.scripts.exports.localtunnel import LocaltunnelProvider
             from nxctl.scripts.exports.pinggy import PinggyProvider
             from nxctl.scripts.exports.cloudflare import CloudflareProvider
+            from nxctl.scripts.exports.bore import BoreProvider
 
             self.providers: Dict[str, Any] = {
                 EXPORT_PROVIDER_NGROK: NgrokProvider(config),
                 EXPORT_PROVIDER_LOCALTUNNEL: LocaltunnelProvider(config),
                 EXPORT_PROVIDER_PINGGY: PinggyProvider(config),
                 EXPORT_PROVIDER_CLOUDFLARE: CloudflareProvider(config),
+                EXPORT_PROVIDER_BORE: BoreProvider(config),
             }
 
     def get_provider(self, provider_name: str) -> Optional[Any]:
@@ -177,8 +180,8 @@ class ExportManager:
     def default_providers_for(self, protocol: str) -> list[str]:
         """Return the existing protocol-based default tunnel providers."""
         if protocol == PROTOCOL_TCP:
-            return [EXPORT_PROVIDER_PINGGY]
-        return [EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_LOCALTUNNEL, EXPORT_PROVIDER_CLOUDFLARE]
+            return [EXPORT_PROVIDER_PINGGY, EXPORT_PROVIDER_BORE]
+        return [EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_LOCALTUNNEL, EXPORT_PROVIDER_CLOUDFLARE, EXPORT_PROVIDER_BORE]
 
     def stop_export(self, challenge_name: str, provider_name: str, host_port: int = 0) -> bool:
         """Stop an export."""
@@ -218,7 +221,7 @@ class ExportManager:
         return stopped_exports
 
     def kill_all_tunnel_processes(self) -> int:
-        """Kill orphaned ngrok, localtunnel, pinggy, and cloudflare processes."""
+        """Kill orphaned ngrok, localtunnel, pinggy, cloudflare, and bore processes."""
         killed = 0
 
         try:
@@ -331,7 +334,7 @@ class ExportManager:
         # Apply a 45-second startup grace period during checks to let the tunnel fully register and stabilize
         try:
             if hasattr(provider, "_load_state"):
-                if export.get("provider") in {"localtunnel", "cloudflare"}:
+                if export.get("provider") in {"localtunnel", "cloudflare", "bore"}:
                     _, state = provider._load_state(int(export.get("port") or 0))
                 else:
                     _, state = provider._load_state(export.get("challenge") or "", int(export.get("port") or 0))
@@ -385,7 +388,7 @@ class ExportManager:
                     and provider
                     and hasattr(provider, "_load_state")
                 ):
-                    if export.get("provider") in {"localtunnel", "cloudflare"}:
+                    if export.get("provider") in {"localtunnel", "cloudflare", "bore"}:
                         _, state = provider._load_state(int(export.get("port") or 0))
                     else:
                         _, state = provider._load_state(export.get("challenge") or "", int(export.get("port") or 0))
@@ -433,7 +436,7 @@ class ExportManager:
                 try:
                     provider = self.get_provider(export.get("provider") or "")
                     if provider:
-                        if export.get("provider") in {"localtunnel", "cloudflare"}:
+                        if export.get("provider") in {"localtunnel", "cloudflare", "bore"}:
                             state_path = provider._get_state_file(int(export.get("port") or 0))
                         elif export.get("provider") == "pinggy":
                             state_path = provider._get_state_file(export.get("challenge") or "", int(export.get("port") or 0))
@@ -464,7 +467,7 @@ class ExportManager:
                         provider = self.get_provider(export.get("provider") or "")
                         if provider:
                             try:
-                                if export.get("provider") in {"localtunnel", "cloudflare"}:
+                                if export.get("provider") in {"localtunnel", "cloudflare", "bore"}:
                                     state_path = provider._get_state_file(int(export.get("port") or 0))
                                 elif export.get("provider") == "pinggy":
                                     state_path = provider._get_state_file(export.get("challenge") or "", int(export.get("port") or 0))
@@ -879,6 +882,18 @@ class ExportManager:
                 return EXPORT_PROVIDER_CLOUDFLARE, int(match.group(1))
             return None
 
+        if "bore" in basenames or proc_name == "bore" or "bore" in command:
+            if "local" in cmdline:
+                try:
+                    index = cmdline.index("local")
+                    return EXPORT_PROVIDER_BORE, int(cmdline[index + 1])
+                except Exception:
+                    pass
+            match = re.search(r"local\s+(\d+)", command)
+            if match:
+                return EXPORT_PROVIDER_BORE, int(match.group(1))
+            return None
+
         return None
 
     def dedupe_active_exports(self) -> int:
@@ -922,6 +937,7 @@ class ExportManager:
             EXPORT_PROVIDER_LOCALTUNNEL: "enable_localtunnel",
             EXPORT_PROVIDER_PINGGY: "enable_pinggy",
             EXPORT_PROVIDER_CLOUDFLARE: "enable_cloudflare",
+            EXPORT_PROVIDER_BORE: "enable_bore",
         }.get(provider_name)
         return bool(getattr(self.config, attr, True)) if attr else True
 
@@ -1048,7 +1064,10 @@ class ExportManager:
         if "localtunnel" in command and "--port" in cmdline:
             return True
 
-        return "cloudflared" in basenames or proc_name == "cloudflared" or "cloudflared" in command
+        if "cloudflared" in basenames or proc_name == "cloudflared" or "cloudflared" in command:
+            return True
+
+        return "bore" in basenames or proc_name == "bore" or "bore" in command
 
     def _ngrok_enabled(self) -> bool:
         return self._provider_enabled(EXPORT_PROVIDER_NGROK)

@@ -309,3 +309,44 @@ git add .
 git commit -m "update commit"
 git push
 ```
+
+```bash
+cloudflared tunnel login
+# cloudflared tunnel create simplee
+cloudflared tunnel create edge
+cloudflared tunnel run edge
+
+cloudflared tunnel run --url http://localhost:49220 edge
+
+mkdir -p ~/.cloudflared
+```
+
+```bash
+mkdir -p ~/.cloudflared
+
+cloudflared tunnel route dns edge a.nxctf.my.id
+cloudflared tunnel route dns edge b.nxctf.my.id
+cloudflared tunnel route dns edge c.nxctf.my.id
+cloudflared tunnel route dns edge d.nxctf.my.id
+cloudflared tunnel route dns edge e.nxctf.my.id
+
+cat > ~/.cloudflared/config.yml <<'EOF'
+tunnel: edge
+credentials-file: /home/vagrant/.cloudflared/2b865acf-2600-4e55-bfc9-d48294f6b6a4.json
+
+ingress:
+  - hostname: a.nxctf.my.id
+    service: http://localhost:49220
+  - hostname: b.nxctf.my.id
+    service: http://localhost:49220
+  - hostname: c.nxctf.my.id
+    service: http://localhost:49220
+  - hostname: d.nxctf.my.id
+    service: http://localhost:49220
+  - hostname: e.nxctf.my.id
+    service: http://localhost:49220
+  - service: http_status:404
+EOF
+
+cloudflared tunnel run edge
+```

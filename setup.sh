@@ -127,6 +127,15 @@ install_nxctl() {
         sudo chmod +x /usr/local/bin/cloudflared
     fi
 
+    if ! command -v bore >/dev/null 2>&1; then
+        echo -e "${GREEN}[*] Downloading Bore binary...${NC}"
+        sudo wget -q "https://github.com/ekzhang/bore/releases/download/v0.6.0/bore-v0.6.0-x86_64-unknown-linux-musl.tar.gz" -O /tmp/bore.tar.gz
+        sudo tar -xzf /tmp/bore.tar.gz -C /tmp
+        sudo chmod +x /tmp/bore
+        sudo mv /tmp/bore /usr/local/bin/
+        sudo rm -f /tmp/bore.tar.gz
+    fi
+
     # if ! command -v playit >/dev/null 2>&1; then
     #     echo -e "${GREEN}[*] Installing Playit.gg CLI...${NC}"
     #     curl -SsL https://playit-cloud.github.io/ppa/key.gpg | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/playit.gpg >/dev/null

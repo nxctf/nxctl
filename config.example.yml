@@ -63,3 +63,7 @@ tunnels:
     # tokens:
     #   - ${PINGGY_TOKEN_1}
     #   - ${PINGGY_TOKEN_2}
+
+  bore:
+    enabled: true
+    server: bore.pub

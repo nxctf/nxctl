@@ -7,7 +7,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from nxctl.core.constants import EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_LOCALTUNNEL, EXPORT_PROVIDER_PINGGY, EXPORT_PROVIDER_CLOUDFLARE
+from nxctl.core.constants import EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_LOCALTUNNEL, EXPORT_PROVIDER_PINGGY, EXPORT_PROVIDER_CLOUDFLARE, EXPORT_PROVIDER_BORE
 from nxctl.scripts.cli.base import (
     get_services,
     green,
@@ -21,7 +21,7 @@ from nxctl.scripts.cli.lifecycle import _start_available_exports, _start_with_fa
 def cmd_export(args) -> int:
     try:
         _, challenge_service, runtime_service, export_manager = get_services()
-        provider_names = {EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_LOCALTUNNEL, EXPORT_PROVIDER_PINGGY, EXPORT_PROVIDER_CLOUDFLARE}
+        provider_names = {EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_LOCALTUNNEL, EXPORT_PROVIDER_PINGGY, EXPORT_PROVIDER_CLOUDFLARE, EXPORT_PROVIDER_BORE}
 
         if getattr(args, "name", None) is None:
             challenge_name = args.target
@@ -239,7 +239,7 @@ def _list_tunnel_processes() -> str:
     lines = [
         line
         for line in result.stdout.splitlines()
-        if "pinggy" in line or "ngrok" in line or "lt --port" in line or "cloudflared" in line
+        if "pinggy" in line or "ngrok" in line or "lt --port" in line or "cloudflared" in line or "bore" in line
     ]
     return "\n".join(lines)
 
@@ -377,6 +377,7 @@ def cmd_ps(args) -> int:
             _kill_by_pattern("lt --port")
             _kill_by_pattern("ngrok")
             _kill_by_pattern("cloudflared")
+            _kill_by_pattern("bore")
             time.sleep(2)
 
             zombie_parents = _kill_zombie_parents()
@@ -390,7 +391,7 @@ def cmd_ps(args) -> int:
             pycache_count = _remove_pycache_dirs(Path("."))
             cleanup_counts = _cleanup_export_artifacts(config)
 
-            step_ok("Killed pinggy/ngrok/localtunnel/cloudflared processes")
+            step_ok("Killed pinggy/ngrok/localtunnel/cloudflared/bore processes")
             if zombie_parents:
                 step_ok(f"Killed zombie parent processes: {zombie_parents}")
             step_ok(f"Removed __pycache__ directories: {pycache_count}")
@@ -404,7 +405,7 @@ def cmd_ps(args) -> int:
         if output:
             print(output)
         else:
-            print(yellow("No pinggy/ngrok/localtunnel/cloudflared processes found"))
+            print(yellow("No pinggy/ngrok/localtunnel/cloudflared/bore processes found"))
         print()
         return 0
     except Exception as e:

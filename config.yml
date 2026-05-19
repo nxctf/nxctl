@@ -53,10 +53,14 @@ tunnels:
   localtunnel:
     enabled: true
   cloudflare:
-    enabled: false
+    enabled: true
   pinggy:
     enabled: true
     max_sessions_per_token: 1
     # tokens:
     #   - ${PINGGY_TOKEN_1}
     #   - ${PINGGY_TOKEN_2}
+
+  bore:
+    enabled: true
+    server: bore.pub
