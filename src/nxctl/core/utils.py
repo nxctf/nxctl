@@ -41,20 +41,7 @@ def bold(text: str) -> str:
 def get_git_cache_path() -> str:
     """Get the normalized path for git challenge cache."""
     config = get_config()
-    chall_dir = getattr(config, "chall_dir", "")
-    if chall_dir:
-        return str(Path(chall_dir))
-
-    cache_dir = Path(config.cache_dir)
-    normalized = str(cache_dir).replace("\\", "/").rstrip("/")
-
-    if cache_dir.name == "chall" or normalized.endswith("/chall"):
-        return str(cache_dir)
-
-    if normalized in {"./data", "data", "/data"} or normalized.endswith("/data"):
-        return str(cache_dir / "chall")
-
-    return str(cache_dir)
+    return str(config.chall_dir)
 
 
 def get_challenge_dir(challenge_path: str) -> Path:
@@ -70,21 +57,21 @@ def safe_runtime_name(name: str) -> str:
 
 def get_runtime_dir(config=None) -> Path:
     config = config or get_config()
-    path = Path(getattr(config, "runtime_dir", Path(config.cache_dir) / "runtime")).resolve()
+    path = config.runtime_dir.resolve()
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def get_export_state_dir(config=None) -> Path:
     config = config or get_config()
-    path = Path(getattr(config, "export_state_dir", get_runtime_dir(config) / "state")).resolve()
+    path = config.state_dir.resolve()
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def get_export_logs_dir(config=None, provider: str = "") -> Path:
     config = config or get_config()
-    path = Path(getattr(config, "export_logs_dir", Path(getattr(config, "logs_dir", Path(config.cache_dir) / "logs")) / "exports")).resolve()
+    path = config.export_logs_dir.resolve()
     if provider:
         path = path / safe_runtime_name(provider)
     path.mkdir(parents=True, exist_ok=True)
@@ -93,21 +80,21 @@ def get_export_logs_dir(config=None, provider: str = "") -> Path:
 
 def get_runtime_tmp_dir(config=None) -> Path:
     config = config or get_config()
-    path = Path(getattr(config, "tmp_dir", get_runtime_dir(config) / "tmp")).resolve()
+    path = config.tmp_dir.resolve()
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def get_challenge_locks_dir(config=None) -> Path:
     config = config or get_config()
-    path = Path(getattr(config, "locks_dir", get_runtime_dir(config) / "locks")).resolve()
+    path = config.locks_dir.resolve()
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def get_runtime_compose_dir(config=None) -> Path:
     config = config or get_config()
-    path = Path(getattr(config, "runtime_compose_dir", get_runtime_dir(config) / "compose")).resolve()
+    path = config.compose_dir.resolve()
     path.mkdir(parents=True, exist_ok=True)
     return path
 

@@ -184,7 +184,7 @@ github_repo: https://github.com/nxctf/nxctl-challenges
 branch: main
 access_token: ${GITHUB_TOKEN}
 
-dir_app: ./data
+data_dir: ./data
 base_ip: "203.0.113.10"
 enable_ngrok: true
 enable_localtunnel: true
@@ -199,6 +199,23 @@ auto_heal_exports: true
 export_endpoint_check_interval_seconds: 120
 export_endpoint_check_timeout_seconds: 5
 ```
+
+`data_dir` is the single root for NXCTL-owned runtime data. Relative values are resolved from the directory that contains `config.yml`. Internally NXCTL derives:
+
+```text
+data/
+  nxctl.db
+  chall/
+  runtime/
+    compose/
+    state/
+    locks/
+    tmp/
+  logs/
+    exports/
+```
+
+Older path keys such as `dir_app`, `cache_dir`, `db_file`, `exports_dir`, `export_state_dir`, and `runtime_compose_dir` are accepted for compatibility, but new configs should use `data_dir` only. Legacy export state is still read from the old locations and migrated to the active runtime state path when valid.
 
 Ngrok tokens can be provided with `ngrok_tokens` in `config.yml`, with `NGROK_AUTHTOKEN`, or through an existing ngrok config file.
 When multiple HTTP challenges run at the same time, NXCTL uses a separate ngrok local API port per export and avoids reusing tokens that are already attached to active ngrok exports. If no unused token is available, the ngrok export fails cleanly while other exports continue.

@@ -23,10 +23,8 @@ class GitRepository:
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-        # Determine a stable local_path for cloning:
-        # - If cache_dir is the repository cache root (./data), clone into ./data/chall
-        # - If cache_dir already points to ./data/chall, use it directly
-        # - Otherwise clone into a subdir named after the repo
+        # Determine a stable local_path for cloning. New callers pass the
+        # explicit challenge directory; older callers may pass a data/cache root.
         repo_name = repo_url.rstrip("/").split("/")[-1].replace(".git", "")
 
         normalized = str(self.cache_dir).replace("\\", "/").rstrip("/")
@@ -35,7 +33,7 @@ class GitRepository:
             self.local_path = self.cache_dir
             self.repo_name = repo_name
         elif normalized in {"./data", "data", "/data"} or normalized.endswith("/data"):
-            # cache_dir is the generic data root -> use data/chall
+            # cache_dir may be the generic data root; use its challenge subdirectory.
             self.repo_name = "chall"
             self.local_path = self.cache_dir / "chall"
         else:

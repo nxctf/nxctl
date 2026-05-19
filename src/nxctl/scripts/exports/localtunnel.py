@@ -15,8 +15,6 @@ from nxctl.core.utils import (
     save_state_file,
     delete_state_file,
     kill_process,
-    get_export_state_dir,
-    get_export_logs_dir,
 )
 from nxctl.core.constants import PROTOCOL_HTTP
 
@@ -35,10 +33,11 @@ class LocaltunnelProvider(ExportProvider):
     def __init__(self, config):
         """Initialize localtunnel provider."""
         super().__init__(config)
-        self.state_dir = get_export_state_dir(config)
-        self.log_dir = get_export_logs_dir(config, self.name)
-        self.legacy_state_dir = Path(getattr(config, "exports_dir", Path(config.cache_dir) / "exports"))
+        self.state_dir = config.state_dir
+        self.log_dir = config.export_logs_dir / self.name
+        self.legacy_state_dir = config.legacy_exports_dir
         self.state_dir.mkdir(parents=True, exist_ok=True)
+        self.log_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_state_file(self, host_port: int) -> Path:
         """Get state file path for a host port."""

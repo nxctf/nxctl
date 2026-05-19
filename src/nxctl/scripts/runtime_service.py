@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from nxctl.core.models import Challenge, RuntimeInstance
 from nxctl.core.db import get_db_connection, close_db_connection
 from nxctl.core.docker import run_docker_compose_build, run_docker_compose_up, run_docker_compose_down_with_cleanup, DockerError
-from nxctl.core.utils import is_port_in_use, get_runtime_compose_dir, safe_runtime_name
+from nxctl.core.utils import is_port_in_use, safe_runtime_name
 from nxctl.core.yaml import extract_ports_from_compose
 
 logger = logging.getLogger(__name__)
@@ -29,10 +29,10 @@ class RuntimeService:
         self.config = config
         self.db_path = db_path
         self.git_cache_dir = Path(git_cache_dir).resolve()
-        self.runtime_compose_dir = get_runtime_compose_dir(config)
+        self.compose_dir = config.compose_dir
 
     def _runtime_compose_file(self, challenge_name: str) -> Path:
-        return (self.runtime_compose_dir / f"{safe_runtime_name(challenge_name)}.docker-compose.yml").resolve()
+        return (self.compose_dir / f"{safe_runtime_name(challenge_name)}.docker-compose.yml").resolve()
 
     def _legacy_runtime_compose_file(self, challenge_dir: Path) -> Path:
         return challenge_dir / "docker-compose.run.yml"
@@ -646,7 +646,7 @@ class RuntimeService:
         legacy_docker_compose_run = self._legacy_runtime_compose_file(challenge_dir)
 
         # Prefer the new runtime compose path, but keep legacy support for
-        # containers started before runtime artifacts were moved out of data/chall.
+        # containers started before runtime artifacts were moved out of challenge dirs.
         if docker_compose_run.exists():
             target_compose = docker_compose_run
         elif legacy_docker_compose_run.exists():

@@ -8,12 +8,6 @@ import time
 from pathlib import Path
 
 from nxctl.core.constants import EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_LOCALTUNNEL, EXPORT_PROVIDER_PINGGY
-from nxctl.core.utils import (
-    get_challenge_locks_dir,
-    get_export_logs_dir,
-    get_export_state_dir,
-    get_runtime_tmp_dir,
-)
 from nxctl.scripts.cli.base import (
     get_services,
     green,
@@ -349,12 +343,12 @@ def _clear_matching_files(root: Path, patterns: list[str]) -> int:
 
 def _cleanup_export_artifacts(config) -> dict[str, int]:
     """Remove known runtime artifacts without deleting the whole legacy exports dir."""
-    legacy_exports_dir = Path(config.exports_dir)
+    legacy_exports_dir = config.legacy_exports_dir
     counts = {
-        "state": _clear_dir_children(get_export_state_dir(config)),
-        "logs": _clear_dir_children(get_export_logs_dir(config)),
-        "locks": _clear_dir_children(get_challenge_locks_dir(config)),
-        "tmp": _clear_dir_children(get_runtime_tmp_dir(config)),
+        "state": _clear_dir_children(config.state_dir),
+        "logs": _clear_dir_children(config.export_logs_dir),
+        "locks": _clear_dir_children(config.locks_dir),
+        "tmp": _clear_dir_children(config.tmp_dir),
     }
 
     legacy_state_dirs = (

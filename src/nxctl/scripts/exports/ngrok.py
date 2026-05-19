@@ -17,9 +17,6 @@ from nxctl.core.utils import (
     save_state_file,
     delete_state_file,
     kill_process,
-    get_export_state_dir,
-    get_export_logs_dir,
-    get_runtime_tmp_dir,
 )
 
 from nxctl.core.constants import PROTOCOL_HTTP, PROTOCOL_TCP
@@ -35,11 +32,13 @@ class NgrokProvider(ExportProvider):
     def __init__(self, config):
         super().__init__(config)
 
-        self.state_dir = get_export_state_dir(config)
-        self.log_dir = get_export_logs_dir(config, self.name)
-        self.tmp_dir = get_runtime_tmp_dir(config)
-        self.legacy_state_dir = Path(getattr(config, "exports_dir", Path(config.cache_dir) / "exports"))
+        self.state_dir = config.state_dir
+        self.log_dir = config.export_logs_dir / self.name
+        self.tmp_dir = config.tmp_dir
+        self.legacy_state_dir = config.legacy_exports_dir
         self.state_dir.mkdir(parents=True, exist_ok=True)
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.tmp_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_state_file(self, host_port: int) -> Path:
         return self.state_dir / f"ngrok_{host_port}.json"

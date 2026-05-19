@@ -121,13 +121,7 @@ install_nxctl() {
         sudo chmod +x /usr/local/bin/pinggy
     fi
 
-    mkdir -p \
-        "$PROJECT_DIR/data/chall" \
-        "$PROJECT_DIR/data/runtime/state" \
-        "$PROJECT_DIR/data/runtime/locks" \
-        "$PROJECT_DIR/data/runtime/tmp" \
-        "$PROJECT_DIR/data/runtime/compose" \
-        "$PROJECT_DIR/data/logs/exports"
+    mkdir -p "$PROJECT_DIR/data"
 
     echo -e "${GREEN}[*] Installing nxctl command...${NC}"
     NXCTL_WRAPPER="#!/bin/bash

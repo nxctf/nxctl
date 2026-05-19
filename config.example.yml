@@ -5,7 +5,7 @@ branch: main
 access_token: ${GITHUB_TOKEN}
 
 # NXCTL stores db, challenge cache, runtime state, locks, temp files, and logs under this dir.
-dir_app: ./data
+data_dir: ./data
 
 # Optional direct/public IP export. Leave empty to disable.
 base_ip: ""

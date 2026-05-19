@@ -1,6 +1,6 @@
 HPone
 _tmp
-data*
+/data/
 /exports/
 config.yml
 
@@ -43,10 +43,9 @@ env/
 .env.local
 
 # Data and artifacts
-data/
-data/runtime/
-data/logs/
-data/exports/
+/data/runtime/
+/data/logs/
+/data/exports/
 docker-compose.run.yml
 *.run.yml
 *.log

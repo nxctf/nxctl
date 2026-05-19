@@ -17,24 +17,17 @@ from pydantic import BaseModel, Field, root_validator
 
 
 class Config(BaseModel):
-    """Main application configuration."""
+    """Main application configuration.
+
+    User-facing config should set only data_dir for NXCTL-owned filesystem
+    state. All internal runtime paths are derived from that root.
+    """
+
     github_repo: str
     branch: str = "main"
     access_token: str = ""
 
-    dir_app: str = "./data"
-    cache_dir: str = "./data"
-    chall_dir: str = "./data/chall"
-    build_dir: str = "./data/build"
-    db_file: str = "./data/nxctl.db"
-    exports_dir: str = "./data/exports"
-    runtime_dir: str = "./data/runtime"
-    logs_dir: str = "./data/logs"
-    export_state_dir: str = "./data/runtime/state"
-    export_logs_dir: str = "./data/logs/exports"
-    locks_dir: str = "./data/runtime/locks"
-    tmp_dir: str = "./data/runtime/tmp"
-    runtime_compose_dir: str = "./data/runtime/compose"
+    data_dir: str = "./data"
     base_ip: str = ""
     api_token: str = ""
     api_admin_secret: str = ""
@@ -64,108 +57,139 @@ class Config(BaseModel):
     class Config:
         extra = "allow"
 
+    @property
+    def data_path(self) -> Path:
+        return Path(self.data_dir)
+
+    @property
+    def chall_dir(self) -> Path:
+        return self.data_path / "chall"
+
+    @property
+    def db_file(self) -> Path:
+        return self.data_path / "nxctl.db"
+
+    @property
+    def runtime_dir(self) -> Path:
+        return self.data_path / "runtime"
+
+    @property
+    def state_dir(self) -> Path:
+        return self.runtime_dir / "state"
+
+    @property
+    def locks_dir(self) -> Path:
+        return self.runtime_dir / "locks"
+
+    @property
+    def tmp_dir(self) -> Path:
+        return self.runtime_dir / "tmp"
+
+    @property
+    def compose_dir(self) -> Path:
+        return self.runtime_dir / "compose"
+
+    @property
+    def logs_dir(self) -> Path:
+        return self.data_path / "logs"
+
+    @property
+    def export_logs_dir(self) -> Path:
+        return self.logs_dir / "exports"
+
+    @property
+    def legacy_exports_dir(self) -> Path:
+        return self.data_path / "exports"
+
+    @property
+    def cache_dir(self) -> Path:
+        """Legacy alias. New code should use chall_dir or data_dir."""
+        return self.data_path
+
+    @property
+    def dir_app(self) -> Path:
+        """Legacy alias for data_dir."""
+        return self.data_path
+
+    @property
+    def exports_dir(self) -> Path:
+        """Legacy alias for the old export artifact directory."""
+        return self.legacy_exports_dir
+
+    @property
+    def export_state_dir(self) -> Path:
+        """Legacy alias for the active export state directory."""
+        return self.state_dir
+
+    @property
+    def runtime_compose_dir(self) -> Path:
+        """Legacy alias for compose_dir."""
+        return self.compose_dir
+
     def path(self, name: str) -> Path:
         """Return a configured filesystem path as a Path object."""
         if not hasattr(self, name):
             raise AttributeError(f"Unknown config path: {name}")
-        return Path(getattr(self, name))
+        value = getattr(self, name)
+        return value if isinstance(value, Path) else Path(value)
 
     def ensure_dirs(self) -> None:
         """Create the runtime directories NXCTL owns."""
-        for name in (
-            "dir_app",
-            "chall_dir",
-            "runtime_dir",
-            "runtime_compose_dir",
-            "export_state_dir",
-            "locks_dir",
-            "tmp_dir",
-            "logs_dir",
-            "export_logs_dir",
+        for path in (
+            self.data_path,
+            self.chall_dir,
+            self.runtime_dir,
+            self.compose_dir,
+            self.state_dir,
+            self.locks_dir,
+            self.tmp_dir,
+            self.logs_dir,
+            self.export_logs_dir,
         ):
-            self.path(name).mkdir(parents=True, exist_ok=True)
+            path.mkdir(parents=True, exist_ok=True)
 
     def legacy_export_state_dirs(self) -> list[Path]:
         """State locations from previous layouts, ordered newest to oldest."""
         return [
-            self.path("runtime_dir") / "exports" / "state",
-            self.path("exports_dir"),
+            self.runtime_dir / "exports" / "state",
+            self.legacy_exports_dir,
         ]
 
     @root_validator(pre=True)
     def _normalize_values(cls, values):
         base_dir = Path(values.get("_config_dir") or os.getcwd()).resolve()
-        dir_app = values.get("dir_app") or values.get("data_dir") or values.get("app_dir")
-        cache_dir = values.get("cache_dir")
 
-        if not dir_app and cache_dir:
-            normalized_cache = cls._normalize_path(cache_dir, base_dir)
-            if normalized_cache.endswith("/chall") or normalized_cache.endswith("/cache"):
-                dir_app = str(Path(normalized_cache).parent).replace("\\", "/")
-            else:
-                dir_app = normalized_cache
-
-        dir_app = cls._normalize_path(dir_app or "./data", base_dir)
-        values["dir_app"] = dir_app
-
-        # Internally cache_dir means the NXCTL data root. Keep accepting legacy
-        # cache_dir values like ./data/chall, but normalize them to ./data.
-        values["cache_dir"] = dir_app
-
-        chall_dir = values.get("chall_dir")
-        if chall_dir:
-            values["chall_dir"] = cls._normalize_path(chall_dir, base_dir)
-        else:
-            values["chall_dir"] = str(Path(dir_app) / "chall").replace("\\", "/")
-
-        if not values.get("build_dir"):
-            values["build_dir"] = str(Path(dir_app) / "build").replace("\\", "/")
-        else:
-            values["build_dir"] = cls._normalize_path(values["build_dir"], base_dir)
-
-        if not values.get("db_file"):
-            values["db_file"] = str(Path(dir_app) / "nxctl.db").replace("\\", "/")
-        else:
-            values["db_file"] = cls._normalize_path(values["db_file"], base_dir)
-
-        runtime_dir = cls._normalize_path(values.get("runtime_dir") or str(Path(dir_app) / "runtime"), base_dir)
-        values["runtime_dir"] = runtime_dir
-
-        logs_dir = cls._normalize_path(values.get("logs_dir") or str(Path(dir_app) / "logs"), base_dir)
-        values["logs_dir"] = logs_dir
-
-        if not values.get("export_state_dir"):
-            values["export_state_dir"] = str(Path(runtime_dir) / "state").replace("\\", "/")
-        else:
-            values["export_state_dir"] = cls._normalize_path(values["export_state_dir"], base_dir)
-
-        if not values.get("export_logs_dir"):
-            values["export_logs_dir"] = str(Path(logs_dir) / "exports").replace("\\", "/")
-        else:
-            values["export_logs_dir"] = cls._normalize_path(values["export_logs_dir"], base_dir)
-
-        if not values.get("locks_dir"):
-            values["locks_dir"] = str(Path(runtime_dir) / "locks").replace("\\", "/")
-        else:
-            values["locks_dir"] = cls._normalize_path(values["locks_dir"], base_dir)
-
-        if not values.get("tmp_dir"):
-            values["tmp_dir"] = str(Path(runtime_dir) / "tmp").replace("\\", "/")
-        else:
-            values["tmp_dir"] = cls._normalize_path(values["tmp_dir"], base_dir)
-
-        if not values.get("runtime_compose_dir"):
-            values["runtime_compose_dir"] = str(Path(runtime_dir) / "compose").replace("\\", "/")
-        else:
-            values["runtime_compose_dir"] = cls._normalize_path(values["runtime_compose_dir"], base_dir)
-
-        exports_dir = (
-            values.get("exports_dir")
-            or values.get("data_exports")
-            or values.get("export_dir")
-            or values.get("exports_path")
+        data_dir = (
+            values.get("data_dir")
+            or values.get("dir_app")
+            or values.get("app_dir")
+            or cls._data_dir_from_legacy(values)
+            or "./data"
         )
-        values["exports_dir"] = cls._normalize_path(exports_dir or str(Path(dir_app) / "exports"), base_dir)
+        values["data_dir"] = cls._normalize_path(data_dir, base_dir)
+
+        # Keep accepting old keys, but do not let them create divergent write
+        # targets. All active paths are derived from data_dir properties.
+        for legacy_key in (
+            "dir_app",
+            "cache_dir",
+            "app_dir",
+            "chall_dir",
+            "build_dir",
+            "db_file",
+            "exports_dir",
+            "runtime_dir",
+            "logs_dir",
+            "export_state_dir",
+            "export_logs_dir",
+            "locks_dir",
+            "tmp_dir",
+            "runtime_compose_dir",
+            "data_exports",
+            "export_dir",
+            "exports_path",
+        ):
+            values.pop(legacy_key, None)
 
         if not values.get("ngrok_tokens"):
             legacy_tunnels = values.get("tunnels", {}) or {}
@@ -192,26 +216,72 @@ class Config(BaseModel):
 
         return values
 
+    @classmethod
+    def _data_dir_from_legacy(cls, values: dict[str, Any]) -> Any:
+        cache_dir = values.get("cache_dir")
+        if cache_dir:
+            normalized = str(cache_dir).replace("\\", "/").rstrip("/")
+            if normalized.endswith("/chall") or normalized.endswith("/cache"):
+                return str(Path(cache_dir).parent)
+            return cache_dir
+
+        for key, marker in (
+            ("chall_dir", "chall"),
+            ("db_file", "nxctl.db"),
+            ("exports_dir", "exports"),
+            ("runtime_dir", "runtime"),
+            ("logs_dir", "logs"),
+        ):
+            value = values.get(key)
+            if not value:
+                continue
+            path = Path(str(value))
+            if path.name == marker:
+                return str(path.parent)
+
+        for key, marker in (
+            ("export_state_dir", "state"),
+            ("export_logs_dir", "exports"),
+            ("locks_dir", "locks"),
+            ("tmp_dir", "tmp"),
+            ("runtime_compose_dir", "compose"),
+        ):
+            value = values.get(key)
+            if not value:
+                continue
+            path = Path(str(value))
+            if path.name != marker:
+                continue
+            parent = path.parent
+            if parent.name == "runtime":
+                return str(parent.parent)
+            if parent.name == "logs":
+                return str(parent.parent)
+
+        return None
+
     @staticmethod
     def _normalize_path(value: Any, base_dir: Path | None = None) -> str:
         path = Path(str(value)).expanduser()
         if not path.is_absolute():
             path = (base_dir or Path.cwd()).resolve() / path
-        return str(path.resolve()).replace("\\", "/").rstrip("/") or "."
+        normalized = str(path.resolve()).replace("\\", "/")
+        if re.fullmatch(r"[A-Za-z]:/", normalized) or normalized == "/":
+            return normalized
+        return normalized.rstrip("/")
 
 
 def substitute_env_vars(value: Any) -> Any:
     """Recursively substitute ${VAR_NAME} with environment variables."""
     if isinstance(value, str):
-        # Replace ${VAR_NAME} with environment variable values
         def replace_env(match):
             var_name = match.group(1)
             return os.environ.get(var_name, "")
 
-        return re.sub(r'\$\{([A-Z0-9_]+)\}', replace_env, value)
-    elif isinstance(value, dict):
+        return re.sub(r"\$\{([A-Z0-9_]+)\}", replace_env, value)
+    if isinstance(value, dict):
         return {k: substitute_env_vars(v) for k, v in value.items()}
-    elif isinstance(value, list):
+    if isinstance(value, list):
         return [substitute_env_vars(item) for item in value]
     return value
 
@@ -224,8 +294,6 @@ def load_config(config_path: str = "config.yml") -> Config:
     else:
         config_file = config_file.resolve()
 
-    # Auto-load .env into environment if present
-    # Look for .env in the config directory or repo root
     env_file = config_file.parent / ".env"
     if not env_file.exists():
         env_file = Path(".env")
@@ -235,35 +303,28 @@ def load_config(config_path: str = "config.yml") -> Config:
             if load_dotenv:
                 load_dotenv(dotenv_path=str(env_file))
             else:
-                # Minimal manual loader: parse KEY=VALUE lines
-                with open(env_file, "r") as ef:
+                with open(env_file, "r", encoding="utf-8") as ef:
                     for line in ef:
                         line = line.strip()
                         if not line or line.startswith("#"):
                             continue
                         if "=" in line:
                             k, v = line.split("=", 1)
-                            k = k.strip()
-                            v = v.strip().strip('"').strip("'")
-                            os.environ.setdefault(k, v)
+                            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
         except Exception:
-            # If dotenv loading fails, continue without failing
             pass
 
     if not config_file.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
-    with open(config_file, "r") as f:
+    with open(config_file, "r", encoding="utf-8") as f:
         raw_config = yaml.safe_load(f) or {}
 
-    # Substitute environment variables
     config_dict = substitute_env_vars(raw_config)
     config_dict["_config_dir"] = str(config_file.parent)
 
-    # Parse and validate
     config = Config(**config_dict)
     config.ensure_dirs()
-
     return config
 
 
