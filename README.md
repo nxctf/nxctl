@@ -281,6 +281,12 @@ git config core.filemode true
 git ls-files "*.sh" | ForEach-Object { git update-index --chmod=+x -- $_ }
 git ls-files "*.sh" "*.bash" | ForEach-Object { git update-index --chmod=+x -- $_ }
 
-git add .
-git commit -m "add the permission executable to linux"
+git config core.filemode true
+git update-index --chmod=+x setup.sh
+git update-index --chmod=+x test_api.sh
+
+git ls-files "*.sh"
+
+git commit -m "Make shell scripts executable"
+git push
 ```
