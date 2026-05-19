@@ -2,6 +2,7 @@
 
 __all__ = [
     "base",
+    "cloudflare",
     "localtunnel",
     "manager",
     "ngrok",

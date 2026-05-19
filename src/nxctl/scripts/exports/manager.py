@@ -218,7 +218,7 @@ class ExportManager:
         return stopped_exports
 
     def kill_all_tunnel_processes(self) -> int:
-        """Kill orphaned ngrok, localtunnel, and pinggy processes."""
+        """Kill orphaned ngrok, localtunnel, pinggy, and cloudflare processes."""
         killed = 0
 
         try:
@@ -331,7 +331,7 @@ class ExportManager:
         # Apply a 45-second startup grace period during checks to let the tunnel fully register and stabilize
         try:
             if hasattr(provider, "_load_state"):
-                if export.get("provider") == "localtunnel":
+                if export.get("provider") in {"localtunnel", "cloudflare"}:
                     _, state = provider._load_state(int(export.get("port") or 0))
                 else:
                     _, state = provider._load_state(export.get("challenge") or "", int(export.get("port") or 0))
@@ -385,7 +385,7 @@ class ExportManager:
                     and provider
                     and hasattr(provider, "_load_state")
                 ):
-                    if export.get("provider") == "localtunnel":
+                    if export.get("provider") in {"localtunnel", "cloudflare"}:
                         _, state = provider._load_state(int(export.get("port") or 0))
                     else:
                         _, state = provider._load_state(export.get("challenge") or "", int(export.get("port") or 0))
@@ -433,7 +433,7 @@ class ExportManager:
                 try:
                     provider = self.get_provider(export.get("provider") or "")
                     if provider:
-                        if export.get("provider") == "localtunnel":
+                        if export.get("provider") in {"localtunnel", "cloudflare"}:
                             state_path = provider._get_state_file(int(export.get("port") or 0))
                         elif export.get("provider") == "pinggy":
                             state_path = provider._get_state_file(export.get("challenge") or "", int(export.get("port") or 0))
@@ -464,7 +464,7 @@ class ExportManager:
                         provider = self.get_provider(export.get("provider") or "")
                         if provider:
                             try:
-                                if export.get("provider") == "localtunnel":
+                                if export.get("provider") in {"localtunnel", "cloudflare"}:
                                     state_path = provider._get_state_file(int(export.get("port") or 0))
                                 elif export.get("provider") == "pinggy":
                                     state_path = provider._get_state_file(export.get("challenge") or "", int(export.get("port") or 0))
@@ -526,7 +526,7 @@ class ExportManager:
         if not endpoint:
             return False, "missing endpoint"
 
-        if export.get("provider") == EXPORT_PROVIDER_LOCALTUNNEL:
+        if export.get("provider") in {EXPORT_PROVIDER_LOCALTUNNEL, EXPORT_PROVIDER_CLOUDFLARE}:
             if export.get("status") == "dead":
                 return False, "process is not running"
             return self._test_dns_endpoint(endpoint)
@@ -873,6 +873,12 @@ class ExportManager:
                         return None
             return None
 
+        if "cloudflared" in basenames or proc_name == "cloudflared" or "cloudflared" in command:
+            match = re.search(r"(?:localhost|127\.0\.0\.1):(\d+)", command)
+            if match:
+                return EXPORT_PROVIDER_CLOUDFLARE, int(match.group(1))
+            return None
+
         return None
 
     def dedupe_active_exports(self) -> int:
@@ -915,6 +921,7 @@ class ExportManager:
             EXPORT_PROVIDER_NGROK: "enable_ngrok",
             EXPORT_PROVIDER_LOCALTUNNEL: "enable_localtunnel",
             EXPORT_PROVIDER_PINGGY: "enable_pinggy",
+            EXPORT_PROVIDER_CLOUDFLARE: "enable_cloudflare",
         }.get(provider_name)
         return bool(getattr(self.config, attr, True)) if attr else True
 
@@ -1038,7 +1045,10 @@ class ExportManager:
         if "lt" in basenames and "--port" in cmdline:
             return True
 
-        return "localtunnel" in command and "--port" in cmdline
+        if "localtunnel" in command and "--port" in cmdline:
+            return True
+
+        return "cloudflared" in basenames or proc_name == "cloudflared" or "cloudflared" in command
 
     def _ngrok_enabled(self) -> bool:
         return self._provider_enabled(EXPORT_PROVIDER_NGROK)

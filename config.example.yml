@@ -55,7 +55,7 @@ tunnels:
     enabled: true
 
   cloudflare:
-    enabled: true
+    enabled: false
 
   pinggy:
     enabled: true

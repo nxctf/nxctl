@@ -53,7 +53,7 @@ tunnels:
   localtunnel:
     enabled: true
   cloudflare:
-    enabled: true
+    enabled: false
   pinggy:
     enabled: true
     max_sessions_per_token: 1
