@@ -290,3 +290,22 @@ git ls-files "*.sh"
 git commit -m "Make shell scripts executable"
 git push
 ```
+
+```bash
+git config core.filemode false
+
+git update-index --chmod=+x setup.sh
+git update-index --chmod=+x test_api.sh
+git update-index --chmod=+x completion/install.sh
+git update-index --chmod=+x completion/uninstall.sh
+git update-index --chmod=+x completion/nxctl-completion.bash
+
+git ls-files --stage | Select-String "100755"
+
+git commit -m "Restore executable permissions"
+git push
+
+git add .
+git commit -m "update commit"
+git push
+```
