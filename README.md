@@ -275,3 +275,12 @@ find . -type d -name "__pycache__" -exec rm -rf {} +
 
 nxctl ps --kill
 ```
+
+```bash
+git config core.filemode true
+git ls-files "*.sh" | ForEach-Object { git update-index --chmod=+x -- $_ }
+git ls-files "*.sh" "*.bash" | ForEach-Object { git update-index --chmod=+x -- $_ }
+
+git add .
+git commit -m "add the permission executable to linux"
+```
