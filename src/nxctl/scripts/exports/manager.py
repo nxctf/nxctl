@@ -877,9 +877,12 @@ class ExportManager:
             return None
 
         if "cloudflared" in basenames or proc_name == "cloudflared" or "cloudflared" in command:
+            # Quick tunnel mode: URL flag contains the port (--url http://localhost:{port})
             match = re.search(r"(?:localhost|127\.0\.0\.1):(\d+)", command)
             if match:
                 return EXPORT_PROVIDER_CLOUDFLARE, int(match.group(1))
+            # Named tunnel mode: single global process, port not in cmdline
+            # State files handle port-to-process mapping, so skip here
             return None
 
         if "bore" in basenames or proc_name == "bore" or "bore" in command:

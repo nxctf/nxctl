@@ -105,6 +105,9 @@ class PinggyConfig(BaseModel):
 class CloudflareConfig(BaseModel):
     enabled: bool = True
     token: str = ""
+    tunnel_name: str = ""
+    credentials_file: str = ""
+    subdomains: list[str] = Field(default_factory=list)
 
     class Config:
         extra = "allow"
@@ -210,6 +213,18 @@ class Config(BaseModel):
     @property
     def enable_cloudflare(self) -> bool:
         return self.tunnels.cloudflare.enabled
+
+    @property
+    def cloudflare_tunnel_name(self) -> str:
+        return self.tunnels.cloudflare.tunnel_name
+
+    @property
+    def cloudflare_credentials_file(self) -> str:
+        return self.tunnels.cloudflare.credentials_file
+
+    @property
+    def cloudflare_subdomains(self) -> list[str]:
+        return self.tunnels.cloudflare.subdomains
 
     @property
     def enable_bore(self) -> bool:

@@ -270,7 +270,7 @@ def _kill_zombie_parents() -> int:
         if len(parts) < 4:
             continue
         _, ppid, stat, cmd = parts
-        if "Z" in stat and ("pinggy" in cmd or "ngrok" in cmd):
+        if "Z" in stat and ("pinggy" in cmd or "ngrok" in cmd or "cloudflared" in cmd or "bore" in cmd or "lt" in cmd):
             try:
                 parent_pid = int(ppid)
             except ValueError:

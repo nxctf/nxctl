@@ -56,6 +56,15 @@ tunnels:
 
   cloudflare:
     enabled: false
+    # To use Named Tunnels, fill these out. Otherwise, TryCloudflare (Quick Tunnel) will be used.
+    tunnel_name: ${CLOUDFLARE_TUNNEL_NAME}
+    credentials_file: ${CLOUDFLARE_CREDENTIALS_FILE}
+    subdomains:
+      - ${CLOUDFLARE_SUBDOMAIN_A}
+      - ${CLOUDFLARE_SUBDOMAIN_B}
+      - ${CLOUDFLARE_SUBDOMAIN_C}
+      - ${CLOUDFLARE_SUBDOMAIN_D}
+      - ${CLOUDFLARE_SUBDOMAIN_E}
 
   pinggy:
     enabled: true
