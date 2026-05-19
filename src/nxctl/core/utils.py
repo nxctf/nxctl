@@ -311,6 +311,7 @@ class ChallengeLock:
                 "hostname": socket.gethostname(),
                 "timestamp": int(time.time()),
                 "challenge": self.challenge_name,
+                "status": "acquired",
             }
             self.fd.seek(0)
             self.fd.truncate()
@@ -334,6 +335,22 @@ class ChallengeLock:
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.fd:
             try:
+                released_at = int(time.time())
+                metadata = {
+                    "pid": os.getpid(),
+                    "hostname": socket.gethostname(),
+                    "timestamp": released_at,
+                    "challenge": self.challenge_name,
+                    "status": "released",
+                    "released_at": released_at,
+                }
+                self.fd.seek(0)
+                self.fd.truncate()
+                json.dump(metadata, self.fd, ensure_ascii=True, indent=2)
+                self.fd.write("\n")
+                self.fd.flush()
+                os.fsync(self.fd.fileno())
+
                 if os.name == "nt":
                     import msvcrt
                     self.fd.seek(0)

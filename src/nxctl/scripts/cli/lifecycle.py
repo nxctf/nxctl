@@ -100,38 +100,41 @@ def _start_available_exports(export_manager, challenge_name: str, challenge, por
 
 def _stop_challenge_completely(name: str, challenge_service, runtime_service, export_manager):
     """Stop both exports and container for a challenge."""
-    challenge = challenge_service.get_challenge(name)
-    if challenge:
-        # Mark stopped first so the daemon cannot auto-heal tunnels during down.
-        try:
-            runtime_service.mark_stopped(name)
-        except Exception as e:
-            logger.warning(f"Failed to pre-mark runtime stopped for {name}: {e}")
+    from nxctl.core.utils import ChallengeLock
 
-        # 1. Stop container
-        try:
-            runtime_service.stop(name)
-            logger.info(f"Stopped container for {name}")
-        except Exception as e:
-            logger.error(f"Failed to stop container for {name}: {e}")
+    with ChallengeLock(name, export_manager.config):
+        challenge = challenge_service.get_challenge(name)
+        if challenge:
+            # Mark stopped first so the daemon cannot auto-heal tunnels during down.
+            try:
+                runtime_service.mark_stopped(name)
+            except Exception as e:
+                logger.warning(f"Failed to pre-mark runtime stopped for {name}: {e}")
 
-        # 2. Stop exports after runtime is no longer considered running.
-        for export in export_manager.stop_all_exports(name):
-            if export.get("error"):
-                logger.error(f"Failed to stop export {export['provider']} for {name}: {export['error']}")
-            else:
-                logger.info(f"Stopped {export['provider']} export for {name}")
+            # 1. Stop container
+            try:
+                runtime_service.stop(name)
+                logger.info(f"Stopped container for {name}")
+            except Exception as e:
+                logger.error(f"Failed to stop container for {name}: {e}")
 
-        # One more pass catches tunnels created by an overlapping daemon tick.
-        for export in export_manager.stop_all_exports(name):
-            if export.get("error"):
-                logger.error(f"Failed to stop late export {export['provider']} for {name}: {export['error']}")
-    else:
-        # Fallback if challenge not in DB but maybe runtime exists
-        try:
-            runtime_service.stop(name)
-        except Exception:
-            pass
+            # 2. Stop exports after runtime is no longer considered running.
+            for export in export_manager.stop_all_exports(name):
+                if export.get("error"):
+                    logger.error(f"Failed to stop export {export['provider']} for {name}: {export['error']}")
+                else:
+                    logger.info(f"Stopped {export['provider']} export for {name}")
+
+            # One more pass catches tunnels created by an overlapping daemon tick.
+            for export in export_manager.stop_all_exports(name):
+                if export.get("error"):
+                    logger.error(f"Failed to stop late export {export['provider']} for {name}: {export['error']}")
+        else:
+            # Fallback if challenge not in DB but maybe runtime exists
+            try:
+                runtime_service.stop(name)
+            except Exception:
+                pass
 
 
 def _cmd_up_one(name: str, challenge_service, runtime_service, export_manager) -> bool:
