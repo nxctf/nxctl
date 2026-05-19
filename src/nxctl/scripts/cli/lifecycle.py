@@ -4,7 +4,7 @@ import logging
 import os
 import time
 from types import SimpleNamespace
-from nxctl.core.constants import PROTOCOL_TCP, EXPORT_PROVIDER_PINGGY, EXPORT_PROVIDER_LOCALTUNNEL
+from nxctl.core.constants import PROTOCOL_TCP, EXPORT_PROVIDER_PINGGY, EXPORT_PROVIDER_LOCALTUNNEL, EXPORT_PROVIDER_NGROK
 from nxctl.scripts.cli.base import (
     get_services,
     green,
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 def _provider_priority(service_type: str) -> list[str]:
     if service_type == PROTOCOL_TCP:
         return [EXPORT_PROVIDER_PINGGY]
-    return [EXPORT_PROVIDER_LOCALTUNNEL]
+    return [EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_LOCALTUNNEL]
 
 
 def _start_with_fallback(export_manager, challenge_name: str, challenge, provider_name: str | None = None) -> tuple[str, str]:
@@ -140,11 +140,11 @@ def _stop_challenge_completely(name: str, challenge_service, runtime_service, ex
 def _cmd_up_one(name: str, challenge_service, runtime_service, export_manager) -> bool:
     """Start one challenge and render the normal up output."""
     try:
-        print(f"\n{bold(f'Starting challenge: {name}')}\n")
+        print(f"{bold(f'Starting challenge: {name}')}")
 
         challenge = challenge_service.get_challenge(name)
         if not challenge:
-            print(f"\n{red(ERR)} Challenge not found: {name}\n")
+            print(f"{red(ERR)} Challenge not found: {name}")
             return False
         step_ok("Loaded challenge config")
 
@@ -160,17 +160,15 @@ def _cmd_up_one(name: str, challenge_service, runtime_service, export_manager) -
 
         with spinner("Creating exports"):
             exports, failures = _start_available_exports(export_manager, name, challenge, ports)
-
-        print()
         print(box("Exports", exports_table(exports), width=116))
         for failure in failures:
             step_warn(f"{failure['provider']} export failed: {format_error(failure['error'])}")
 
-        print(f"\n{green(OK)} Challenge is running.")
-        print(f"Expires in: {ttl_text}\n")
+        print(f"{green(OK)} Challenge is running.")
+        print(f"Expires in: {ttl_text}")
         return True
     except Exception as e:
-        print(f"\n{red(ERR)} Up failed for {name}: {str(e)}\n")
+        print(f"{red(ERR)} Up failed for {name}: {str(e)}")
         return False
 
 
@@ -181,10 +179,10 @@ def cmd_up(args) -> int:
         if getattr(args, "all", False):
             challenges = [challenge for challenge in challenge_service.list_challenges() if challenge.enabled]
             if not challenges:
-                print(f"\n{yellow('No enabled challenges found')}\n")
+                print(f"{yellow('No enabled challenges found')}")
                 return 0
 
-            print(f"\n{blue(f'Starting all enabled challenges ({len(challenges)})...')}")
+            print(f"{blue(f'Starting all enabled challenges ({len(challenges)})...')}")
             ok_count = 0
             failed_count = 0
             for challenge in challenges:
@@ -195,16 +193,16 @@ def cmd_up(args) -> int:
 
             print(f"{green(OK)} Up --all complete")
             print(f"  Started: {ok_count}")
-            print(f"  Failed:  {failed_count}\n")
+            print(f"  Failed:  {failed_count}")
             return 1 if failed_count else 0
 
         if not getattr(args, "name", None):
-            print(f"\n{red(ERR)} Please provide a challenge name or use --all\n")
+            print(f"{red(ERR)} Please provide a challenge name or use --all")
             return 1
 
         return 0 if _cmd_up_one(args.name, challenge_service, runtime_service, export_manager) else 1
     except Exception as e:
-        print(f"\n{red(ERR)} Up failed: {str(e)}\n")
+        print(f"{red(ERR)} Up failed: {str(e)}")
         return 1
 
 
@@ -213,7 +211,7 @@ def cmd_down(args) -> int:
         _, challenge_service, runtime_service, export_manager = get_services()
 
         if getattr(args, "all", False):
-            print(f"\n{blue('Stopping all challenges...')}")
+            print(f"{blue('Stopping all challenges...')}")
             stopped_count = 0
 
             for challenge in challenge_service.list_challenges():
@@ -236,19 +234,19 @@ def cmd_down(args) -> int:
 
             print(f"{green(OK)} Down complete")
             print(f"  Challenges handled: {stopped_count}")
-            print(f"  Tunnel processes killed: {killed}\n")
+            print(f"  Tunnel processes killed: {killed}")
             return 0
 
         if not args.name:
-            print(f"\n{red(ERR)} Please provide a challenge name or use --all\n")
+            print(f"{red(ERR)} Please provide a challenge name or use --all")
             return 1
 
-        print(f"\n{blue('Stopping...')}")
+        print(f"{blue('Stopping...')}")
         _stop_challenge_completely(args.name, challenge_service, runtime_service, export_manager)
-        print(f"{green(OK)} Down complete\n")
+        print(f"{green(OK)} Down complete")
         return 0
     except Exception as e:
-        print(f"\n{red(ERR)} Down failed: {str(e)}\n")
+        print(f"{red(ERR)} Down failed: {str(e)}")
         return 1
 
 
@@ -259,7 +257,7 @@ def cmd_restart(args) -> int:
         # 1. Check Cooldown
         remaining = runtime_service.check_restart_cooldown(args.name)
         if remaining:
-            print(f"\n{red(ERR)} Restart denied: Cooldown active. Please wait {remaining}s.\n")
+            print(f"{red(ERR)} Restart denied: Cooldown active. Please wait {remaining}s.")
             return 1
 
         # 2. Determine what to restart
@@ -269,10 +267,10 @@ def cmd_restart(args) -> int:
 
         challenge = challenge_service.get_challenge(args.name)
         if not challenge:
-            print(f"\n{red(ERR)} Challenge not found: {args.name}\n")
+            print(f"{red(ERR)} Challenge not found: {args.name}")
             return 1
 
-        print(f"\n{blue('Restarting...')}")
+        print(f"{blue('Restarting...')}")
 
         # Handle Provider Stop
         if do_provider:
@@ -300,10 +298,10 @@ def cmd_restart(args) -> int:
         # 3. Update last_restart time
         runtime_service.update_restart_time(args.name)
 
-        print(f"\n{green(OK)} Restart complete\n")
+        print(f"{green(OK)} Restart complete")
         return 0
     except Exception as e:
-        print(f"\n{red(ERR)} Restart failed: {str(e)}\n")
+        print(f"{red(ERR)} Restart failed: {str(e)}")
         return 1
 
 
@@ -344,14 +342,12 @@ def cmd_status(args) -> int:
 
             if not challenges:
                 if not watch_mode:
-                    print(f"\n{yellow('No challenges found')}\n")
+                    print(f"{yellow('No challenges found')}")
                     return 0
 
             if watch_mode:
                 os.system('cls' if os.name == 'nt' else 'clear')
-                print(f"\n{bold('Status (Watching every 15s - Ctrl+C to stop)')}")
-            else:
-                print(f"\n{bold('Status')}")
+                print(f"{yellow('Watching every 15s - Ctrl+C to stop')}")
 
             status_rows = []
 
@@ -391,7 +387,6 @@ def cmd_status(args) -> int:
                     status_rows,
                     [28, 10, 26, 12, 14, 8, 10, 8, 58],
                 ))
-            print()
 
             if not watch_mode:
                 break
@@ -402,7 +397,7 @@ def cmd_status(args) -> int:
     except KeyboardInterrupt:
         return 0
     except Exception as e:
-        print(f"\n{red(ERR)} Status failed: {str(e)}\n")
+        print(f"{red(ERR)} Status failed: {str(e)}")
         return 1
 
 
@@ -416,12 +411,12 @@ def cmd_extend(args) -> int:
         mins = int(remaining.total_seconds() // 60)
         secs = int(remaining.total_seconds() % 60)
 
-        print(f"\n{green(OK)} Extended {args.name}")
+        print(f"{green(OK)} Extended {args.name}")
         print(f"  New expiry: {runtime.expires_at.strftime('%H:%M:%S')}")
-        print(f"  Time remaining: {mins}m {secs}s\n")
+        print(f"  Time remaining: {mins}m {secs}s")
         return 0
     except Exception as e:
-        print(f"\n{red(ERR)} Extend failed: {str(e)}\n")
+        print(f"{red(ERR)} Extend failed: {str(e)}")
         return 1
 
 def cmd_daemon(args) -> int:
@@ -431,7 +426,7 @@ def cmd_daemon(args) -> int:
         interval = getattr(args, "interval", None) or config.daemon_interval
         with_api = getattr(args, "with_api", False)
 
-        print(f"\n{blue('[daemon]')} Starting NXCTL Daemon")
+        print(f"{blue('[daemon]')} Starting NXCTL Daemon")
         print(f"{blue('[daemon]')} Interval: {interval}s")
 
         if with_api:
@@ -447,7 +442,7 @@ def cmd_daemon(args) -> int:
             api_thread = threading.Thread(target=run_api, daemon=True)
             api_thread.start()
 
-        print(f"{blue('[daemon]')} Monitoring challenges for auto-shutdown & auto-heal...\n")
+        print(f"{blue('[daemon]')} Monitoring challenges for auto-shutdown & auto-heal...")
         last_endpoint_check = 0.0
         endpoint_check_interval = int(
             getattr(config, "export_endpoint_check_interval_seconds", 120) or 120
@@ -525,10 +520,10 @@ def cmd_daemon(args) -> int:
             time.sleep(interval)
 
     except KeyboardInterrupt:
-        print(f"\n{yellow('[daemon]')} Shutting down daemon...")
+        print(f"{yellow('[daemon]')} Shutting down daemon...")
         return 0
     except Exception as e:
-        print(f"\n{red('[daemon]')} Fatal error: {str(e)}\n")
+        print(f"{red('[daemon]')} Fatal error: {str(e)}")
         return 1
 
 def cmd_api(args) -> int:
@@ -537,7 +532,7 @@ def cmd_api(args) -> int:
         host = getattr(args, "host", "0.0.0.0")
         port = getattr(args, "port", 8000)
 
-        print(f"\n{blue('[api]')} Starting NXCTL Web API on {host}:{port}")
+        print(f"{blue('[api]')} Starting NXCTL Web API on {host}:{port}")
         print(f"{blue('[api]')} Swagger UI: http://{host}:{port}/docs")
 
         uvicorn.run("nxctl_api:app", host=host, port=port, reload=False)
@@ -545,5 +540,5 @@ def cmd_api(args) -> int:
     except KeyboardInterrupt:
         return 0
     except Exception as e:
-        print(f"\n{red(ERR)} API failed: {str(e)}\n")
+        print(f"{red(ERR)} API failed: {str(e)}")
         return 1

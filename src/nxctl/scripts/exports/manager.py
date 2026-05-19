@@ -143,33 +143,16 @@ class ExportManager:
             except Exception as exc:
                 failures.append(self._failure_dict(EXPORT_PROVIDER_BASE_IP, "direct", exc))
 
-        if protocol != PROTOCOL_TCP and self._ngrok_enabled() and self._ngrok_token_available():
-            attempted.add(EXPORT_PROVIDER_NGROK)
-            try:
-                exports.append(
-                    self.start_export_details(
-                        challenge_name,
-                        host_port,
-                        protocol,
-                        EXPORT_PROVIDER_NGROK,
-                    )
-                )
-            except Exception as exc:
-                failures.append(self._failure_dict(EXPORT_PROVIDER_NGROK, "tunnel", exc))
+        # Determine prioritized tunnel providers to try
+        priority_list = list(default_providers) if default_providers else self.default_providers_for(protocol)
 
-        tunnel_started = any(
-            export.get("type") == "tunnel"
-            and export.get("provider") != EXPORT_PROVIDER_BASE_IP
-            for export in exports
-        )
-        if tunnel_started:
-            return exports, failures
-
-        for provider_name in default_providers or self.default_providers_for(protocol):
+        for provider_name in priority_list:
             if not provider_name or provider_name in attempted:
                 continue
             attempted.add(provider_name)
             if not self._provider_enabled(provider_name):
+                continue
+            if provider_name == EXPORT_PROVIDER_NGROK and not self._ngrok_token_available():
                 continue
             try:
                 exports.append(
@@ -180,7 +163,6 @@ class ExportManager:
                         provider_name,
                     )
                 )
-                break
             except Exception as exc:
                 failures.append(self._failure_dict(provider_name, "tunnel", exc))
 
@@ -193,7 +175,7 @@ class ExportManager:
         """Return the existing protocol-based default tunnel providers."""
         if protocol == PROTOCOL_TCP:
             return [EXPORT_PROVIDER_PINGGY]
-        return [EXPORT_PROVIDER_LOCALTUNNEL]
+        return [EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_LOCALTUNNEL]
 
     def stop_export(self, challenge_name: str, provider_name: str, host_port: int = 0) -> bool:
         """Stop an export."""

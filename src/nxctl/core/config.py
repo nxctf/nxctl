@@ -16,6 +16,102 @@ except Exception:
 from pydantic import BaseModel, Field, root_validator
 
 
+class ChallengesConfig(BaseModel):
+    github_repo: str = ""
+    branch: str = "main"
+    access_token: str = ""
+
+    class Config:
+        extra = "allow"
+
+
+class AppConfig(BaseModel):
+    data_dir: str = "./data"
+    base_ip: str = ""
+
+    class Config:
+        extra = "allow"
+
+
+class ApiConfig(BaseModel):
+    token: str = ""
+    admin_secret: str = ""
+
+    class Config:
+        extra = "allow"
+
+
+class TtlConfig(BaseModel):
+    default_minutes: int = 15
+    extend_minutes: int = 10
+    extend_threshold_minutes: int = 5
+    extend_cooldown_seconds: int = 30
+
+    class Config:
+        extra = "allow"
+
+
+class DaemonConfig(BaseModel):
+    interval_seconds: int = 10
+    restart_cooldown_seconds: int = 300
+
+    class Config:
+        extra = "allow"
+
+
+class ExportsConfig(BaseModel):
+    auto_heal: bool = True
+    endpoint_check_interval_seconds: int = 120
+    endpoint_check_timeout_seconds: int = 5
+
+    class Config:
+        extra = "allow"
+
+
+class PortsConfig(BaseModel):
+    local_start: int = 40000
+    local_end: int = 49999
+    randomize: bool = True
+
+    class Config:
+        extra = "allow"
+
+
+class NgrokConfig(BaseModel):
+    enabled: bool = True
+    max_sessions_per_token: int = 3
+    tokens: list[str] = Field(default_factory=list)
+
+    class Config:
+        extra = "allow"
+
+
+class LocalTunnelConfig(BaseModel):
+    enabled: bool = True
+
+    class Config:
+        extra = "allow"
+
+
+class PinggyConfig(BaseModel):
+    enabled: bool = True
+    max_sessions_per_token: int = 1
+    tokens: list[str] = Field(default_factory=list)
+
+    class Config:
+        extra = "allow"
+
+
+class TunnelsConfig(BaseModel):
+    default: str = "localtunnel"
+    ngrok: NgrokConfig = Field(default_factory=NgrokConfig)
+    localtunnel: LocalTunnelConfig = Field(default_factory=LocalTunnelConfig)
+    pinggy: PinggyConfig = Field(default_factory=PinggyConfig)
+
+    class Config:
+        extra = "allow"
+
+
 class Config(BaseModel):
     """Main application configuration.
 
@@ -23,43 +119,131 @@ class Config(BaseModel):
     state. All internal runtime paths are derived from that root.
     """
 
-    github_repo: str
-    branch: str = "main"
-    access_token: str = ""
-
-    data_dir: str = "./data"
-    base_ip: str = ""
-    api_token: str = ""
-    api_admin_secret: str = ""
-
-    ngrok_tokens: list[str] = Field(default_factory=list)
-    pinggy_token: str = ""
-
-    default_tunnel: str = "localtunnel"
-    enable_ngrok: bool = True
-    enable_localtunnel: bool = True
-    enable_pinggy: bool = True
-    local_port_start: int = 40000
-    local_port_end: int = 49999
-    randomize_local_ports: bool = True
-
-    # TTL settings
-    default_ttl_minutes: int = 15
-    extend_time_minutes: int = 10
-    extend_threshold_minutes: int = 5
-    extend_cooldown_seconds: int = 30
-    daemon_interval: int = 10
-    restart_cooldown_seconds: int = 300
-    auto_heal_exports: bool = True
-    export_endpoint_check_interval_seconds: int = 120
-    export_endpoint_check_timeout_seconds: int = 5
+    challenges: ChallengesConfig = Field(default_factory=ChallengesConfig)
+    app: AppConfig = Field(default_factory=AppConfig)
+    api: ApiConfig = Field(default_factory=ApiConfig)
+    ttl: TtlConfig = Field(default_factory=TtlConfig)
+    daemon: DaemonConfig = Field(default_factory=DaemonConfig)
+    exports: ExportsConfig = Field(default_factory=ExportsConfig)
+    ports: PortsConfig = Field(default_factory=PortsConfig)
+    tunnels: TunnelsConfig = Field(default_factory=TunnelsConfig)
 
     class Config:
         extra = "allow"
 
+    # =========================================================================
+    # Legacy Properties for Backward Compatibility
+    # =========================================================================
+
+    @property
+    def github_repo(self) -> str:
+        return self.challenges.github_repo
+
+    @property
+    def branch(self) -> str:
+        return self.challenges.branch
+
+    @property
+    def access_token(self) -> str:
+        return self.challenges.access_token
+
+    @property
+    def data_dir(self) -> str:
+        return self.app.data_dir
+
+    @property
+    def base_ip(self) -> str:
+        return self.app.base_ip
+
+    @property
+    def api_token(self) -> str:
+        return self.api.token
+
+    @property
+    def api_admin_secret(self) -> str:
+        return self.api.admin_secret
+
+    @property
+    def ngrok_tokens(self) -> list[str]:
+        return self.tunnels.ngrok.tokens
+
+    @property
+    def pinggy_token(self) -> str:
+        if self.tunnels.pinggy.tokens:
+            return self.tunnels.pinggy.tokens[0]
+        return ""
+
+    @property
+    def default_tunnel(self) -> str:
+        return self.tunnels.default
+
+    @property
+    def enable_ngrok(self) -> bool:
+        return self.tunnels.ngrok.enabled
+
+    @property
+    def enable_localtunnel(self) -> bool:
+        return self.tunnels.localtunnel.enabled
+
+    @property
+    def enable_pinggy(self) -> bool:
+        return self.tunnels.pinggy.enabled
+
+    @property
+    def local_port_start(self) -> int:
+        return self.ports.local_start
+
+    @property
+    def local_port_end(self) -> int:
+        return self.ports.local_end
+
+    @property
+    def randomize_local_ports(self) -> bool:
+        return self.ports.randomize
+
+    @property
+    def default_ttl_minutes(self) -> int:
+        return self.ttl.default_minutes
+
+    @property
+    def extend_time_minutes(self) -> int:
+        return self.ttl.extend_minutes
+
+    @property
+    def extend_threshold_minutes(self) -> int:
+        return self.ttl.extend_threshold_minutes
+
+    @property
+    def extend_cooldown_seconds(self) -> int:
+        return self.ttl.extend_cooldown_seconds
+
+    @property
+    def daemon_interval(self) -> int:
+        return self.daemon.interval_seconds
+
+    @property
+    def restart_cooldown_seconds(self) -> int:
+        return self.daemon.restart_cooldown_seconds
+
+    @property
+    def auto_heal_exports(self) -> bool:
+        return self.exports.auto_heal
+
+    @property
+    def export_endpoint_check_interval_seconds(self) -> int:
+        return self.exports.endpoint_check_interval_seconds
+
+    @property
+    def export_endpoint_check_timeout_seconds(self) -> int:
+        return self.exports.endpoint_check_timeout_seconds
+
+    # =========================================================================
+    # Path Properties
+    # =========================================================================
+
     @property
     def data_path(self) -> Path:
-        return Path(self.data_dir)
+        return Path(self.app.data_dir)
 
     @property
     def chall_dir(self) -> Path:
@@ -135,7 +319,7 @@ class Config(BaseModel):
 
     def ensure_dirs(self) -> None:
         """Create the runtime directories NXCTL owns."""
-        for path in (
+        for path_obj in (
             self.data_path,
             self.chall_dir,
             self.runtime_dir,
@@ -146,7 +330,7 @@ class Config(BaseModel):
             self.logs_dir,
             self.export_logs_dir,
         ):
-            path.mkdir(parents=True, exist_ok=True)
+            path_obj.mkdir(parents=True, exist_ok=True)
 
     def legacy_export_state_dirs(self) -> list[Path]:
         """State locations from previous layouts, ordered newest to oldest."""
@@ -159,60 +343,119 @@ class Config(BaseModel):
     def _normalize_values(cls, values):
         base_dir = Path(values.get("_config_dir") or os.getcwd()).resolve()
 
+        # Extract legacy data dir values to find the definitive data_dir
         data_dir = (
             values.get("data_dir")
             or values.get("dir_app")
             or values.get("app_dir")
             or cls._data_dir_from_legacy(values)
-            or "./data"
         )
-        values["data_dir"] = cls._normalize_path(data_dir, base_dir)
 
-        # Keep accepting old keys, but do not let them create divergent write
-        # targets. All active paths are derived from data_dir properties.
+        # Ensure app config dict exists
+        if "app" not in values or not isinstance(values["app"], dict):
+            values["app"] = {}
+
+        if data_dir:
+            values["app"]["data_dir"] = cls._normalize_path(data_dir, base_dir)
+        elif "data_dir" not in values["app"]:
+            values["app"]["data_dir"] = cls._normalize_path("./data", base_dir)
+
+        # Map legacy flat keys to nested dictionaries
+        legacy_mappings = {
+            "github_repo": ("challenges", "github_repo"),
+            "branch": ("challenges", "branch"),
+            "access_token": ("challenges", "access_token"),
+            "base_ip": ("app", "base_ip"),
+            "api_token": ("api", "token"),
+            "api_admin_secret": ("api", "admin_secret"),
+            "default_ttl_minutes": ("ttl", "default_minutes"),
+            "extend_time_minutes": ("ttl", "extend_minutes"),
+            "extend_threshold_minutes": ("ttl", "extend_threshold_minutes"),
+            "extend_cooldown_seconds": ("ttl", "extend_cooldown_seconds"),
+            "daemon_interval": ("daemon", "interval_seconds"),
+            "restart_cooldown_seconds": ("daemon", "restart_cooldown_seconds"),
+            "auto_heal_exports": ("exports", "auto_heal"),
+            "export_endpoint_check_interval_seconds": ("exports", "endpoint_check_interval_seconds"),
+            "export_endpoint_check_timeout_seconds": ("exports", "endpoint_check_timeout_seconds"),
+            "local_port_start": ("ports", "local_start"),
+            "local_port_end": ("ports", "local_end"),
+            "randomize_local_ports": ("ports", "randomize"),
+            "default_tunnel": ("tunnels", "default"),
+            "enable_ngrok": ("tunnels", "ngrok", "enabled"),
+            "enable_localtunnel": ("tunnels", "localtunnel", "enabled"),
+            "enable_pinggy": ("tunnels", "pinggy", "enabled"),
+            "ngrok_tokens": ("tunnels", "ngrok", "tokens"),
+            "ngrok_max_sessions_per_token": ("tunnels", "ngrok", "max_sessions_per_token"),
+        }
+
+        # Handle legacy flat pinggy_token
+        if "pinggy_token" in values:
+            flat_pinggy_token = str(values.pop("pinggy_token", "")).strip()
+            if flat_pinggy_token:
+                if "tunnels" not in values:
+                    values["tunnels"] = {}
+                if "pinggy" not in values["tunnels"]:
+                    values["tunnels"]["pinggy"] = {}
+                if "tokens" not in values["tunnels"]["pinggy"]:
+                    values["tunnels"]["pinggy"]["tokens"] = []
+                if flat_pinggy_token not in values["tunnels"]["pinggy"]["tokens"]:
+                    values["tunnels"]["pinggy"]["tokens"].append(flat_pinggy_token)
+
+        for old_key, path in legacy_mappings.items():
+            if old_key in values:
+                # Traverse and set
+                current = values
+                for part in path[:-1]:
+                    if part not in current or not isinstance(current[part], dict):
+                        current[part] = {}
+                    current = current[part]
+
+                # Set only if not already explicitly set in nested struct
+                last_part = path[-1]
+                if last_part not in current:
+                    current[last_part] = values[old_key]
+
+                # Remove legacy key to avoid clutter
+                values.pop(old_key)
+
+        # Clean up legacy path keys
         for legacy_key in (
-            "dir_app",
-            "cache_dir",
-            "app_dir",
-            "chall_dir",
-            "build_dir",
-            "db_file",
-            "exports_dir",
-            "runtime_dir",
-            "logs_dir",
-            "export_state_dir",
-            "export_logs_dir",
-            "locks_dir",
-            "tmp_dir",
-            "runtime_compose_dir",
-            "data_exports",
-            "export_dir",
-            "exports_path",
+            "dir_app", "cache_dir", "app_dir", "chall_dir", "build_dir",
+            "db_file", "exports_dir", "runtime_dir", "logs_dir",
+            "export_state_dir", "export_logs_dir", "locks_dir", "tmp_dir",
+            "runtime_compose_dir", "data_exports", "export_dir", "exports_path",
+            "data_dir",
         ):
             values.pop(legacy_key, None)
 
-        if not values.get("ngrok_tokens"):
-            legacy_tunnels = values.get("tunnels", {}) or {}
-            legacy_ngrok = legacy_tunnels.get("ngrok", {}) if isinstance(legacy_tunnels, dict) else {}
-            legacy_tokens = legacy_ngrok.get("tokens", []) if isinstance(legacy_ngrok, dict) else []
-            tokens: list[str] = []
-            for token_item in legacy_tokens:
-                if isinstance(token_item, str) and token_item.strip():
-                    tokens.append(token_item.strip())
-                elif isinstance(token_item, dict):
-                    token_value = str(token_item.get("token", "")).strip()
-                    if token_value:
-                        tokens.append(token_value)
-            if tokens:
-                values["ngrok_tokens"] = tokens
+        # Process nested tunnels to handle old partial layouts (e.g. tokens in dicts)
+        legacy_tunnels = values.get("tunnels", {})
+        if isinstance(legacy_tunnels, dict):
+            # Ngrok tokens normalization
+            legacy_ngrok = legacy_tunnels.get("ngrok", {})
+            if isinstance(legacy_ngrok, dict):
+                legacy_tokens = legacy_ngrok.get("tokens", [])
+                tokens = []
+                for token_item in legacy_tokens:
+                    if isinstance(token_item, str) and token_item.strip():
+                        tokens.append(token_item.strip())
+                    elif isinstance(token_item, dict):
+                        token_value = str(token_item.get("token", "")).strip()
+                        if token_value:
+                            tokens.append(token_value)
+                if tokens:
+                    legacy_tunnels["ngrok"]["tokens"] = tokens
 
-        if not values.get("pinggy_token"):
-            legacy_tunnels = values.get("tunnels", {}) or {}
-            legacy_pinggy = legacy_tunnels.get("pinggy", {}) if isinstance(legacy_tunnels, dict) else {}
+            # Pinggy token normalization
+            legacy_pinggy = legacy_tunnels.get("pinggy", {})
             if isinstance(legacy_pinggy, dict):
-                legacy_token = str(legacy_pinggy.get("token", "")).strip()
-                if legacy_token:
-                    values["pinggy_token"] = legacy_token
+                if "token" in legacy_pinggy:
+                    legacy_token = str(legacy_pinggy.pop("token", "")).strip()
+                    if legacy_token:
+                        if "tokens" not in legacy_pinggy:
+                            legacy_pinggy["tokens"] = []
+                        if legacy_token not in legacy_pinggy["tokens"]:
+                            legacy_pinggy["tokens"].append(legacy_token)
 
         return values
 

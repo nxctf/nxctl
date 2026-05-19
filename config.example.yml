@@ -1,42 +1,62 @@
 # NXCTL configuration template
 
-github_repo: https://github.com/your-username/your-repo
-branch: main
-access_token: ${GITHUB_TOKEN}
+challenges:
+  github_repo: https://github.com/your-username/your-repo
+  branch: main
+  access_token: ${GITHUB_TOKEN}
 
-# NXCTL stores db, challenge cache, runtime state, locks, temp files, and logs under this dir.
-data_dir: ./data
+app:
+  # NXCTL stores db, challenge cache, runtime state, locks, temp files, and logs under this dir.
+  data_dir: ./data
 
-# Optional direct/public IP export. Leave empty to disable.
-base_ip: ""
+  # Optional direct/public IP export. Leave empty to disable.
+  base_ip: ""
 
-# API security:
-# - api_token is optional normal API access control.
-# - api_admin_secret is required for dangerous/global API actions.
-api_token: ${NXCTL_API_TOKEN}
-api_admin_secret: ${NXCTL_API_ADMIN_SECRET}
+api:
+  # API security:
+  # - token is optional normal API access control.
+  # - admin_secret is required for dangerous/global API actions.
+  token: ${NXCTL_API_TOKEN}
+  admin_secret: ${NXCTL_API_ADMIN_SECRET}
 
-enable_ngrok: true
-enable_localtunnel: true
-enable_pinggy: true
-ngrok_max_sessions_per_token: 3
+ttl:
+  default_minutes: 15
+  extend_minutes: 10
+  extend_threshold_minutes: 5
+  extend_cooldown_seconds: 30
 
-default_ttl_minutes: 15
-extend_time_minutes: 10
-extend_threshold_minutes: 5
-extend_cooldown_seconds: 30
-daemon_interval: 10
-restart_cooldown_seconds: 300
-auto_heal_exports: true
-export_endpoint_check_interval_seconds: 120
-export_endpoint_check_timeout_seconds: 20
+daemon:
+  interval_seconds: 10
+  restart_cooldown_seconds: 300
 
-local_port_start: 40000
-local_port_end: 49999
-randomize_local_ports: true
+exports:
+  auto_heal: true
+  endpoint_check_interval_seconds: 120
+  endpoint_check_timeout_seconds: 20
 
-ngrok_tokens:
-  - ${NGROK_TOKEN_1}
-  - ${NGROK_TOKEN_2}
-  - ${NGROK_TOKEN_3}
-  # - ${NGROK_TOKEN_4}
+ports:
+  local_start: 40000
+  local_end: 49999
+  randomize: true
+
+tunnels:
+  default: localtunnel
+
+  ngrok:
+    enabled: true
+    max_sessions_per_token: 3
+    tokens:
+      - ${NGROK_TOKEN_1}
+      - ${NGROK_TOKEN_2}
+      - ${NGROK_TOKEN_3}
+      # - ${NGROK_TOKEN_4}
+
+  localtunnel:
+    enabled: true
+
+  pinggy:
+    enabled: true
+    max_sessions_per_token: 1
+    # tokens:
+    #   - ${PINGGY_TOKEN_1}
+    #   - ${PINGGY_TOKEN_2}

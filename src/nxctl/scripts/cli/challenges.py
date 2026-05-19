@@ -45,21 +45,20 @@ def cmd_sync(args) -> int:
             token=config.access_token,
         )
 
-        print(f"\n{blue('Syncing challenges...')}")
+        print(f"{blue('Syncing challenges...')}")
         challenges = challenge_service.sync_challenges(git_repo)
-        print(f"{green(OK)} Synced {len(challenges)} challenges\n")
+        print(f"{green(OK)} Synced {len(challenges)} challenges")
         for challenge in challenges:
             print(f"  {BULLET} {challenge.name} ({_ports_text(challenge_service, challenge)})")
-        print()
         return 0
     except GitError as e:
-        print(f"\n{red(ERR)} Sync failed: {str(e)}\n")
+        print(f"{red(ERR)} Sync failed: {str(e)}")
         return 1
     except ChallengeDiscoveryError as e:
-        print(f"\n{red(ERR)} Sync failed: {str(e)}\n")
+        print(f"{red(ERR)} Sync failed: {str(e)}")
         return 1
     except Exception as e:
-        print(f"\n{red(ERR)} Sync failed: {str(e)}\n")
+        print(f"{red(ERR)} Sync failed: {str(e)}")
         return 1
 
 
@@ -68,20 +67,20 @@ def cmd_list(args) -> int:
         _, challenge_service, _, _ = get_services()
         challenges = challenge_service.list_challenges()
         if not challenges:
-            print(f"\n{yellow('No challenges found')}\n")
+            print(f"{yellow('No challenges found')}")
             return 0
 
-        print(f"\n{bold('Challenges')}")
+        
         print(f"{'-' * 124}")
         print(f"{'Name':28} {'Primary':16} {'Ports':46} {'Path'}")
         print(f"{'-' * 124}")
         for challenge in challenges:
             primary = f"{challenge.service_port}/{challenge.service_type}"
             print(f"{challenge.name:28} {primary:16} {_ports_text(challenge_service, challenge):46} {challenge.path}")
-        print(f"{'-' * 124}\n")
+        print(f"{'-' * 124}")
         return 0
     except Exception as e:
-        print(f"\n{red(ERR)} List failed: {str(e)}\n")
+        print(f"{red(ERR)} List failed: {str(e)}")
         return 1
 
 
@@ -90,7 +89,7 @@ def cmd_inspect(args) -> int:
         config, challenge_service, runtime_service, export_manager = get_services()
         challenge = challenge_service.get_challenge(args.name)
         if not challenge:
-            print(f"\n{red(ERR)} Challenge not found: {args.name}\n")
+            print(f"{red(ERR)} Challenge not found: {args.name}")
             return 1
 
         container_port = get_container_port(config, challenge)
@@ -110,8 +109,6 @@ def cmd_inspect(args) -> int:
         pinggy_status = green("Enabled") if getattr(config, "enable_pinggy", True) else red("Disabled")
         restart_cd = yellow(f"{format_duration(cooldown)} left") if cooldown else green("Ready")
         ttl_value = green(ttl_text) if ttl_ok and ttl_text != "-" else red("Expired") if ttl_text != "-" else "-"
-
-        print()
         print(panel(
             f"Challenge: {challenge.name}",
             [
@@ -124,7 +121,6 @@ def cmd_inspect(args) -> int:
                 ("Created", format_datetime(challenge.created_at)),
             ],
         ))
-        print()
         print(panel(
             "Configuration",
             [
@@ -136,7 +132,6 @@ def cmd_inspect(args) -> int:
                 ("Auto Heal", green("Enabled") if getattr(config, "auto_heal_exports", False) else red("Disabled")),
             ],
         ))
-        print()
         print(panel(
             "Runtime",
             [
@@ -148,12 +143,10 @@ def cmd_inspect(args) -> int:
                 ("Restart CD", restart_cd),
             ],
         ))
-        print()
         print(box("Active Exports", exports_table(exports, detailed=True), width=116))
-        print()
         return 0
     except Exception as e:
-        print(f"\n{red(ERR)} Inspect failed: {str(e)}\n")
+        print(f"{red(ERR)} Inspect failed: {str(e)}")
         return 1
 
 
@@ -161,10 +154,10 @@ def cmd_add(args) -> int:
     try:
         _, challenge_service, _, _ = get_services()
         challenge = challenge_service.add_challenge(args.name, args.path, args.port, args.type)
-        print(f"\n{green(OK)} Added challenge: {challenge.name}\n")
+        print(f"{green(OK)} Added challenge: {challenge.name}")
         return 0
     except Exception as e:
-        print(f"\n{red(ERR)} Add failed: {str(e)}\n")
+        print(f"{red(ERR)} Add failed: {str(e)}")
         return 1
 
 
@@ -172,10 +165,10 @@ def cmd_remove(args) -> int:
     try:
         _, challenge_service, _, _ = get_services()
         if not challenge_service.remove_challenge(args.name):
-            print(f"\n{red(ERR)} Challenge not found: {args.name}\n")
+            print(f"{red(ERR)} Challenge not found: {args.name}")
             return 1
-        print(f"\n{green(OK)} Removed challenge: {args.name}\n")
+        print(f"{green(OK)} Removed challenge: {args.name}")
         return 0
     except Exception as e:
-        print(f"\n{red(ERR)} Remove failed: {str(e)}\n")
+        print(f"{red(ERR)} Remove failed: {str(e)}")
         return 1

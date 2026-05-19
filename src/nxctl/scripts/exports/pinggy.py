@@ -7,6 +7,8 @@ import re
 import socket
 import subprocess
 import psutil
+import os
+import random
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
@@ -42,6 +44,108 @@ class PinggyProvider(ExportProvider):
         self.legacy_state_dir = config.legacy_exports_dir
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.log_dir.mkdir(parents=True, exist_ok=True)
+
+    def _configured_tokens(self) -> list[tuple[str, str]]:
+        tokens = []
+        env_token = os.getenv("PINGGY_TOKEN", "").strip()
+        if env_token:
+            tokens.append((env_token, "PINGGY_TOKEN"))
+
+        try:
+            cfg_tokens = getattr(self.config.tunnels.pinggy, "tokens", None) or []
+            if isinstance(cfg_tokens, list):
+                for index, token_item in enumerate(cfg_tokens, start=1):
+                    token = str(token_item).strip()
+                    if token:
+                        tokens.append((token, f"tunnels.pinggy.tokens[{index}]"))
+        except Exception as e:
+            logger.warning(f"Failed loading pinggy tokens: {e}")
+
+        deduped = []
+        seen = set()
+        for token, source in tokens:
+            if token not in seen:
+                seen.add(token)
+                deduped.append((token, source))
+        return deduped
+
+    def _token_from_cmdline(self, cmdline: list[str]) -> Optional[str]:
+        joined = " ".join(cmdline)
+        match = re.search(r"([^\s\+]+)\+tcp@(?:a|free)\.pinggy\.io", joined)
+        return match.group(1) if match else None
+
+    def _used_token_counts(self) -> dict[str, int]:
+        used: dict[str, int] = {}
+        counted_pids: set[int] = set()
+
+        state_paths = list(self.state_dir.glob("pinggy_*.json"))
+        legacy_dirs = (
+            self.config.legacy_export_state_dirs()
+            if hasattr(self.config, "legacy_export_state_dirs")
+            else [self.legacy_state_dir]
+        )
+        for legacy_dir in legacy_dirs:
+            state_paths.extend(
+                path for path in legacy_dir.glob("pinggy_*.json")
+                if path not in state_paths
+            )
+        for path in state_paths:
+            state = load_state_file(path)
+            if not state:
+                continue
+
+            pid = int(state.get("pid", 0) or 0)
+            token = str(state.get("token", "")).strip()
+            if pid and token and self._is_pinggy_pid(pid, int(state.get("host_port", 0))):
+                used[token] = used.get(token, 0) + 1
+                counted_pids.add(pid)
+
+        try:
+            for proc in psutil.process_iter(["pid", "cmdline"]):
+                pid = int(proc.info.get("pid") or 0)
+                if not pid or pid in counted_pids:
+                    continue
+
+                cmdline = proc.info.get("cmdline") or []
+                is_pinggy = False
+                for part in cmdline:
+                    if part and "pinggy" in Path(part).name.lower():
+                        is_pinggy = True
+                        break
+                if not is_pinggy and "pinggy" not in " ".join(cmdline).lower():
+                    continue
+
+                token = self._token_from_cmdline(cmdline)
+                if token:
+                    used[token] = used.get(token, 0) + 1
+        except Exception:
+            pass
+
+        return used
+
+    def _select_token(self) -> tuple[str, str]:
+        tokens = self._configured_tokens()
+        if not tokens:
+            return ("", "no token configured")
+
+        used_token_counts = self._used_token_counts()
+        max_sessions = int(getattr(self.config.tunnels.pinggy, "max_sessions_per_token", 1) or 1)
+
+        available = [
+            (token, source)
+            for token, source in tokens
+            if used_token_counts.get(token, 0) < max_sessions
+        ]
+        if not available:
+            logger.warning("All pinggy tokens are busy, falling back to free tier without token")
+            return ("", "fallback (all tokens busy)")
+
+        lowest_count = min(used_token_counts.get(token, 0) for token, _ in available)
+        least_used = [
+            item for item in available
+            if used_token_counts.get(item[0], 0) == lowest_count
+        ]
+        return random.choice(least_used)
 
     def _get_state_file(self, challenge_name: str, host_port: int = 0) -> Path:
         """Get state file path for a challenge and host port."""
@@ -200,6 +304,12 @@ class PinggyProvider(ExportProvider):
             if endpoint:
                 ready, ready_error = self._endpoint_ready(endpoint, probe_timeout)
                 if ready:
+                    existing_cmdline = []
+                    try:
+                        existing_cmdline = psutil.Process(existing_pid).cmdline()
+                    except Exception:
+                        pass
+                    existing_token = self._token_from_cmdline(existing_cmdline) or ""
                     save_state_file(
                         state_path,
                         {
@@ -208,6 +318,7 @@ class PinggyProvider(ExportProvider):
                             "log_file": str(log_file),
                             "challenge_name": challenge_name,
                             "host_port": host_port,
+                            "token": existing_token,
                             "started_at": int(time.time()),
                         }
                     )
@@ -218,12 +329,20 @@ class PinggyProvider(ExportProvider):
                 last_error = f"existing pinggy process {existing_pid} has not written an endpoint"
             raise RuntimeError(last_error)
 
+        token, token_source = self._select_token()
+        if token:
+            logger.info(f"Using pinggy token from {token_source}")
+        else:
+            logger.info("Using pinggy free tier (no token)")
+
+        user_host = f"{token}+tcp@a.pinggy.io" if token else "tcp@free.pinggy.io"
+
         for attempt in range(1, attempts + 1):
             try:
                 log_file = self._get_log_file(challenge_name, host_port)
                 log_file.write_text("", encoding="utf-8")
                 command = (
-                    f"nohup pinggy -p 443 -R0:localhost:{int(host_port)} tcp@free.pinggy.io "
+                    f"nohup pinggy -p 443 -R0:localhost:{int(host_port)} {user_host} "
                     f"> {shlex.quote(str(log_file))} 2>&1 < /dev/null & echo $!"
                 )
                 proc = subprocess.Popen(
@@ -284,6 +403,7 @@ class PinggyProvider(ExportProvider):
                                 "log_file": str(log_file),
                                 "challenge_name": challenge_name,
                                 "host_port": host_port,
+                                "token": token,
                                 "started_at": int(time.time()),
                             }
                         )

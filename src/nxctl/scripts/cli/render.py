@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 import threading
@@ -187,6 +188,38 @@ def step_error(text: str) -> None:
 
 
 @contextmanager
+def suppress_input():
+    """Temporarily suppress terminal input and flush the buffer (Linux/Unix only)."""
+    try:
+        import termios
+        import tty
+    except ImportError:
+        yield
+        return
+    fd = sys.stdin.fileno()
+    if not os.isatty(fd):
+        yield
+        return
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setcbreak(fd)
+        new = termios.tcgetattr(fd)
+        new[3] = new[3] & ~termios.ECHO
+        termios.tcsetattr(fd, termios.TCSADRAIN, new)
+        yield
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        termios.tcflush(fd, termios.TCIFLUSH)
+
+
+def print_section(title: str, text: str = "") -> None:
+    if title:
+        print(bold(title))
+    if text:
+        print(text)
+
+
+@contextmanager
 def spinner(label: str):
     """Small terminal spinner for long blocking operations."""
     if not sys.stdout.isatty() or logging.getLogger().getEffectiveLevel() <= logging.INFO:
@@ -208,7 +241,8 @@ def spinner(label: str):
     thread = threading.Thread(target=animate, daemon=True)
     thread.start()
     try:
-        yield
+        with suppress_input():
+            yield
     finally:
         done.set()
         thread.join(timeout=0.2)
