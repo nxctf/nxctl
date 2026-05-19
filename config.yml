@@ -52,6 +52,8 @@ tunnels:
       - ${NGROK_TOKEN_10}
   localtunnel:
     enabled: true
+  cloudflare:
+    enabled: true
   pinggy:
     enabled: true
     max_sessions_per_token: 1

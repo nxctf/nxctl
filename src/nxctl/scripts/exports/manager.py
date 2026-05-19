@@ -17,6 +17,7 @@ from nxctl.core.constants import (
     EXPORT_PROVIDER_NGROK,
     EXPORT_PROVIDER_LOCALTUNNEL,
     EXPORT_PROVIDER_PINGGY,
+    EXPORT_PROVIDER_CLOUDFLARE,
     EXPORT_PROVIDER_BASE_IP,
     PROTOCOL_TCP,
 )
@@ -37,11 +38,13 @@ class ExportManager:
             from nxctl.scripts.exports.ngrok import NgrokProvider
             from nxctl.scripts.exports.localtunnel import LocaltunnelProvider
             from nxctl.scripts.exports.pinggy import PinggyProvider
+            from nxctl.scripts.exports.cloudflare import CloudflareProvider
 
             self.providers: Dict[str, Any] = {
                 EXPORT_PROVIDER_NGROK: NgrokProvider(config),
                 EXPORT_PROVIDER_LOCALTUNNEL: LocaltunnelProvider(config),
                 EXPORT_PROVIDER_PINGGY: PinggyProvider(config),
+                EXPORT_PROVIDER_CLOUDFLARE: CloudflareProvider(config),
             }
 
     def get_provider(self, provider_name: str) -> Optional[Any]:
@@ -175,7 +178,7 @@ class ExportManager:
         """Return the existing protocol-based default tunnel providers."""
         if protocol == PROTOCOL_TCP:
             return [EXPORT_PROVIDER_PINGGY]
-        return [EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_LOCALTUNNEL]
+        return [EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_LOCALTUNNEL, EXPORT_PROVIDER_CLOUDFLARE]
 
     def stop_export(self, challenge_name: str, provider_name: str, host_port: int = 0) -> bool:
         """Stop an export."""

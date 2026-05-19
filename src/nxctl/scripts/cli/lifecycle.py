@@ -4,7 +4,7 @@ import logging
 import os
 import time
 from types import SimpleNamespace
-from nxctl.core.constants import PROTOCOL_TCP, EXPORT_PROVIDER_PINGGY, EXPORT_PROVIDER_LOCALTUNNEL, EXPORT_PROVIDER_NGROK
+from nxctl.core.constants import PROTOCOL_TCP, EXPORT_PROVIDER_PINGGY, EXPORT_PROVIDER_LOCALTUNNEL, EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_CLOUDFLARE
 from nxctl.scripts.cli.base import (
     get_services,
     green,
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 def _provider_priority(service_type: str) -> list[str]:
     if service_type == PROTOCOL_TCP:
         return [EXPORT_PROVIDER_PINGGY]
-    return [EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_LOCALTUNNEL]
+    return [EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_LOCALTUNNEL, EXPORT_PROVIDER_CLOUDFLARE]
 
 
 def _start_with_fallback(export_manager, challenge_name: str, challenge, provider_name: str | None = None) -> tuple[str, str]:

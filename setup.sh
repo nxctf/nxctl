@@ -121,6 +121,12 @@ install_nxctl() {
         sudo chmod +x /usr/local/bin/pinggy
     fi
 
+    if ! command -v cloudflared >/dev/null 2>&1; then
+        echo -e "${GREEN}[*] Downloading Cloudflared binary...${NC}"
+        sudo wget -q "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64" -O /usr/local/bin/cloudflared
+        sudo chmod +x /usr/local/bin/cloudflared
+    fi
+
     mkdir -p "$PROJECT_DIR/data"
 
     echo -e "${GREEN}[*] Installing nxctl command...${NC}"

@@ -102,11 +102,20 @@ class PinggyConfig(BaseModel):
         extra = "allow"
 
 
+class CloudflareConfig(BaseModel):
+    enabled: bool = True
+    token: str = ""
+
+    class Config:
+        extra = "allow"
+
+
 class TunnelsConfig(BaseModel):
     default: str = "localtunnel"
     ngrok: NgrokConfig = Field(default_factory=NgrokConfig)
     localtunnel: LocalTunnelConfig = Field(default_factory=LocalTunnelConfig)
     pinggy: PinggyConfig = Field(default_factory=PinggyConfig)
+    cloudflare: CloudflareConfig = Field(default_factory=CloudflareConfig)
 
     class Config:
         extra = "allow"
@@ -188,6 +197,10 @@ class Config(BaseModel):
     @property
     def enable_pinggy(self) -> bool:
         return self.tunnels.pinggy.enabled
+
+    @property
+    def enable_cloudflare(self) -> bool:
+        return self.tunnels.cloudflare.enabled
 
     @property
     def local_port_start(self) -> int:
@@ -384,6 +397,7 @@ class Config(BaseModel):
             "enable_ngrok": ("tunnels", "ngrok", "enabled"),
             "enable_localtunnel": ("tunnels", "localtunnel", "enabled"),
             "enable_pinggy": ("tunnels", "pinggy", "enabled"),
+            "enable_cloudflare": ("tunnels", "cloudflare", "enabled"),
             "ngrok_tokens": ("tunnels", "ngrok", "tokens"),
             "ngrok_max_sessions_per_token": ("tunnels", "ngrok", "max_sessions_per_token"),
         }
