@@ -45,7 +45,7 @@ async def sync_challenges():
         config, challenge_service, _, _ = get_services()
         git_repo = GitRepository(
             repo_url=config.github_repo,
-            cache_dir=config.cache_dir,
+            cache_dir=config.chall_dir,
             branch=config.branch,
             token=config.access_token,
         )

@@ -40,6 +40,13 @@ def _get_compose_cmd() -> list[str]:
     return ["docker", "compose"]
 
 
+def _compose_cmd(cwd: Path | None = None) -> list[str]:
+    cmd = list(_get_compose_cmd())
+    if cwd:
+        cmd.extend(["--project-directory", str(cwd)])
+    return cmd
+
+
 def run_docker_compose_build(compose_path: Path, cwd: Optional[Path] = None, timeout: int = 300) -> str:
     """Build Docker image using docker compose.
 
@@ -48,15 +55,16 @@ def run_docker_compose_build(compose_path: Path, cwd: Optional[Path] = None, tim
     Returns:
         Image name (e.g., "challenge-name:latest")
     """
+    compose_path = Path(compose_path).resolve()
     if not compose_path.exists():
         raise DockerError(f"docker-compose.yml not found: {compose_path}")
 
-    cwd = cwd or compose_path.parent
+    cwd = Path(cwd).resolve() if cwd else compose_path.parent
 
     logger.info(f"Building image from {compose_path}")
 
     try:
-        cmd = _get_compose_cmd() + ["-f", str(compose_path), "build"]
+        cmd = _compose_cmd(cwd) + ["-f", str(compose_path), "build"]
         result = subprocess.run(
             cmd,
             cwd=str(cwd),
@@ -81,15 +89,16 @@ def run_docker_compose_up(compose_path: Path, cwd: Optional[Path] = None, detach
     Returns:
         Dict with container info
     """
+    compose_path = Path(compose_path).resolve()
     if not compose_path.exists():
         raise DockerError(f"docker-compose.yml not found: {compose_path}")
 
-    cwd = cwd or compose_path.parent
+    cwd = Path(cwd).resolve() if cwd else compose_path.parent
 
     logger.info(f"Starting containers from {compose_path}")
 
     try:
-        cmd = _get_compose_cmd() + ["-f", str(compose_path), "up"]
+        cmd = _compose_cmd(cwd) + ["-f", str(compose_path), "up"]
         if detach:
             cmd.append("-d")
 
@@ -115,15 +124,16 @@ def run_docker_compose_up(compose_path: Path, cwd: Optional[Path] = None, detach
 
 def run_docker_compose_down(compose_path: Path, cwd: Optional[Path] = None) -> dict:
     """Stop containers using docker compose."""
+    compose_path = Path(compose_path).resolve()
     if not compose_path.exists():
         raise DockerError(f"docker-compose.yml not found: {compose_path}")
 
-    cwd = cwd or compose_path.parent
+    cwd = Path(cwd).resolve() if cwd else compose_path.parent
 
     logger.info(f"Stopping containers from {compose_path}")
 
     try:
-        cmd = _get_compose_cmd() + ["-f", str(compose_path), "down"]
+        cmd = _compose_cmd(cwd) + ["-f", str(compose_path), "down"]
         result = subprocess.run(
             cmd,
             cwd=str(cwd),
@@ -152,10 +162,11 @@ def run_docker_compose_down_with_cleanup(
     remove_orphans: bool = True,
 ) -> dict:
     """Stop containers using docker compose and optionally remove volumes/images."""
+    compose_path = Path(compose_path).resolve()
     if not compose_path.exists():
         raise DockerError(f"docker-compose.yml not found: {compose_path}")
 
-    cwd = cwd or compose_path.parent
+    cwd = Path(cwd).resolve() if cwd else compose_path.parent
 
     logger.info(f"Stopping containers from {compose_path}")
 
@@ -170,7 +181,7 @@ def run_docker_compose_down_with_cleanup(
         return cmd
 
     try:
-        cmd = build_cmd(_get_compose_cmd() + ["-f", str(compose_path), "down"])
+        cmd = build_cmd(_compose_cmd(cwd) + ["-f", str(compose_path), "down"])
         result = subprocess.run(
             cmd,
             cwd=str(cwd),

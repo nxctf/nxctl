@@ -9,7 +9,15 @@ import os
 from pathlib import Path
 
 from nxctl.scripts.exports.base import ExportProvider, ExportResult
-from nxctl.core.utils import is_pid_alive, load_state_file, save_state_file, delete_state_file, kill_process
+from nxctl.core.utils import (
+    is_pid_alive,
+    load_state_file,
+    save_state_file,
+    delete_state_file,
+    kill_process,
+    get_export_state_dir,
+    get_export_logs_dir,
+)
 from nxctl.core.constants import PROTOCOL_HTTP
 
 logger = logging.getLogger(__name__)
@@ -27,16 +35,31 @@ class LocaltunnelProvider(ExportProvider):
     def __init__(self, config):
         """Initialize localtunnel provider."""
         super().__init__(config)
-        self.state_dir = Path(getattr(config, "exports_dir", Path(config.cache_dir) / "exports"))
+        self.state_dir = get_export_state_dir(config)
+        self.log_dir = get_export_logs_dir(config, self.name)
+        self.legacy_state_dir = Path(getattr(config, "exports_dir", Path(config.cache_dir) / "exports"))
         self.state_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_state_file(self, host_port: int) -> Path:
         """Get state file path for a host port."""
         return self.state_dir / f"localtunnel_{host_port}.json"
 
+    def _get_legacy_state_file(self, host_port: int) -> Path:
+        return self.legacy_state_dir / f"localtunnel_{host_port}.json"
+
+    def _get_legacy_state_files(self, host_port: int) -> list[Path]:
+        if hasattr(self.config, "legacy_export_state_dirs"):
+            return [path / f"localtunnel_{host_port}.json" for path in self.config.legacy_export_state_dirs()]
+        return [self._get_legacy_state_file(host_port)]
+
     def _get_log_file(self, host_port: int) -> Path:
         """Get log file path for a host port."""
-        return self.state_dir / f"localtunnel_{host_port}.log"
+        return self.log_dir / f"localtunnel_{host_port}.log"
+
+    def _load_state(self, host_port: int) -> tuple[Path, dict]:
+        state_path = self._get_state_file(host_port)
+        state = load_state_file(state_path, self._get_legacy_state_files(host_port))
+        return state_path, state
 
     def _extract_url(self, text: str) -> str:
         """Extract URL from localtunnel output."""
@@ -59,6 +82,19 @@ class LocaltunnelProvider(ExportProvider):
             and str(host_port) in cmdline
         )
 
+    def _kill_process_tree(self, pid: int) -> None:
+        try:
+            parent = psutil.Process(pid)
+            children = parent.children(recursive=True)
+            for child in children:
+                try:
+                    kill_process(child.pid)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        kill_process(pid)
+
     def start(self, challenge_name: str, host_port: int, protocol: str = "http") -> ExportResult:
         """Start localtunnel.
 
@@ -76,7 +112,7 @@ class LocaltunnelProvider(ExportProvider):
         logger.info(f"Starting localtunnel for {challenge_name}:{host_port}")
 
         # Try to reuse existing tunnel if still alive (from state file)
-        state = load_state_file(self._get_state_file(host_port))
+        _, state = self._load_state(host_port)
         if state:
             state_pid = int(state.get("pid", 0))
             state_url = str(state.get("public_url", ""))
@@ -86,6 +122,7 @@ class LocaltunnelProvider(ExportProvider):
                 return ExportResult(url=state_url, pid=state_pid)
             logger.info("Ignoring stale localtunnel state for port %s", host_port)
             delete_state_file(self._get_state_file(host_port))
+            delete_state_file(self._get_legacy_state_file(host_port))
 
         # Fallback: check system processes for any 'lt' running on this port
         # This prevents race conditions between CLI and Daemon
@@ -219,13 +256,13 @@ class LocaltunnelProvider(ExportProvider):
                 else:
                     last_error = f"timed out after {timeout}s waiting for localtunnel URL"
                     if proc and proc.poll() is None:
-                        kill_process(proc.pid)
+                        self._kill_process_tree(proc.pid)
                     logger.info("localtunnel attempt %s/%s failed: %s", attempt, attempts, last_error)
 
             except Exception as e:
                 last_error = str(e)
                 if proc and proc.poll() is None:
-                    kill_process(proc.pid)
+                    self._kill_process_tree(proc.pid)
                 logger.info("localtunnel attempt %s/%s failed: %s", attempt, attempts, last_error)
 
             time.sleep(0.7)
@@ -239,7 +276,7 @@ class LocaltunnelProvider(ExportProvider):
         stopped = False
 
         # Kill via PID if alive
-        state = load_state_file(self._get_state_file(host_port))
+        _, state = self._load_state(host_port)
         if state:
             pid = int(state.get("pid", 0))
             if pid and self._is_localtunnel_pid(pid, host_port):
@@ -248,12 +285,13 @@ class LocaltunnelProvider(ExportProvider):
 
         # Clean up state file
         delete_state_file(self._get_state_file(host_port))
+        delete_state_file(self._get_legacy_state_file(host_port))
 
         return stopped
 
     def is_running(self, challenge_name: str, host_port: int) -> bool:
         """Check if tunnel is running."""
-        state = load_state_file(self._get_state_file(host_port))
+        _, state = self._load_state(host_port)
         if not state:
             return False
 

@@ -2,6 +2,7 @@ HPone
 _tmp
 data*
 /exports/
+config.yml
 
 # Python
 __pycache__/
@@ -43,6 +44,14 @@ env/
 
 # Data and artifacts
 data/
+data/runtime/
+data/logs/
+data/exports/
+docker-compose.run.yml
+*.run.yml
+*.log
+*.lock
+*.pid
 .DS_Store
 
 # Database

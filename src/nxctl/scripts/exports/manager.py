@@ -157,6 +157,14 @@ class ExportManager:
             except Exception as exc:
                 failures.append(self._failure_dict(EXPORT_PROVIDER_NGROK, "tunnel", exc))
 
+        tunnel_started = any(
+            export.get("type") == "tunnel"
+            and export.get("provider") != EXPORT_PROVIDER_BASE_IP
+            for export in exports
+        )
+        if tunnel_started:
+            return exports, failures
+
         for provider_name in default_providers or self.default_providers_for(protocol):
             if not provider_name or provider_name in attempted:
                 continue

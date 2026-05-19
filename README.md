@@ -50,7 +50,7 @@ nxctl/
 |   |   |-- core/               # Config, Docker, Git, DB, models
 |   |   `-- scripts/            # CLI handlers and service logic
 |   `-- nxctl_api/              # FastAPI app, auth, serializers, routes
-|-- data/                       # Persistent data, builds, logs
+|-- data/                       # Persistent data, challenge cache, runtime state, logs
 |-- config.yml                  # Local configuration
 `-- requirements.txt            # Python dependencies
 ```
@@ -256,5 +256,5 @@ ps aux | grep -E '[p]inggy|[n]grok|lt --port'
 
 find . -type d -name "__pycache__" -exec rm -rf {} +
 
-rm -rf data/exports/*
+nxctl ps --kill
 ```

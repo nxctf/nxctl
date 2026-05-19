@@ -7,6 +7,7 @@ import time
 from typing import Optional
 from pathlib import Path
 import json
+import tempfile
 from nxctl.core.config import get_config
 
 COLOR_GREEN = "\033[32m"
@@ -40,6 +41,10 @@ def bold(text: str) -> str:
 def get_git_cache_path() -> str:
     """Get the normalized path for git challenge cache."""
     config = get_config()
+    chall_dir = getattr(config, "chall_dir", "")
+    if chall_dir:
+        return str(Path(chall_dir))
+
     cache_dir = Path(config.cache_dir)
     normalized = str(cache_dir).replace("\\", "/").rstrip("/")
 
@@ -57,6 +62,56 @@ def get_challenge_dir(challenge_path: str) -> Path:
     return Path(get_git_cache_path()) / challenge_path
 
 
+def safe_runtime_name(name: str) -> str:
+    """Return a filesystem-safe name for runtime artifacts."""
+    safe = str(name or "").replace("\\", "_").replace("/", "_").replace(":", "_")
+    return safe.strip("._") or "unknown"
+
+
+def get_runtime_dir(config=None) -> Path:
+    config = config or get_config()
+    path = Path(getattr(config, "runtime_dir", Path(config.cache_dir) / "runtime")).resolve()
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def get_export_state_dir(config=None) -> Path:
+    config = config or get_config()
+    path = Path(getattr(config, "export_state_dir", get_runtime_dir(config) / "state")).resolve()
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def get_export_logs_dir(config=None, provider: str = "") -> Path:
+    config = config or get_config()
+    path = Path(getattr(config, "export_logs_dir", Path(getattr(config, "logs_dir", Path(config.cache_dir) / "logs")) / "exports")).resolve()
+    if provider:
+        path = path / safe_runtime_name(provider)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def get_runtime_tmp_dir(config=None) -> Path:
+    config = config or get_config()
+    path = Path(getattr(config, "tmp_dir", get_runtime_dir(config) / "tmp")).resolve()
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def get_challenge_locks_dir(config=None) -> Path:
+    config = config or get_config()
+    path = Path(getattr(config, "locks_dir", get_runtime_dir(config) / "locks")).resolve()
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def get_runtime_compose_dir(config=None) -> Path:
+    config = config or get_config()
+    path = Path(getattr(config, "runtime_compose_dir", get_runtime_dir(config) / "compose")).resolve()
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def is_pid_alive(pid: int) -> bool:
     """Return True if PID exists and can receive signal 0."""
     if pid <= 0:
@@ -68,20 +123,68 @@ def is_pid_alive(pid: int) -> bool:
         return False
 
 
-def load_state_file(state_path: Path) -> dict:
-    """Load persisted state from JSON file, return empty dict if unavailable."""
-    if not state_path.exists():
-        return {}
+def _read_json_file(state_path: Path) -> dict:
     try:
         return json.loads(state_path.read_text(encoding="utf-8"))
     except Exception:
         return {}
 
 
+def load_state_file(state_path: Path, legacy_paths: Optional[list[Path]] = None, migrate: bool = True) -> dict:
+    """Load persisted state from JSON, optionally migrating legacy state."""
+    state_path = Path(state_path)
+    if state_path.exists():
+        return _read_json_file(state_path)
+
+    for legacy_path in legacy_paths or []:
+        legacy_path = Path(legacy_path)
+        if not legacy_path.exists():
+            continue
+        state = _read_json_file(legacy_path)
+        if not state:
+            continue
+        if migrate:
+            try:
+                save_state_file(state_path, state)
+                legacy_path.unlink()
+            except Exception:
+                pass
+        return state
+
+    return {}
+
+
 def save_state_file(state_path: Path, state: dict) -> None:
-    """Persist state to disk as JSON."""
+    """Persist state to disk as JSON using an atomic same-directory replace."""
     state_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path.write_text(json.dumps(state, ensure_ascii=True, indent=2), encoding="utf-8")
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{state_path.name}.",
+        suffix=".tmp",
+        dir=str(state_path.parent),
+        text=True,
+    )
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(state, fh, ensure_ascii=True, indent=2)
+            fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(temp_path, state_path)
+        try:
+            dir_fd = os.open(str(state_path.parent), os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except Exception:
+            pass
+    except Exception:
+        try:
+            temp_path.unlink()
+        except Exception:
+            pass
+        raise
 
 
 def delete_state_file(state_path: Path) -> None:
@@ -190,24 +293,44 @@ def probe_endpoint(url: str, timeout: float = 5.0) -> bool:
 
 class ChallengeLock:
     """A cross-process file lock for a challenge to prevent race conditions between daemon and CLI."""
-    def __init__(self, challenge_name: str, exports_dir: str):
+    def __init__(self, challenge_name: str, config_or_path=None):
         self.challenge_name = challenge_name
-        safe_name = challenge_name.replace("/", "_")
-        locks_dir = Path(exports_dir) / "locks"
-        locks_dir.mkdir(parents=True, exist_ok=True)
-        self.lock_file = locks_dir / f"{safe_name}.lock"
+        if config_or_path is not None and hasattr(config_or_path, "locks_dir"):
+            locks_dir = get_challenge_locks_dir(config_or_path)
+        elif config_or_path is not None:
+            locks_dir = Path(config_or_path)
+            if locks_dir.name not in {"locks", "challenges"}:
+                locks_dir = locks_dir / "locks"
+            locks_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            locks_dir = get_challenge_locks_dir()
+        self.lock_file = locks_dir / f"{safe_runtime_name(challenge_name)}.lock"
         self.fd = None
 
     def __enter__(self):
         try:
-            self.fd = open(self.lock_file, "w")
+            self.fd = open(self.lock_file, "a+", encoding="utf-8")
             if os.name == "nt":
                 import msvcrt
                 # Lock 1 byte exclusively and block until acquired
+                self.fd.seek(0)
                 msvcrt.locking(self.fd.fileno(), msvcrt.LK_LOCK, 1)
             else:
                 import fcntl
                 fcntl.flock(self.fd.fileno(), fcntl.LOCK_EX)
+
+            metadata = {
+                "pid": os.getpid(),
+                "hostname": socket.gethostname(),
+                "timestamp": int(time.time()),
+                "challenge": self.challenge_name,
+            }
+            self.fd.seek(0)
+            self.fd.truncate()
+            json.dump(metadata, self.fd, ensure_ascii=True, indent=2)
+            self.fd.write("\n")
+            self.fd.flush()
+            os.fsync(self.fd.fileno())
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
@@ -218,6 +341,7 @@ class ChallengeLock:
                 except Exception:
                     pass
                 self.fd = None
+            raise RuntimeError(f"Failed to acquire challenge lock for {self.challenge_name}: {e}") from e
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):

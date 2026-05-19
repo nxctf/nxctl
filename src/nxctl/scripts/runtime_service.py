@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from nxctl.core.models import Challenge, RuntimeInstance
 from nxctl.core.db import get_db_connection, close_db_connection
 from nxctl.core.docker import run_docker_compose_build, run_docker_compose_up, run_docker_compose_down_with_cleanup, DockerError
-from nxctl.core.utils import is_port_in_use
+from nxctl.core.utils import is_port_in_use, get_runtime_compose_dir, safe_runtime_name
 from nxctl.core.yaml import extract_ports_from_compose
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,80 @@ class RuntimeService:
         """Initialize runtime service."""
         self.config = config
         self.db_path = db_path
-        self.git_cache_dir = Path(git_cache_dir)
+        self.git_cache_dir = Path(git_cache_dir).resolve()
+        self.runtime_compose_dir = get_runtime_compose_dir(config)
+
+    def _runtime_compose_file(self, challenge_name: str) -> Path:
+        return (self.runtime_compose_dir / f"{safe_runtime_name(challenge_name)}.docker-compose.yml").resolve()
+
+    def _legacy_runtime_compose_file(self, challenge_dir: Path) -> Path:
+        return challenge_dir / "docker-compose.run.yml"
+
+    def _absolute_compose_path(self, challenge_dir: Path, value):
+        if not isinstance(value, str) or not value.strip():
+            return value
+        raw = value.strip()
+        if "://" in raw or raw.startswith("${"):
+            return value
+        path = Path(raw).expanduser()
+        if path.is_absolute():
+            return str(path)
+        return str((challenge_dir / path).resolve())
+
+    def _prepare_external_runtime_compose(self, compose_data: dict, challenge_dir: Path) -> dict:
+        """Make relative host paths valid when the generated compose lives outside the challenge dir."""
+        services = compose_data.get("services")
+        if not isinstance(services, dict):
+            return compose_data
+
+        for service_config in services.values():
+            if not isinstance(service_config, dict):
+                continue
+
+            build = service_config.get("build")
+            if isinstance(build, str):
+                service_config["build"] = self._absolute_compose_path(challenge_dir, build)
+            elif isinstance(build, dict) and build.get("context"):
+                build["context"] = self._absolute_compose_path(challenge_dir, build["context"])
+
+            env_file = service_config.get("env_file")
+            if isinstance(env_file, str):
+                service_config["env_file"] = self._absolute_compose_path(challenge_dir, env_file)
+            elif isinstance(env_file, list):
+                service_config["env_file"] = [
+                    self._absolute_compose_path(challenge_dir, item)
+                    for item in env_file
+                ]
+
+            volumes = service_config.get("volumes")
+            if isinstance(volumes, list):
+                service_config["volumes"] = [
+                    self._prepare_volume_path(challenge_dir, volume)
+                    for volume in volumes
+                ]
+
+        return compose_data
+
+    def _prepare_volume_path(self, challenge_dir: Path, volume):
+        if isinstance(volume, dict):
+            updated = dict(volume)
+            source = updated.get("source")
+            volume_type = str(updated.get("type") or "")
+            if isinstance(source, str) and volume_type in {"bind", ""} and source.startswith((".", "~")):
+                updated["source"] = self._absolute_compose_path(challenge_dir, source)
+            return updated
+
+        if not isinstance(volume, str):
+            return volume
+
+        parts = volume.split(":")
+        if not parts:
+            return volume
+        source = parts[0]
+        if source.startswith((".", "~")):
+            parts[0] = self._absolute_compose_path(challenge_dir, source)
+            return ":".join(parts)
+        return volume
 
     def _get_challenge_from_db(self, name: str) -> Optional[Challenge]:
         """Get challenge from database."""
@@ -460,8 +533,9 @@ class RuntimeService:
 
         try:
             # Load and modify docker-compose
-            with open(docker_compose, 'r') as f:
+            with open(docker_compose, "r", encoding="utf-8") as f:
                 compose_data = yaml.safe_load(f) or {}
+            compose_data = self._prepare_external_runtime_compose(compose_data, challenge_dir)
 
             configured_ports = extract_ports_from_compose(docker_compose)
             if not configured_ports:
@@ -506,10 +580,13 @@ class RuntimeService:
                             new_ports.append(replacement if replacement is not None else port_spec)
                         service_config['ports'] = new_ports
 
-            # Write modified compose to temporary file
-            docker_compose_run = challenge_dir / "docker-compose.run.yml"
-            with open(docker_compose_run, 'w') as f:
+            # Write modified compose to runtime state, outside the challenge cache.
+            docker_compose_run = self._runtime_compose_file(challenge_name)
+            docker_compose_run.parent.mkdir(parents=True, exist_ok=True)
+            with open(docker_compose_run, "w", encoding="utf-8") as f:
                 yaml.safe_dump(compose_data, f, default_flow_style=False, sort_keys=False)
+            if not docker_compose_run.exists():
+                raise RuntimeError(f"Generated compose file was not created: {docker_compose_run}")
 
             primary_port = int(allocated_ports[0]["host_port"])
             self._replace_challenge_ports(challenge.id, allocated_ports)
@@ -565,13 +642,25 @@ class RuntimeService:
             raise RuntimeError(f"Challenge directory not found: {challenge_dir}")
 
         docker_compose = challenge_dir / "docker-compose.yml"
-        docker_compose_run = challenge_dir / "docker-compose.run.yml"
+        docker_compose_run = self._runtime_compose_file(challenge_name)
+        legacy_docker_compose_run = self._legacy_runtime_compose_file(challenge_dir)
 
-        # Use the temporary run file if it exists, otherwise use original
-        target_compose = docker_compose_run if docker_compose_run.exists() else docker_compose
+        # Prefer the new runtime compose path, but keep legacy support for
+        # containers started before runtime artifacts were moved out of data/chall.
+        if docker_compose_run.exists():
+            target_compose = docker_compose_run
+        elif legacy_docker_compose_run.exists():
+            target_compose = legacy_docker_compose_run
+        else:
+            target_compose = docker_compose
 
         if not target_compose.exists():
-            raise RuntimeError(f"No docker-compose file found in {challenge_dir}")
+            raise RuntimeError(
+                "No docker-compose file found. Checked: "
+                f"{docker_compose_run.resolve()}, "
+                f"{legacy_docker_compose_run.resolve()}, "
+                f"{docker_compose.resolve()}"
+            )
 
         try:
             logger.info(f"Stopping challenge: {challenge_name}")

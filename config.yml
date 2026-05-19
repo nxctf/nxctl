@@ -11,7 +11,7 @@ dir_app: ./data
 # api_admin_secret: ${NXCTL_API_ADMIN_SECRET}
 
 enable_ngrok: true
-enable_localtunnel: true
+enable_localtunnel: false
 enable_pinggy: true
 ngrok_max_sessions_per_token: 3
 

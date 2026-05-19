@@ -4,7 +4,7 @@ github_repo: https://github.com/your-username/your-repo
 branch: main
 access_token: ${GITHUB_TOKEN}
 
-# NXCTL stores db, challenge cache, build files, and export state under this dir.
+# NXCTL stores db, challenge cache, runtime state, locks, temp files, and logs under this dir.
 dir_app: ./data
 
 # Optional direct/public IP export. Leave empty to disable.

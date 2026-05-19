@@ -8,6 +8,12 @@ import time
 from pathlib import Path
 
 from nxctl.core.constants import EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_LOCALTUNNEL, EXPORT_PROVIDER_PINGGY
+from nxctl.core.utils import (
+    get_challenge_locks_dir,
+    get_export_logs_dir,
+    get_export_state_dir,
+    get_runtime_tmp_dir,
+)
 from nxctl.scripts.cli.base import (
     get_services,
     green,
@@ -305,21 +311,67 @@ def _remove_pycache_dirs(root: Path) -> int:
     return removed
 
 
-def _clear_exports_dir(exports_dir: Path) -> int:
-    if not exports_dir.exists() or not exports_dir.is_dir():
+def _remove_path(path: Path) -> bool:
+    try:
+        if path.is_dir():
+            shutil.rmtree(path)
+        elif path.exists():
+            path.unlink()
+        else:
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def _clear_dir_children(path: Path) -> int:
+    if not path.exists() or not path.is_dir():
         return 0
 
     removed = 0
-    for child in exports_dir.iterdir():
-        try:
-            if child.is_dir():
-                shutil.rmtree(child)
-            else:
-                child.unlink()
+    for child in path.iterdir():
+        if _remove_path(child):
             removed += 1
-        except Exception:
-            pass
     return removed
+
+
+def _clear_matching_files(root: Path, patterns: list[str]) -> int:
+    if not root.exists() or not root.is_dir():
+        return 0
+
+    removed = 0
+    for pattern in patterns:
+        for path in root.glob(pattern):
+            if path.is_file() and _remove_path(path):
+                removed += 1
+    return removed
+
+
+def _cleanup_export_artifacts(config) -> dict[str, int]:
+    """Remove known runtime artifacts without deleting the whole legacy exports dir."""
+    legacy_exports_dir = Path(config.exports_dir)
+    counts = {
+        "state": _clear_dir_children(get_export_state_dir(config)),
+        "logs": _clear_dir_children(get_export_logs_dir(config)),
+        "locks": _clear_dir_children(get_challenge_locks_dir(config)),
+        "tmp": _clear_dir_children(get_runtime_tmp_dir(config)),
+    }
+
+    legacy_state_dirs = (
+        config.legacy_export_state_dirs()
+        if hasattr(config, "legacy_export_state_dirs")
+        else [legacy_exports_dir]
+    )
+    for legacy_state_dir in legacy_state_dirs:
+        counts["state"] += _clear_matching_files(legacy_state_dir, ["*.json"])
+    counts["logs"] += _clear_matching_files(legacy_exports_dir, ["*.log"])
+    counts["tmp"] += _clear_matching_files(legacy_exports_dir, ["ngrok_*.yml"])
+
+    legacy_logs_dir = legacy_exports_dir / "logs"
+    legacy_locks_dir = legacy_exports_dir / "locks"
+    counts["logs"] += _clear_dir_children(legacy_logs_dir)
+    counts["locks"] += _clear_dir_children(legacy_locks_dir)
+    return counts
 
 
 def cmd_ps(args) -> int:
@@ -341,13 +393,16 @@ def cmd_ps(args) -> int:
                 pass
 
             pycache_count = _remove_pycache_dirs(Path("."))
-            exports_count = _clear_exports_dir(Path(config.exports_dir))
+            cleanup_counts = _cleanup_export_artifacts(config)
 
             step_ok("Killed pinggy/ngrok/localtunnel processes")
             if zombie_parents:
                 step_ok(f"Killed zombie parent processes: {zombie_parents}")
             step_ok(f"Removed __pycache__ directories: {pycache_count}")
-            step_ok(f"Cleared export state entries: {exports_count}")
+            step_ok(f"Cleared export state entries: {cleanup_counts['state']}")
+            step_ok(f"Cleared export logs: {cleanup_counts['logs']}")
+            step_ok(f"Cleared challenge locks: {cleanup_counts['locks']}")
+            step_ok(f"Cleared runtime tmp files: {cleanup_counts['tmp']}")
 
         output = _list_tunnel_processes()
         print()

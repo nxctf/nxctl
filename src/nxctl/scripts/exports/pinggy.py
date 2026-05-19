@@ -12,7 +12,16 @@ from typing import Optional
 from urllib.parse import urlparse
 
 from nxctl.scripts.exports.base import ExportProvider, ExportResult
-from nxctl.core.utils import is_pid_alive, load_state_file, save_state_file, delete_state_file, kill_process
+from nxctl.core.utils import (
+    is_pid_alive,
+    load_state_file,
+    save_state_file,
+    delete_state_file,
+    kill_process,
+    get_export_state_dir,
+    get_export_logs_dir,
+    safe_runtime_name,
+)
 from nxctl.core.constants import PROTOCOL_TCP
 
 logger = logging.getLogger(__name__)
@@ -30,22 +39,35 @@ class PinggyProvider(ExportProvider):
     def __init__(self, config):
         """Initialize pinggy provider."""
         super().__init__(config)
-        self.state_dir = Path(getattr(config, "exports_dir", Path(config.cache_dir) / "exports"))
+        self.state_dir = get_export_state_dir(config)
+        self.log_dir = get_export_logs_dir(config, self.name)
+        self.legacy_state_dir = Path(getattr(config, "exports_dir", Path(config.cache_dir) / "exports"))
         self.state_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_state_file(self, challenge_name: str, host_port: int = 0) -> Path:
         """Get state file path for a challenge and host port."""
-        safe_name = challenge_name.replace("/", "_")
+        safe_name = safe_runtime_name(challenge_name)
         if host_port:
             return self.state_dir / f"pinggy_{safe_name}_{host_port}.json"
         return self.state_dir / f"pinggy_{safe_name}.json"
 
+    def _get_legacy_state_file(self, challenge_name: str, host_port: int = 0) -> Path:
+        safe_name = safe_runtime_name(challenge_name)
+        if host_port:
+            return self.legacy_state_dir / f"pinggy_{safe_name}_{host_port}.json"
+        return self.legacy_state_dir / f"pinggy_{safe_name}.json"
+
+    def _get_legacy_state_files(self, challenge_name: str, host_port: int = 0) -> list[Path]:
+        safe_name = safe_runtime_name(challenge_name)
+        filename = f"pinggy_{safe_name}_{host_port}.json" if host_port else f"pinggy_{safe_name}.json"
+        if hasattr(self.config, "legacy_export_state_dirs"):
+            return [path / filename for path in self.config.legacy_export_state_dirs()]
+        return [self._get_legacy_state_file(challenge_name, host_port)]
+
     def _get_log_file(self, challenge_name: str, host_port: int) -> Path:
         """Get log file path for a challenge and port."""
-        safe_name = challenge_name.replace("/", "_")
-        log_dir = self.state_dir / "logs"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        return log_dir / f"pinggy_{safe_name}_{host_port}.log"
+        safe_name = safe_runtime_name(challenge_name)
+        return self.log_dir / f"pinggy_{safe_name}_{host_port}.log"
 
     def _is_pinggy_pid(self, pid: int, host_port: int) -> bool:
         """Return True when PID is the pinggy process for this local port."""
@@ -84,19 +106,21 @@ class PinggyProvider(ExportProvider):
     def _load_state(self, challenge_name: str, host_port: int) -> tuple[Path, dict]:
         """Load current state, migrating legacy challenge-only state when possible."""
         state_path = self._get_state_file(challenge_name, host_port)
-        state = load_state_file(state_path)
+        state = load_state_file(state_path, self._get_legacy_state_files(challenge_name, host_port))
         if state:
             return state_path, state
 
-        legacy_path = self._get_state_file(challenge_name)
-        legacy_state = load_state_file(legacy_path)
+        legacy_paths = self._get_legacy_state_files(challenge_name)
+        legacy_state = load_state_file(legacy_paths[0], legacy_paths[1:], migrate=False)
         if legacy_state and int(legacy_state.get("host_port", 0) or 0) == int(host_port):
-            delete_state_file(legacy_path)
             save_state_file(state_path, legacy_state)
+            for legacy_path in legacy_paths:
+                delete_state_file(legacy_path)
             return state_path, legacy_state
 
         if legacy_state:
-            delete_state_file(legacy_path)
+            for legacy_path in legacy_paths:
+                delete_state_file(legacy_path)
 
         return state_path, {}
 
@@ -167,6 +191,7 @@ class PinggyProvider(ExportProvider):
                 logger.info("Ignoring pinggy state with invalid endpoint for %s:%s: %s", challenge_name, host_port, ready_error)
             logger.info("Ignoring stale pinggy state for %s:%s", challenge_name, host_port)
             delete_state_file(state_path)
+            delete_state_file(self._get_legacy_state_file(challenge_name, host_port))
 
         existing_pid = self._find_pinggy_pid(host_port)
         if existing_pid:
@@ -310,6 +335,7 @@ class PinggyProvider(ExportProvider):
 
         # Clean up state file
         delete_state_file(state_path)
+        delete_state_file(self._get_legacy_state_file(challenge_name, host_port))
 
         return stopped
 

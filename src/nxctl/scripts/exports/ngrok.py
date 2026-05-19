@@ -17,6 +17,9 @@ from nxctl.core.utils import (
     save_state_file,
     delete_state_file,
     kill_process,
+    get_export_state_dir,
+    get_export_logs_dir,
+    get_runtime_tmp_dir,
 )
 
 from nxctl.core.constants import PROTOCOL_HTTP, PROTOCOL_TCP
@@ -32,14 +35,33 @@ class NgrokProvider(ExportProvider):
     def __init__(self, config):
         super().__init__(config)
 
-        self.state_dir = Path(getattr(config, "exports_dir", Path(config.cache_dir) / "exports"))
+        self.state_dir = get_export_state_dir(config)
+        self.log_dir = get_export_logs_dir(config, self.name)
+        self.tmp_dir = get_runtime_tmp_dir(config)
+        self.legacy_state_dir = Path(getattr(config, "exports_dir", Path(config.cache_dir) / "exports"))
         self.state_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_state_file(self, host_port: int) -> Path:
         return self.state_dir / f"ngrok_{host_port}.json"
 
+    def _get_legacy_state_file(self, host_port: int) -> Path:
+        return self.legacy_state_dir / f"ngrok_{host_port}.json"
+
+    def _get_legacy_state_files(self, host_port: int) -> list[Path]:
+        if hasattr(self.config, "legacy_export_state_dirs"):
+            return [path / f"ngrok_{host_port}.json" for path in self.config.legacy_export_state_dirs()]
+        return [self._get_legacy_state_file(host_port)]
+
+    def _get_log_file(self, host_port: int) -> Path:
+        return self.log_dir / f"ngrok_{host_port}.log"
+
     def _get_token_config_file(self, host_port: int, token_id: str) -> Path:
-        return self.state_dir / f"ngrok_{host_port}_{token_id}.yml"
+        return self.tmp_dir / f"ngrok_{host_port}_{token_id}.yml"
+
+    def _load_state(self, host_port: int) -> tuple[Path, dict]:
+        state_path = self._get_state_file(host_port)
+        state = load_state_file(state_path, self._get_legacy_state_files(host_port))
+        return state_path, state
 
     def _configured_tokens(self) -> list[tuple[str, str]]:
         tokens = []
@@ -116,7 +138,18 @@ class NgrokProvider(ExportProvider):
         used: dict[str, int] = {}
         counted_pids: set[int] = set()
 
-        for path in self.state_dir.glob("ngrok_*.json"):
+        state_paths = list(self.state_dir.glob("ngrok_*.json"))
+        legacy_dirs = (
+            self.config.legacy_export_state_dirs()
+            if hasattr(self.config, "legacy_export_state_dirs")
+            else [self.legacy_state_dir]
+        )
+        for legacy_dir in legacy_dirs:
+            state_paths.extend(
+                path for path in legacy_dir.glob("ngrok_*.json")
+                if path not in state_paths
+            )
+        for path in state_paths:
             state = load_state_file(path)
             if not state:
                 continue
@@ -205,7 +238,7 @@ class NgrokProvider(ExportProvider):
         if non_info_lines:
             return non_info_lines[-1]
 
-        return "ngrok exited before a public URL was ready; check the ngrok log in data/exports"
+        return "ngrok exited before a public URL was ready; check the ngrok export log"
 
     def _write_token_config(self, host_port: int, token: str, token_id: str) -> Optional[Path]:
         """Write a per-process ngrok config so the selected token is actually used."""
@@ -225,7 +258,8 @@ class NgrokProvider(ExportProvider):
             return
         try:
             path = Path(path_text)
-            if path.exists() and path.parent == self.state_dir:
+            allowed_dirs = {self.tmp_dir.resolve(), self.legacy_state_dir.resolve()}
+            if path.exists() and path.parent.resolve() in allowed_dirs:
                 path.unlink()
         except Exception:
             pass
@@ -259,9 +293,7 @@ class NgrokProvider(ExportProvider):
             f"{challenge_name}:{host_port}"
         )
 
-        state = load_state_file(
-            self._get_state_file(host_port)
-        )
+        _, state = self._load_state(host_port)
 
         if state:
             pid = int(state.get("pid", 0))
@@ -275,6 +307,7 @@ class NgrokProvider(ExportProvider):
                 return ExportResult(url=public_url, pid=pid)
             logger.info("Ignoring stale ngrok state for port %s", host_port)
             delete_state_file(self._get_state_file(host_port))
+            delete_state_file(self._get_legacy_state_file(host_port))
 
         try:
             from pyngrok import conf as ngrok_conf
@@ -339,9 +372,11 @@ class NgrokProvider(ExportProvider):
 
             logger.info(f"Starting ngrok: {' '.join(cmd)}")
 
+            log_path = self._get_log_file(host_port)
             log_file = open(
-                self.state_dir / f"ngrok_{host_port}.log",
+                log_path,
                 "w",
+                encoding="utf-8",
             )
 
             proc = subprocess.Popen(
@@ -356,16 +391,16 @@ class NgrokProvider(ExportProvider):
             deadline = time.time() + 20
 
             public_url = None
-            log_path = self.state_dir / f"ngrok_{host_port}.log"
-
             while time.time() < deadline:
 
                 if proc.poll() is not None:
 
                     try:
                         with open(
-                            self.state_dir / f"ngrok_{host_port}.log",
+                            log_path,
                             "r",
+                            encoding="utf-8",
+                            errors="ignore",
                         ) as f:
 
                             logs = f.read()
@@ -446,9 +481,7 @@ class NgrokProvider(ExportProvider):
 
         stopped = False
 
-        state = load_state_file(
-            self._get_state_file(host_port)
-        )
+        _, state = self._load_state(host_port)
 
         if state:
 
@@ -462,6 +495,9 @@ class NgrokProvider(ExportProvider):
         delete_state_file(
             self._get_state_file(host_port)
         )
+        delete_state_file(
+            self._get_legacy_state_file(host_port)
+        )
         self._delete_token_config(str(state.get("token_config", "")) if state else "")
 
         return stopped
@@ -472,9 +508,7 @@ class NgrokProvider(ExportProvider):
         host_port: int,
     ) -> bool:
 
-        state = load_state_file(
-            self._get_state_file(host_port)
-        )
+        _, state = self._load_state(host_port)
 
         if not state:
             return False

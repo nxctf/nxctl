@@ -72,11 +72,8 @@ def _port_summary(ports) -> str:
 def _start_available_exports(export_manager, challenge_name: str, challenge, ports=None) -> tuple[list[dict], list[dict]]:
     """Start every auto-discovered export while preserving default tunnel selection."""
     from nxctl.core.utils import ChallengeLock
-    from pathlib import Path
 
-    exports_dir = getattr(export_manager.config, "exports_dir", Path(export_manager.config.cache_dir) / "exports")
-
-    with ChallengeLock(challenge_name, exports_dir):
+    with ChallengeLock(challenge_name, export_manager.config):
         all_exports: list[dict] = []
         all_failures: list[dict] = []
         export_ports = ports or [SimpleNamespace(

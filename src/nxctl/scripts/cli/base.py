@@ -34,8 +34,9 @@ def get_container_port(config, challenge) -> str:
 def get_services():
     """Initialize and return all core services."""
     config = get_config()
+    config.ensure_dirs()
     init_database(config.db_file)
     challenge_service = ChallengeService(config.db_file)
-    runtime_service = RuntimeService(config, config.db_file, get_git_cache_path())
+    runtime_service = RuntimeService(config, config.db_file, config.chall_dir)
     export_manager = ExportManager(config, config.db_file)
     return config, challenge_service, runtime_service, export_manager
