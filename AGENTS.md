@@ -1,406 +1,356 @@
-# AGENTS.md
+# AGENT.md
 
-## Project Overview
+## Project Identity
 
-This project is a Python-based CTF challenge orchestration platform.
+`nxctl` is a Python-based CTF challenge orchestration tool.
 
-The system is designed to manage containerized Capture The Flag (CTF) challenges using Docker and modular export providers. The platform handles challenge lifecycle management, dynamic port allocation, automatic exports/tunnels, TTL expiration, API integration, and challenge monitoring.
+This repository manages:
 
-Core goals:
-- Simple challenge orchestration
-- Multi-provider export/tunneling
-- Automated lifecycle handling
-- Fast CLI workflows
-- Modular architecture
-- Easy extensibility for new providers/features
+* Docker Compose challenge runtimes
+* dynamic host-port allocation
+* public tunnel/export providers
+* runtime lifecycle management
+* TTL expiration
+* daemon reconciliation
+* FastAPI lifecycle access
+* SQLite runtime state
+
+This is NOT an AI-agent framework project.
+
+Do not introduce AI-agent terminology, orchestration patterns, memory systems, or autonomous-agent abstractions unless explicitly required by the repository implementation itself.
 
 ---
 
 # Core Architecture
 
-The project is organized into several logical layers:
+Current architecture:
 
 ```text
-CLI Layer
-  ↓
-Command Handlers
-  ↓
-Core Services
-  ↓
-Docker / Export Providers / Database / TTL Engine
+CLI/API
+  -> orchestration services
+  -> runtime/export management
+  -> SQLite state
+  -> Docker Compose runtime
+  -> provider subprocesses
 ```
 
-The architecture should remain modular and provider-driven.
-
-Avoid tightly coupling:
-- CLI logic
-- Docker logic
-- export provider logic
-- persistence/database logic
-- API logic
-
----
-
-# Main System Responsibilities
-
-## Challenge Lifecycle
-
-The platform manages:
-- challenge startup
-- challenge shutdown
-- restart
-- inspection
-- status reporting
-- TTL expiration
-- export handling
-
-Challenges are usually Docker Compose based.
-
-The orchestration layer should:
-- dynamically allocate host ports
-- prevent conflicts
-- track running state
-- monitor exports
-- clean up resources automatically
-
----
-
-# Export System
-
-The export system is one of the most important parts of the project.
-
-Exports expose challenge services publicly.
-
-Supported providers may include:
-- ngrok
-- localtunnel
-- pinggy
-- direct/public IP
-- future providers
-
-The architecture MUST support:
-- multiple exports per challenge
-- provider abstraction
-- provider isolation
-- independent export lifecycle management
-
-Avoid designing exports as a single object.
-
-Preferred structure:
-
-```python
-challenge.exports: list[ExportRecord]
-```
-
-Example:
-
-```python
-[
-    {
-        "provider": "ngrok",
-        "url": "...",
-        "status": "running"
-    },
-    {
-        "provider": "localtunnel",
-        "url": "...",
-        "status": "running"
-    }
-]
-```
-
----
-
-# Provider Architecture
-
-Export providers should behave like plugins.
-
-Preferred structure:
-
-```python
-class ExportProvider:
-    name: str
-
-    def start(self, challenge, port) -> ExportResult:
-        ...
-
-    def stop(self, export_id):
-        ...
-
-    def status(self, export_id):
-        ...
-```
-
-Provider implementations should remain isolated from:
-- CLI parsing
-- database internals
-- API response formatting
-
-Keep providers stateless where possible.
-
----
-
-# Base IP / Direct Export Support
-
-The system should support direct public IP exposure.
-
-If the host machine has a public IP:
-- generate direct access URLs automatically
-- avoid requiring tunnels
-- integrate direct access into the same export system
-
-Example:
-
-```json
-{
-  "provider": "base_ip",
-  "url": "http://203.0.113.10:30001"
-}
-```
-
-Public IP detection should:
-- fail gracefully
-- support manual override
-- never crash orchestration
-
----
-
-# TTL System
-
-Challenges have expiration timers.
-
-TTL responsibilities:
-- automatic shutdown
-- export cleanup
-- PID cleanup
-- container cleanup
-- expiration tracking
-
-TTL logic should remain centralized.
-
-Avoid spreading TTL checks across unrelated modules.
-
-Preferred:
-- dedicated scheduler/daemon/service
-
----
-
-# Dynamic Port Allocation
-
-The platform dynamically maps challenge ports.
-
-Requirements:
-- avoid collisions
-- track allocations
-- preserve mappings during runtime
-- release ports cleanly on shutdown
-
-Port management should remain centralized.
-
----
-
-# CLI Design
-
-The CLI should remain:
-- minimal
-- composable
-- automation-friendly
-- scriptable
-
-Commands should delegate logic to services instead of implementing business logic inline.
-
-Bad:
-
-```python
-@click.command()
-def up():
-    # docker logic here
-```
-
-Preferred:
-
-```python
-@click.command()
-def up():
-    orchestrator.start(...)
-```
-
----
-
-# API Design
-
-The API layer should mirror orchestration behavior.
-
-The API should:
-- avoid duplicating orchestration logic
-- reuse core services
-- serialize internal state cleanly
-- remain stateless where possible
-
-Preferred flow:
+Primary code ownership:
 
 ```text
-API Route
-  ↓
-Core Service
-  ↓
-Orchestrator
-  ↓
-Providers / Docker / Database
+src/nxctl/core/
+    config/db/docker/utils/models
+
+src/nxctl/scripts/
+    challenge_service
+    runtime_service
+    export manager/providers
+
+src/nxctl/scripts/cli/
+    CLI handlers only
+
+src/nxctl_api/
+    FastAPI routes/adapters
 ```
 
----
-
-# Persistence Layer
-
-Persistence may include:
-- challenge state
-- export state
-- TTL tracking
-- active processes
-- cached metadata
-
-Persistence should remain abstracted.
-
-Avoid direct DB calls scattered throughout the project.
-
-Preferred:
-
-```python
-repository.save(...)
-repository.get(...)
-```
-
-Instead of:
-
-```python
-sqlite3.execute(...)
-```
-
-everywhere.
+CLI and API are adapters.
+Business logic belongs in services/orchestration layers.
 
 ---
 
-# Logging
-
-Logging should:
-- be structured
-- provider-aware
-- easy to debug
-
-Avoid excessive print statements.
-
-Preferred:
-- centralized logger
-- contextual metadata
-- provider identifiers
-- challenge identifiers
-
----
-
-# Error Handling
-
-The project should fail gracefully.
-
-Never allow:
-- orphaned exports
-- zombie tunnel processes
-- dangling containers
-- silent failures
-
-All provider failures should:
-- be isolated
-- return meaningful errors
-- avoid crashing unrelated exports
-
----
-
-# Code Style Guidelines
-
-## Preferred
-
-- small service-focused modules
-- provider abstraction
-- dataclasses/pydantic models where useful
-- typed interfaces
-- dependency injection where reasonable
-
-## Avoid
-
-- giant utility files
-- business logic inside CLI handlers
-- circular imports
-- hardcoded provider-specific logic
-- shared mutable global state
-
----
-
-# Suggested Internal Structure
-
-```text
-src/
-├── app.py
-├── core/
-│   ├── orchestrator/
-│   ├── docker/
-│   ├── exports/
-│   ├── ttl/
-│   ├── ports/
-│   ├── models/
-│   ├── repositories/
-│   └── services/
-├── api/
-├── cli/
-├── providers/
-│   ├── ngrok/
-│   ├── localtunnel/
-│   ├── pinggy/
-│   └── base_ip/
-└── utils/
-```
-
----
-
-# Design Priorities
+# Engineering Priorities
 
 Priority order:
 
-1. Reliability
-2. Isolation between providers
-3. Clean orchestration flow
-4. Extensibility
-5. Simple debugging
-6. CLI usability
-7. Performance
+1. Runtime reliability
+2. Deterministic cleanup
+3. Correct container/export state
+4. Concurrency safety
+5. Provider isolation
+6. Stable Docker Compose lifecycle
+7. Correct port allocation
+8. Minimal orphan processes
+9. Cross-platform compatibility where feasible
+10. Maintainable service boundaries
+
+Avoid cosmetic rewrites without operational benefit.
 
 ---
 
-# Expectations For Agents
+# Runtime Data Layout
 
-When modifying code:
-- preserve modularity
-- avoid unnecessary rewrites
-- keep orchestration centralized
-- avoid breaking provider contracts
-- maintain backward compatibility where possible
-- prefer reusable services over duplicated logic
+All runtime-generated artifacts belong under `data_dir`.
 
-Before finalizing:
-- search for duplicated logic
-- check provider consistency
-- verify cleanup behavior
-- verify exports are tracked correctly
-- ensure shutdown paths clean resources properly
+Expected layout:
+
+```text
+data/
+  nxctl.db
+  chall/
+  runtime/
+    compose/
+    locks/
+    state/
+    tmp/
+  logs/
+    exports/
+```
+
+Rules:
+
+* `chall/` contains repository/cache content only
+* generated compose files belong in `runtime/compose`
+* provider state belongs in `runtime/state`
+* lock files belong in `runtime/locks`
+* provider temp/config belongs in `runtime/tmp`
+* provider logs belong in `logs/exports`
+
+Never write runtime-generated files into challenge source directories.
 
 ---
 
-# Important Principle
+# Lifecycle Rules
 
-This project is fundamentally an orchestration engine.
+Lifecycle operations include:
 
-The orchestration layer should remain the single source of truth for:
-- challenge state
-- export state
-- TTL state
-- runtime lifecycle
-- cleanup behavior
+* up
+* down
+* restart
+* extend
+* export
+* unexport
+* reconcile
+* expire
+* status
+
+Lifecycle behavior must be idempotent whenever possible.
+
+Repeated operations must not create:
+
+* duplicate active runtimes
+* duplicate exports
+* conflicting ports
+* orphan containers
+* orphan provider processes
+
+---
+
+# CLI and API Boundaries
+
+CLI handlers should:
+
+* parse arguments
+* call services
+* render output
+
+API routes should:
+
+* validate/authenticate
+* call services
+* serialize responses
+
+Do not place orchestration logic directly inside CLI or API modules.
+
+Avoid importing private CLI helpers into API code.
+
+Shared lifecycle logic belongs in orchestration/service modules.
+
+---
+
+# SQLite Rules
+
+SQLite is currently the primary source of truth.
+
+Tracked state includes:
+
+* challenges
+* runtime instances
+* ports
+* exports
+* TTL metadata
+
+Do not scatter raw sqlite logic across unrelated modules.
+
+Prefer centralized persistence/repository helpers for new functionality.
+
+Multi-step lifecycle transitions should be transactional where possible.
+
+---
+
+# Docker Compose Rules
+
+Docker Compose is the runtime backend.
+
+Requirements:
+
+* generated compose files must remain deterministic
+* challenge-relative paths must continue working
+* compose project identity should remain stable
+* cleanup must be verifiable
+* runtime status should not trust DB state alone
+
+Do not assume containers are healthy because SQLite says `running`.
+
+Always prefer reconciliation against actual Docker/container state.
+
+---
+
+# Port Allocation Rules
+
+Ports are global resources.
+
+Allocation must avoid:
+
+* duplicate assignment
+* race conditions
+* stale runtime collisions
+
+Per-challenge locks alone are insufficient for global port safety.
+
+Avoid best-effort-only socket probing as the sole allocation mechanism.
+
+---
+
+# Export / Tunnel Rules
+
+Supported providers may include:
+
+* ngrok
+* localtunnel
+* pinggy
+* direct/base IP
+
+Provider modules should own:
+
+* subprocess spawning
+* provider-specific commands
+* provider-specific parsing
+* provider-specific cleanup
+* provider-specific health checks
+
+Export manager should coordinate providers, not implement provider internals.
+
+Avoid provider-specific branching spread across unrelated modules.
+
+---
+
+# Process Management Rules
+
+Every spawned provider/runtime process should be traceable by:
+
+* PID
+* provider
+* challenge
+* port
+* log path
+* start timestamp
+
+Normal cleanup must target nxctl-owned processes only.
+
+Avoid broad host-wide process killing patterns such as:
+
+* pkill by substring
+* generic process-name sweeps
+
+Pattern-based cleanup is emergency-only behavior.
+
+Do not assume POSIX-only tooling exists on all platforms.
+
+---
+
+# TTL and Daemon Rules
+
+TTL expiration and reconciliation should remain centralized.
+
+Daemon responsibilities:
+
+* expire runtimes
+* reconcile export state
+* reconcile runtime state
+* detect stale exports
+* heal missing exports when enabled
+* cleanup stale nxctl-owned processes
+
+Status commands should report state, not mutate lifecycle state silently.
+
+---
+
+# Concurrency Rules
+
+Lifecycle mutations may originate from:
+
+* CLI
+* API
+* daemon
+* restart/recovery logic
+
+Mutating operations must acquire locks inside orchestration layers.
+
+Callers should not be responsible for remembering locking behavior.
+
+Global shared resources must use deterministic coordination.
+
+---
+
+# Refactor Direction
+
+Preferred direction:
+
+```text
+CLI/API
+    ↓
+Orchestrator Services
+    ↓
+Repositories / Runtime Layer
+    ↓
+Docker + Provider Integrations
+```
+
+Refactor goals:
+
+* reduce coupling
+* reduce duplicated lifecycle logic
+* isolate provider behavior
+* centralize reconciliation
+* centralize TTL handling
+* centralize runtime ownership
+* improve deterministic cleanup
+
+Do not introduce unnecessary frameworks.
+
+Keep implementation explicit and debuggable.
+
+---
+
+# Anti-Patterns To Avoid
+
+Do NOT:
+
+* add business logic to CLI handlers
+* add orchestration logic to API routes
+* spread raw sqlite access everywhere
+* kill unrelated host processes
+* create second authoritative state systems
+* trust stale JSON state blindly
+* duplicate TTL logic
+* mix rendering and orchestration
+* introduce AI-agent abstractions unrelated to runtime orchestration
+
+---
+
+# Validation Expectations
+
+Before finalizing lifecycle/runtime/export changes, verify:
+
+* runtime starts once
+* compose files generate correctly
+* ports are unique
+* exports attach correctly
+* exports cleanup correctly
+* containers stop correctly
+* TTL expiration works
+* daemon reconciliation is stable
+* duplicate exports are not created
+* stale processes are cleaned safely
+* unrelated host processes are untouched
+
+Operational correctness is more important than abstraction purity.
