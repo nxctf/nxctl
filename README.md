@@ -166,6 +166,23 @@ Example response shape from the API:
 | `nxctl api` | Run the FastAPI web server | `nxctl api --port 8000` |
 
 The API is secured with the `X-NXCTL-Token` header. Set the token with `NXCTL_API_TOKEN`.
+Protected challenges can also require an inherited challenge key. Add a `key`
+file anywhere in the challenge repository; every challenge under that directory
+inherits the nearest key. The key is hashed into SQLite during `sync`, so key
+additions, updates, and removals are picked up on the next sync.
+Sync also disables stale challenge rows that are no longer discovered in the
+repository, which covers renamed or deleted challenge folders without orphaning
+runtime history.
+
+Clients send scoped challenge keys with:
+
+```text
+X-NXCTL-Challenge-Key: <key>
+```
+
+Multiple keys can be sent comma-separated for aggregate read endpoints such as
+`/status`. The admin secret (`X-NXCTL-Admin-Secret`) overrides challenge keys for
+admin/global operations.
 
 | Endpoint | Method | Description |
 | --- | --- | --- |
@@ -174,6 +191,10 @@ The API is secured with the `X-NXCTL-Token` header. Set the token with `NXCTL_AP
 | `/down/{name}` | POST | Stop a challenge |
 | `/restart/{name}` | POST | Restart a challenge, with optional scope |
 | `/extend/{name}` | POST | Add more time to a running challenge |
+
+Read endpoints that can expose challenge names or tunnel endpoints (`/status`,
+`/challenges`, `/list`, `/inspect/{name}`, and `/test`) only return challenges
+authorized by the submitted challenge key or admin secret.
 
 ## Configuration
 
@@ -251,8 +272,10 @@ chmod +x test_api.sh
 API_TOKEN=client123 API_ADMIN_SECRET=aria123 CHALLENGE=simplee ./test_api.sh
 START_API=1 API_TOKEN=client123 API_ADMIN_SECRET=aria123 ./test_api.sh
 RUN_SYNC=1 RUN_ADMIN_GLOBAL=1 API_TOKEN=client123 API_ADMIN_SECRET=aria123 GLOBAL_CURL_TIMEOUT=600 ./test_api.sh
-```
 
+API_TOKEN=client123 API_ADMIN_SECRET=aria123 CHALLENGE=FGTE0/FGTE_Corp ./test_api.sh
+API_TOKEN=client123 API_ADMIN_SECRET=aria123 CHALLENGE=FGTE0/FGTE_Corp CHALLENGE_KEY=aria123 ./test_api.sh
+```
 
 ```bash
 pkill -9 -f pinggy
@@ -329,6 +352,11 @@ cloudflared tunnel route dns edge b.nxctf.my.id
 cloudflared tunnel route dns edge c.nxctf.my.id
 cloudflared tunnel route dns edge d.nxctf.my.id
 cloudflared tunnel route dns edge e.nxctf.my.id
+
+# script add route dns ke cloudflared dengan loop f - z
+for letter in {f..o}; do
+  cloudflared tunnel route dns edge "$letter.nxctf.my.id"
+done
 
 cat > ~/.cloudflared/config.yml <<'EOF'
 tunnel: edge

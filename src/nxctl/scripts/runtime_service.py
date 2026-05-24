@@ -110,7 +110,8 @@ class RuntimeService:
 
         try:
             cursor.execute("""
-                SELECT id, name, path, service_port, service_type, enabled, created_at
+                SELECT id, name, path, service_port, service_type, enabled,
+                       access_key_hash, access_key_source, created_at
                 FROM challenges
                 WHERE name = ?
             """, (name,))
@@ -126,6 +127,8 @@ class RuntimeService:
                 service_port=row["service_port"],
                 service_type=row["service_type"],
                 enabled=bool(row["enabled"]),
+                access_key_hash=row["access_key_hash"] or "",
+                access_key_source=row["access_key_source"] or "",
                 created_at=row["created_at"],
             )
 

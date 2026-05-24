@@ -2,7 +2,12 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from nxctl_api.auth import verify_client_token
+from nxctl_api.auth import (
+    ApiAccessContext,
+    filter_authorized_challenges,
+    get_api_access_context,
+    require_challenge_access,
+)
 from nxctl_api.serializers import (
     build_extend_availability,
     compute_remaining_seconds,
@@ -15,8 +20,10 @@ from nxctl.scripts.cli.base import get_services
 router = APIRouter()
 
 
-@router.get("/status", dependencies=[Depends(verify_client_token)])
-async def get_all_status():
+@router.get("/status")
+async def get_all_status(
+    access: ApiAccessContext = Depends(get_api_access_context),
+):
     try:
         (
             config,
@@ -26,7 +33,11 @@ async def get_all_status():
         ) = get_services()
 
         results = []
-        for challenge in challenge_service.list_challenges():
+        challenges = filter_authorized_challenges(
+            challenge_service.list_challenges(),
+            access,
+        )
+        for challenge in challenges:
             runtime = runtime_service.status(challenge.name)
             extend_availability = build_extend_availability(
                 runtime_service,
@@ -51,8 +62,11 @@ async def get_all_status():
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@router.get("/inspect/{name}", dependencies=[Depends(verify_client_token)])
-async def inspect_challenge(name: str):
+@router.get("/inspect/{name:path}")
+async def inspect_challenge(
+    name: str,
+    access: ApiAccessContext = Depends(get_api_access_context),
+):
     try:
         (
             config,
@@ -61,9 +75,10 @@ async def inspect_challenge(name: str):
             export_manager,
         ) = get_services()
 
-        challenge = challenge_service.get_challenge(name)
-        if not challenge:
-            raise HTTPException(status_code=404, detail="Challenge not found")
+        challenge = require_challenge_access(
+            challenge_service.get_challenge(name),
+            access,
+        )
 
         runtime = runtime_service.status(name)
         extend_availability = build_extend_availability(

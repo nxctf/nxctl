@@ -14,6 +14,8 @@ class Challenge:
     service_port: int = 0
     service_type: str = "http"
     enabled: bool = True
+    access_key_hash: str = ""
+    access_key_source: str = ""
     created_at: Optional[datetime] = None
 
 

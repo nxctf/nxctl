@@ -22,6 +22,8 @@ def init_database(db_path: str) -> None:
             service_port INTEGER NOT NULL,
             service_type TEXT DEFAULT 'http',
             enabled BOOLEAN DEFAULT 1,
+            access_key_hash TEXT DEFAULT '',
+            access_key_source TEXT DEFAULT '',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -97,6 +99,19 @@ def init_database(db_path: str) -> None:
     # Migration: Add last_restart column to runtime_instances
     try:
         cursor.execute("ALTER TABLE runtime_instances ADD COLUMN last_restart DATETIME")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+    # Migration: Add inherited API access key fields to challenges
+    try:
+        cursor.execute("ALTER TABLE challenges ADD COLUMN access_key_hash TEXT DEFAULT ''")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        cursor.execute("ALTER TABLE challenges ADD COLUMN access_key_source TEXT DEFAULT ''")
         conn.commit()
     except sqlite3.OperationalError:
         pass

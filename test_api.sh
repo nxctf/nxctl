@@ -11,7 +11,8 @@
 # Examples:
 #   ./test_api.sh
 #   API_TOKEN=client123 API_ADMIN_SECRET=aria123 ./test_api.sh
-#   CHALLENGE=simplee API_URL=http://127.0.0.1:8000 ./test_api.sh
+#   CHALLENGE=simplee CHALLENGE_KEY=event-secret API_URL=http://127.0.0.1:8000 ./test_api.sh
+#   CHALLENGE=web/heavy CHALLENGE_KEY=event-secret MUTATION_CURL_TIMEOUT=300 ./test_api.sh
 #   RUN_ADMIN_GLOBAL=1 API_ADMIN_SECRET=aria123 GLOBAL_CURL_TIMEOUT=600 ./test_api.sh
 #   RUN_SYNC=1 API_ADMIN_SECRET=aria123 ./test_api.sh
 #   START_API=1 API_PORT=8000 API_TOKEN=client123 API_ADMIN_SECRET=aria123 ./test_api.sh
@@ -26,12 +27,14 @@ CHALLENGE="${CHALLENGE:-simplee}"
 # Both names are accepted for convenience.
 API_TOKEN="${API_TOKEN:-${NXCTL_API_TOKEN:-}}"
 API_ADMIN_SECRET="${API_ADMIN_SECRET:-${NXCTL_API_ADMIN_SECRET:-}}"
+CHALLENGE_KEY="${CHALLENGE_KEY:-${NXCTL_CHALLENGE_KEY:-}}"
 
 START_API="${START_API:-0}"
 RUN_MUTATING="${RUN_MUTATING:-auto}"
 RUN_ADMIN_GLOBAL="${RUN_ADMIN_GLOBAL:-0}"
 RUN_SYNC="${RUN_SYNC:-0}"
 CURL_TIMEOUT="${CURL_TIMEOUT:-30}"
+MUTATION_CURL_TIMEOUT="${MUTATION_CURL_TIMEOUT:-300}"
 GLOBAL_CURL_TIMEOUT="${GLOBAL_CURL_TIMEOUT:-300}"
 SYNC_CURL_TIMEOUT="${SYNC_CURL_TIMEOUT:-120}"
 
@@ -138,10 +141,16 @@ make_request() {
       if [ -n "$API_TOKEN" ]; then
         args+=(--header "Authorization: Bearer ${API_TOKEN}")
       fi
+      if [ -n "$CHALLENGE_KEY" ]; then
+        args+=(--header "X-NXCTL-Challenge-Key: ${CHALLENGE_KEY}")
+      fi
       ;;
     client-x)
       if [ -n "$API_TOKEN" ]; then
         args+=(--header "X-NXCTL-Token: ${API_TOKEN}")
+      fi
+      if [ -n "$CHALLENGE_KEY" ]; then
+        args+=(--header "X-NXCTL-Challenge-Key: ${CHALLENGE_KEY}")
       fi
       ;;
     admin)
@@ -285,6 +294,11 @@ if [ -n "$API_ADMIN_SECRET" ]; then
 else
   printf "API_ADMIN_SECRET=%snot set%s (admin endpoint success tests will be skipped)\n" "$YELLOW" "$RESET"
 fi
+if [ -n "$CHALLENGE_KEY" ]; then
+  printf "CHALLENGE_KEY=%sconfigured%s\n" "$GREEN" "$RESET"
+else
+  printf "CHALLENGE_KEY=%snot set%s (protected challenges will be hidden/denied unless admin is used)\n" "$YELLOW" "$RESET"
+fi
 
 section "Public Root"
 make_request "GET /" public GET "/" "200"
@@ -331,10 +345,11 @@ fi
 
 if [ "$RUN_MUTATING" = "1" ]; then
   section "Single Challenge Mutations"
-  make_request "POST /up/${CHALLENGE} (client token only)" client POST "/up/${CHALLENGE_ENC}" "200"
+  printf "Using MUTATION_CURL_TIMEOUT=%ss because challenge up/restart can build images and start exports.\n" "$MUTATION_CURL_TIMEOUT"
+  make_request "POST /up/${CHALLENGE} (client token + challenge key)" client POST "/up/${CHALLENGE_ENC}" "200" "$MUTATION_CURL_TIMEOUT"
   assert_no_secret_leak "POST /up/${CHALLENGE}"
   make_request "POST /extend/${CHALLENGE} (client token only)" client POST "/extend/${CHALLENGE_ENC}" "200,400,429"
-  make_request "POST /restart/${CHALLENGE} (no admin secret required)" client POST "/restart/${CHALLENGE_ENC}" "200,429"
+  make_request "POST /restart/${CHALLENGE} (client token + challenge key)" client POST "/restart/${CHALLENGE_ENC}" "200,429" "$MUTATION_CURL_TIMEOUT"
   make_request "GET /status after up/restart" client GET "/status" "200"
   make_request "GET /test?name=${CHALLENGE} after up" client GET "/test?name=${CHALLENGE_ENC}" "200"
 

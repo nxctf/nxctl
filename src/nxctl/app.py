@@ -120,6 +120,7 @@ Examples:
     list_cmd = subparsers.add_parser("list", help="List all challenges")
     add_debug_flag(list_cmd, default=argparse.SUPPRESS)
     list_cmd.add_argument("-a", "--all", action="store_true", help="Show full details")
+    list_cmd.add_argument("-k", "--key", action="store_true", help="Show whether each challenge requires a key")
     list_cmd.set_defaults(func=cmd_list)
 
     inspect_cmd = subparsers.add_parser("inspect", help="Show challenge details")

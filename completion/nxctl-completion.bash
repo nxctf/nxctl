@@ -72,7 +72,7 @@ _nxctl_completion() {
     cmd="${COMP_WORDS[1]}"
 
     local commands="sync list inspect add remove up down restart status extend daemon api export unexport exports test ps"
-    local provider_names="ngrok localtunnel pinggy"
+    local provider_names="ngrok localtunnel pinggy cloudflare bore"
 
     if [[ ${COMP_CWORD} -eq 1 ]]; then
         COMPREPLY=( $(compgen -W "${commands}" -- "${cur}") )
@@ -80,7 +80,12 @@ _nxctl_completion() {
     fi
 
     case "${cmd}" in
-        sync|list)
+        sync)
+            ;;
+        list)
+            if [[ "${cur}" == -* ]]; then
+                COMPREPLY=( $(compgen -W "-a --all -k --key" -- "${cur}") )
+            fi
             ;;
         inspect|remove|up|down|status|extend|unexport)
             if [[ ${COMP_CWORD} -eq 2 ]]; then

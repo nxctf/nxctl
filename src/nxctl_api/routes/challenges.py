@@ -2,7 +2,12 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from nxctl_api.auth import verify_admin_secret, verify_client_token
+from nxctl_api.auth import (
+    ApiAccessContext,
+    filter_authorized_challenges,
+    get_api_access_context,
+    verify_admin_secret,
+)
 from nxctl_api.serializers import (
     serialize_challenge_basic,
     serialize_challenge_with_runtime,
@@ -13,11 +18,17 @@ from nxctl.scripts.cli.base import get_services
 router = APIRouter()
 
 
-@router.get("/challenges", dependencies=[Depends(verify_client_token)])
-async def list_challenges():
+@router.get("/challenges")
+async def list_challenges(
+    access: ApiAccessContext = Depends(get_api_access_context),
+):
     _, challenge_service, runtime_service, _ = get_services()
     results = []
-    for challenge in challenge_service.list_challenges():
+    challenges = filter_authorized_challenges(
+        challenge_service.list_challenges(),
+        access,
+    )
+    for challenge in challenges:
         try:
             runtime = runtime_service.status(challenge.name)
             results.append(serialize_challenge_with_runtime(challenge, runtime))
@@ -30,12 +41,17 @@ async def list_challenges():
     return results
 
 
-@router.get("/list", dependencies=[Depends(verify_client_token)])
-async def list_challenges_basic():
+@router.get("/list")
+async def list_challenges_basic(
+    access: ApiAccessContext = Depends(get_api_access_context),
+):
     _, challenge_service, _, _ = get_services()
     return [
         serialize_challenge_basic(challenge)
-        for challenge in challenge_service.list_challenges()
+        for challenge in filter_authorized_challenges(
+            challenge_service.list_challenges(),
+            access,
+        )
     ]
 
 
@@ -53,6 +69,11 @@ async def sync_challenges():
         return {
             "ok": True,
             "synced": len(challenges),
+            "disabled_stale": getattr(
+                challenge_service,
+                "last_sync_disabled_stale_count",
+                0,
+            ),
             "challenges": [
                 serialize_challenge_basic(challenge)
                 for challenge in challenges

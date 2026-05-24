@@ -2,7 +2,12 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from nxctl_api.auth import verify_admin_secret, verify_client_token
+from nxctl_api.auth import (
+    ApiAccessContext,
+    get_api_access_context,
+    require_challenge_access,
+    verify_admin_secret,
+)
 from nxctl_api.serializers import (
     build_extend_availability,
     compute_remaining_seconds,
@@ -17,12 +22,19 @@ from nxctl.scripts.cli.lifecycle import (
 router = APIRouter()
 
 
-@router.post("/up/{name}", dependencies=[Depends(verify_client_token)])
-async def up_challenge(name: str):
+@router.post("/up/{name:path}")
+async def up_challenge(
+    name: str,
+    access: ApiAccessContext = Depends(get_api_access_context),
+):
     try:
         _, challenge_service, runtime_service, export_manager = get_services()
+        challenge = require_challenge_access(
+            challenge_service.get_challenge(name),
+            access,
+        )
         return start_challenge_payload(
-            name,
+            challenge.name,
             challenge_service,
             runtime_service,
             export_manager,
@@ -89,7 +101,7 @@ async def up_all_challenges(all: bool = False):
         )
 
 
-@router.post("/down/{name}", dependencies=[Depends(verify_admin_secret)])
+@router.post("/down/{name:path}", dependencies=[Depends(verify_admin_secret)])
 async def down_challenge(name: str):
     try:
         _, challenge_service, runtime_service, export_manager = get_services()
@@ -123,7 +135,7 @@ async def down_all_challenges(all: bool = False):
         handled = []
         failures = []
 
-        for challenge in challenge_service.list_challenges():
+        for challenge in challenge_service.list_challenges(include_disabled=True):
             try:
                 runtime = runtime_service.status(challenge.name)
                 exports = export_manager.list_exports(challenge.name, check_health=False)
@@ -164,14 +176,19 @@ async def down_all_challenges(all: bool = False):
         )
 
 
-@router.post("/restart/{name}", dependencies=[Depends(verify_client_token)])
+@router.post("/restart/{name:path}")
 async def restart_challenge(
     name: str,
     container: bool = False,
     provider: bool = False,
+    access: ApiAccessContext = Depends(get_api_access_context),
 ):
     try:
         _, challenge_service, runtime_service, export_manager = get_services()
+        challenge = require_challenge_access(
+            challenge_service.get_challenge(name),
+            access,
+        )
         remaining = runtime_service.check_restart_cooldown(name)
 
         if remaining:
@@ -183,10 +200,6 @@ async def restart_challenge(
         restart_all = not (container or provider)
         do_container = restart_all or container
         do_provider = restart_all or provider
-
-        challenge = challenge_service.get_challenge(name)
-        if not challenge:
-            raise HTTPException(status_code=404, detail="Challenge not found")
 
         if do_provider:
             export_manager.stop_all_exports(name)
@@ -222,15 +235,22 @@ async def restart_challenge(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@router.post("/extend/{name}", dependencies=[Depends(verify_client_token)])
-async def extend_challenge(name: str):
+@router.post("/extend/{name:path}")
+async def extend_challenge(
+    name: str,
+    access: ApiAccessContext = Depends(get_api_access_context),
+):
     try:
-        config, _, runtime_service, _ = get_services()
+        config, challenge_service, runtime_service, _ = get_services()
+        challenge = require_challenge_access(
+            challenge_service.get_challenge(name),
+            access,
+        )
         runtime = runtime_service.status(name)
         extend_availability = build_extend_availability(
             runtime_service,
             config,
-            name,
+            challenge.name,
             runtime,
         )
 
@@ -258,7 +278,7 @@ async def extend_challenge(name: str):
         extend_after = build_extend_availability(
             runtime_service,
             config,
-            name,
+            challenge.name,
             runtime,
         )
 

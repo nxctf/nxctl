@@ -122,7 +122,6 @@ class BoreConfig(BaseModel):
 
 
 class TunnelsConfig(BaseModel):
-    default: str = "localtunnel"
     ngrok: NgrokConfig = Field(default_factory=NgrokConfig)
     localtunnel: LocalTunnelConfig = Field(default_factory=LocalTunnelConfig)
     pinggy: PinggyConfig = Field(default_factory=PinggyConfig)
@@ -193,10 +192,6 @@ class Config(BaseModel):
         if self.tunnels.pinggy.tokens:
             return self.tunnels.pinggy.tokens[0]
         return ""
-
-    @property
-    def default_tunnel(self) -> str:
-        return self.tunnels.default
 
     @property
     def enable_ngrok(self) -> bool:
@@ -425,7 +420,6 @@ class Config(BaseModel):
             "local_port_start": ("ports", "local_start"),
             "local_port_end": ("ports", "local_end"),
             "randomize_local_ports": ("ports", "randomize"),
-            "default_tunnel": ("tunnels", "default"),
             "enable_ngrok": ("tunnels", "ngrok", "enabled"),
             "enable_localtunnel": ("tunnels", "localtunnel", "enabled"),
             "enable_pinggy": ("tunnels", "pinggy", "enabled"),

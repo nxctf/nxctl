@@ -35,7 +35,6 @@ ports:
   randomize: true
 
 tunnels:
-  default: localtunnel
   ngrok:
     enabled: true
     max_sessions_per_token: 3
@@ -50,8 +49,7 @@ tunnels:
       - ${NGROK_TOKEN_8}
       - ${NGROK_TOKEN_9}
       - ${NGROK_TOKEN_10}
-  localtunnel:
-    enabled: true
+
   cloudflare:
     enabled: true
     tunnel_name: edge
@@ -62,6 +60,20 @@ tunnels:
       - c.nxctf.my.id
       - d.nxctf.my.id
       - e.nxctf.my.id
+      - f.nxctf.my.id
+      - g.nxctf.my.id
+      - h.nxctf.my.id
+      - i.nxctf.my.id
+      - j.nxctf.my.id
+      - k.nxctf.my.id
+      - l.nxctf.my.id
+      - m.nxctf.my.id
+      - n.nxctf.my.id
+      - o.nxctf.my.id
+
+  localtunnel:
+    enabled: false
+
   pinggy:
     enabled: true
     max_sessions_per_token: 1

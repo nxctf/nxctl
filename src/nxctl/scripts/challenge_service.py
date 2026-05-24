@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+from nxctl.core.access import ACCESS_KEY_FILENAMES, hash_access_key
 from nxctl.core.models import Challenge, ChallengePort
 from nxctl.core.db import get_db_connection, close_db_connection
 from nxctl.core.git import GitRepository
@@ -23,6 +24,7 @@ class ChallengeService:
     def __init__(self, db_path: str):
         """Initialize challenge service."""
         self.db_path = db_path
+        self.last_sync_disabled_stale_count = 0
 
     def discover_challenges(
         self,
@@ -94,6 +96,10 @@ class ChallengeService:
         # Use the relative path from repo root as the challenge name.
         challenge_name = str(challenge_dir.relative_to(repo_root)).replace("\\", "/")
         challenge_path = str(challenge_dir.relative_to(repo_root)).replace("\\", "/")
+        access_key_hash, access_key_source = self._resolve_inherited_access_key(
+            challenge_dir,
+            repo_root,
+        )
 
         # Extract port and service type information
         service_port = 8080
@@ -113,10 +119,45 @@ class ChallengeService:
             path=challenge_path,
             service_port=service_port,
             service_type=service_type,
+            access_key_hash=access_key_hash,
+            access_key_source=access_key_source,
         )
 
         logger.info(f"Discovered challenge: {challenge_name} (port {service_port}, type {service_type})")
         return challenge
+
+    def _resolve_inherited_access_key(self, challenge_dir: Path, repo_root: Path) -> tuple[str, str]:
+        """Return the nearest inherited access key hash and source path."""
+        try:
+            current = challenge_dir.resolve()
+            root = repo_root.resolve()
+            current.relative_to(root)
+        except Exception:
+            return "", ""
+
+        while True:
+            for filename in ACCESS_KEY_FILENAMES:
+                key_path = current / filename
+                if not key_path.is_file():
+                    continue
+                try:
+                    key_value = key_path.read_text(encoding="utf-8").strip()
+                except UnicodeDecodeError:
+                    key_value = key_path.read_text().strip()
+                key_hash = hash_access_key(key_value)
+                if not key_hash:
+                    return "", ""
+                try:
+                    key_source = str(key_path.relative_to(root)).replace("\\", "/")
+                except ValueError:
+                    key_source = str(key_path)
+                return key_hash, key_source
+
+            if current == root or current.parent == current:
+                break
+            current = current.parent
+
+        return "", ""
 
     def sync_challenges(
         self,
@@ -137,39 +178,53 @@ class ChallengeService:
         challenges = self.discover_challenges(git_repo.local_path, challenge_base_dir)
 
         # Save to database
-        self._save_challenges_to_db(challenges)
+        self._save_challenges_to_db(challenges, challenge_base_dir)
 
         logger.info(f"Synced {len(challenges)} challenges")
         return challenges
 
-    def _save_challenges_to_db(self, challenges: list[Challenge]) -> None:
+    def _save_challenges_to_db(
+        self,
+        challenges: list[Challenge],
+        challenge_base_dir: str = "",
+    ) -> None:
         """Save challenges to database."""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
 
         try:
+            discovered_names = {challenge.name for challenge in challenges}
             for challenge in challenges:
                 cursor.execute("""
                     INSERT INTO challenges
-                    (name, path, service_port, service_type, enabled)
-                    VALUES (?, ?, ?, ?, ?)
+                    (name, path, service_port, service_type, enabled, access_key_hash, access_key_source)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(name) DO UPDATE SET
                         path = excluded.path,
                         service_port = excluded.service_port,
                         service_type = excluded.service_type,
-                        enabled = excluded.enabled
+                        enabled = excluded.enabled,
+                        access_key_hash = excluded.access_key_hash,
+                        access_key_source = excluded.access_key_source
                 """, (
                     challenge.name,
                     challenge.path,
                     challenge.service_port,
                     challenge.service_type,
                     challenge.enabled,
+                    challenge.access_key_hash,
+                    challenge.access_key_source,
                 ))
                 cursor.execute("SELECT id FROM challenges WHERE name = ?", (challenge.name,))
                 row = cursor.fetchone()
                 if row:
                     self._save_ports_for_challenge(cursor, int(row["id"]), challenge)
 
+            self.last_sync_disabled_stale_count = self._disable_stale_challenges(
+                cursor,
+                discovered_names,
+                challenge_base_dir,
+            )
             conn.commit()
 
         except Exception as e:
@@ -177,6 +232,55 @@ class ChallengeService:
             raise ChallengeDiscoveryError(f"Failed to save challenges: {str(e)}")
         finally:
             close_db_connection(conn)
+
+    def _disable_stale_challenges(
+        self,
+        cursor,
+        discovered_names: set[str],
+        challenge_base_dir: str = "",
+    ) -> int:
+        """Disable DB challenges no longer discovered by sync."""
+        where_parts = ["enabled = 1"]
+        params: list[str] = []
+
+        normalized_base = str(challenge_base_dir or "").replace("\\", "/").strip("/")
+        if normalized_base:
+            where_parts.append("(name = ? OR name LIKE ?)")
+            params.extend([normalized_base, f"{normalized_base}/%"])
+
+        if discovered_names:
+            placeholders = ", ".join("?" for _ in discovered_names)
+            where_parts.append(f"name NOT IN ({placeholders})")
+            params.extend(sorted(discovered_names))
+
+        cursor.execute(
+            f"""
+                SELECT id
+                FROM challenges
+                WHERE {' AND '.join(where_parts)}
+            """,
+            params,
+        )
+        stale_ids = [int(row["id"]) for row in cursor.fetchall()]
+        if not stale_ids:
+            return 0
+
+        stale_placeholders = ", ".join("?" for _ in stale_ids)
+        cursor.execute(
+            f"""
+                UPDATE challenges
+                SET enabled = 0,
+                    access_key_hash = '',
+                    access_key_source = ''
+                WHERE id IN ({stale_placeholders})
+            """,
+            stale_ids,
+        )
+        cursor.execute(
+            f"DELETE FROM challenge_ports WHERE challenge_id IN ({stale_placeholders})",
+            stale_ids,
+        )
+        return len(stale_ids)
 
     def _save_ports_for_challenge(self, cursor, challenge_id: int, challenge: Challenge) -> None:
         """Save all compose port mappings for a challenge."""
@@ -212,17 +316,20 @@ class ChallengeService:
                 1 if index == 0 else 0,
             ))
 
-    def list_challenges(self) -> list[Challenge]:
+    def list_challenges(self, include_disabled: bool = False) -> list[Challenge]:
         """List all challenges from database."""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
 
         try:
+            enabled_filter = "" if include_disabled else "WHERE enabled = 1"
             cursor.execute("""
-                SELECT id, name, path, service_port, service_type, enabled, created_at
+                SELECT id, name, path, service_port, service_type, enabled,
+                       access_key_hash, access_key_source, created_at
                 FROM challenges
+                {enabled_filter}
                 ORDER BY name
-            """)
+            """.format(enabled_filter=enabled_filter))
 
             challenges = []
             for row in cursor.fetchall():
@@ -233,6 +340,8 @@ class ChallengeService:
                     service_port=row["service_port"],
                     service_type=row["service_type"],
                     enabled=bool(row["enabled"]),
+                    access_key_hash=row["access_key_hash"] or "",
+                    access_key_source=row["access_key_source"] or "",
                     created_at=row["created_at"],
                 )
                 challenges.append(challenge)
@@ -292,7 +401,8 @@ class ChallengeService:
 
         try:
             cursor.execute("""
-                SELECT id, name, path, service_port, service_type, enabled, created_at
+                SELECT id, name, path, service_port, service_type, enabled,
+                       access_key_hash, access_key_source, created_at
                 FROM challenges
                 WHERE name = ?
             """, (name,))
@@ -308,6 +418,8 @@ class ChallengeService:
                 service_port=row["service_port"],
                 service_type=row["service_type"],
                 enabled=bool(row["enabled"]),
+                access_key_hash=row["access_key_hash"] or "",
+                access_key_source=row["access_key_source"] or "",
                 created_at=row["created_at"],
             )
 

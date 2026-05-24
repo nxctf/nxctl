@@ -35,6 +35,21 @@ def _ports_text(challenge_service, challenge) -> str:
     return f"{challenge.service_port}/{challenge.service_type}"
 
 
+def _key_text(config, challenge) -> str:
+    if not challenge.access_key_hash:
+        return "No"
+
+    key_source = str(challenge.access_key_source or "").strip()
+    if not key_source:
+        return "(unavailable)"
+
+    key_path = (config.chall_dir / key_source).resolve()
+    try:
+        return key_path.read_text(encoding="utf-8").strip() or "(empty)"
+    except Exception:
+        return "(unavailable)"
+
+
 def cmd_sync(args) -> int:
     try:
         config, challenge_service, _, _ = get_services()
@@ -48,6 +63,9 @@ def cmd_sync(args) -> int:
         print(f"{blue('Syncing challenges...')}")
         challenges = challenge_service.sync_challenges(git_repo)
         print(f"{green(OK)} Synced {len(challenges)} challenges")
+        stale_count = getattr(challenge_service, "last_sync_disabled_stale_count", 0)
+        if stale_count:
+            print(f"{yellow('!')} Disabled {stale_count} stale challenge(s)")
         for challenge in challenges:
             print(f"  {BULLET} {challenge.name} ({_ports_text(challenge_service, challenge)})")
         return 0
@@ -64,20 +82,30 @@ def cmd_sync(args) -> int:
 
 def cmd_list(args) -> int:
     try:
-        _, challenge_service, _, _ = get_services()
+        config, challenge_service, _, _ = get_services()
         challenges = challenge_service.list_challenges()
         if not challenges:
             print(f"{yellow('No challenges found')}")
             return 0
 
 
-        print(f"{'-' * 124}")
-        print(f"{'Name':28} {'Primary':16} {'Ports':46} {'Path'}")
-        print(f"{'-' * 124}")
+        show_key = bool(getattr(args, "key", False))
+        width = 152 if show_key else 124
+        print(f"{'-' * width}")
+        if show_key:
+            print(f"{'Name':28} {'Primary':16} {'Ports':46} {'Key':24} {'Path'}")
+        else:
+            print(f"{'Name':28} {'Primary':16} {'Ports':46} {'Path'}")
+        print(f"{'-' * width}")
         for challenge in challenges:
             primary = f"{challenge.service_port}/{challenge.service_type}"
-            print(f"{challenge.name:28} {primary:16} {_ports_text(challenge_service, challenge):46} {challenge.path}")
-        print(f"{'-' * 124}")
+            ports_text = _ports_text(challenge_service, challenge)
+            if show_key:
+                key_text = _key_text(config, challenge)
+                print(f"{challenge.name:28} {primary:16} {ports_text:46} {key_text:24} {challenge.path}")
+            else:
+                print(f"{challenge.name:28} {primary:16} {ports_text:46} {challenge.path}")
+        print(f"{'-' * width}")
         return 0
     except Exception as e:
         print(f"{red(ERR)} List failed: {str(e)}")

@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 def _provider_priority(service_type: str) -> list[str]:
     if service_type == PROTOCOL_TCP:
         return [EXPORT_PROVIDER_PINGGY, EXPORT_PROVIDER_BORE]
-    return [EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_LOCALTUNNEL, EXPORT_PROVIDER_CLOUDFLARE, EXPORT_PROVIDER_BORE]
+    return [EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_CLOUDFLARE, EXPORT_PROVIDER_LOCALTUNNEL, EXPORT_PROVIDER_BORE]
 
 
 def _start_with_fallback(export_manager, challenge_name: str, challenge, provider_name: str | None = None) -> tuple[str, str]:
@@ -214,7 +214,7 @@ def cmd_down(args) -> int:
             print(f"{blue('Stopping all challenges...')}")
             stopped_count = 0
 
-            for challenge in challenge_service.list_challenges():
+            for challenge in challenge_service.list_challenges(include_disabled=True):
                 runtime = runtime_service.status(challenge.name)
                 exports = export_manager.list_exports(challenge.name, check_health=False)
                 if runtime.status != "running" and not exports:
@@ -472,6 +472,7 @@ def cmd_daemon(args) -> int:
                         FROM runtime_instances r
                         JOIN challenges c ON r.challenge_id = c.id
                         WHERE r.status = 'running'
+                        AND c.enabled = 1
                     """)
                     running_names = [row["name"] for row in cursor.fetchall()]
                 finally:
