@@ -52,24 +52,14 @@ tunnels:
 
   cloudflare:
     enabled: true
-    tunnel_name: edge
-    credentials_file: ~/.cloudflared/2b865acf-2600-4e55-bfc9-d48294f6b6a4.json
+    tunnel_name: nxctl
+    credentials_file: ~/.cloudflared/d9195db7-52a3-4fa9-a1f7-5ea7c6a4d47d.json
     subdomains:
-      - a.nxctf.my.id
-      - b.nxctf.my.id
-      - c.nxctf.my.id
-      - d.nxctf.my.id
-      - e.nxctf.my.id
-      - f.nxctf.my.id
-      - g.nxctf.my.id
-      - h.nxctf.my.id
-      - i.nxctf.my.id
-      - j.nxctf.my.id
-      - k.nxctf.my.id
-      - l.nxctf.my.id
-      - m.nxctf.my.id
-      - n.nxctf.my.id
-      - o.nxctf.my.id
+      - 519abcb392.nxctf.my.id
+      - d269b17a7b.nxctf.my.id
+      - b8ed9102c0.nxctf.my.id
+      - c8f09c37aa.nxctf.my.id
+      - d0870760dc.nxctf.my.id
 
   localtunnel:
     enabled: false

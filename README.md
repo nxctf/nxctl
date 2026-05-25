@@ -385,5 +385,4 @@ cloudflared tunnel run edge
 
 # cloudflared tunnel delete edge
 cloudflared tunnel create nxctl
-
 ```
