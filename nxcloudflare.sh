@@ -3,20 +3,15 @@ set -euo pipefail
 
 ACTION="${1:-}"
 TUNNEL="${2:-nxctl}"
-COUNT="${3:-15}"
+COUNT="${3:-}"
 DOMAIN="${4:-nxctf.my.id}"
 
 STATE_DIR="$HOME/.cloudflared/nxcloudflare"
 STATE_FILE="$STATE_DIR/$TUNNEL.hosts"
 mkdir -p "$STATE_DIR" "$HOME/.cloudflared"
 
-letters() {
-  local count="$1"
-  local i
-  for ((i=0; i<count; i++)); do
-    printf "\\$(printf '%03o' $((97+i)))"
-    echo
-  done
+generate_subdomain() {
+  openssl rand -hex 5
 }
 
 get_uuid() {
@@ -45,8 +40,19 @@ delete_all() {
 }
 
 create_all() {
-  if [[ "$COUNT" -gt 26 ]]; then
-    echo "COUNT max 26 untuk mode a-z"
+  if [[ -z "$COUNT" ]]; then
+    echo "COUNT wajib diisi"
+    echo "Usage: ./nxcloudflare.sh create nxctl 20 [nxctf.my.id]"
+    exit 1
+  fi
+
+  if ! [[ "$COUNT" =~ ^[0-9]+$ ]] || [[ "$COUNT" -lt 1 ]]; then
+    echo "COUNT harus angka positif"
+    exit 1
+  fi
+
+  if ! command -v openssl >/dev/null 2>&1; then
+    echo "openssl tidak ditemukan, dibutuhkan untuk generate subdomain random"
     exit 1
   fi
 
@@ -69,25 +75,27 @@ create_all() {
   : > "$STATE_FILE"
 
   echo "[+] Creating DNS routes..."
-  while read -r sub; do
+  for ((i=0; i<COUNT; i++)); do
+    sub="$(generate_subdomain)"
     host="$sub.$DOMAIN"
     echo "[+] $host"
     cloudflared tunnel route dns "$TUNNEL" "$host"
     echo "$host" >> "$STATE_FILE"
-  done < <(letters "$COUNT")
+  done
 
   echo
   echo "========== config.yml =========="
   cat <<EOF
-cloudflare:
-  enabled: true
-  tunnel_name: $TUNNEL
-  credentials_file: ~/.cloudflared/$UUID.json
-  subdomains:
+tunnels:
+  cloudflare:
+    enabled: true
+    tunnel_name: $TUNNEL
+    credentials_file: ~/.cloudflared/$UUID.json
+    subdomains:
 EOF
 
   while read -r host; do
-    echo "    - $host"
+    echo "      - $host"
   done < "$STATE_FILE"
 
   echo "================================"
@@ -103,8 +111,8 @@ case "$ACTION" in
     ;;
   *)
     echo "Usage:"
-    echo "  ./nxcloudflare create edge 15 nxctf.my.id"
-    echo "  ./nxcloudflare delete edge"
+    echo "  ./nxcloudflare.sh create nxctl 20 [nxctf.my.id]"
+    echo "  ./nxcloudflare.sh delete nxctl"
     exit 1
     ;;
 esac
