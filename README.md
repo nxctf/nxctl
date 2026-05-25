@@ -378,3 +378,12 @@ EOF
 
 cloudflared tunnel run edge
 ```
+
+```bash
+# gagal cuy ini
+# cloudflared tunnel token edge | base64 -d > ~/.cloudflared/edge.json
+
+# cloudflared tunnel delete edge
+cloudflared tunnel create nxctl
+
+```
