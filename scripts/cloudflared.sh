@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ACTION="${1:-}"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+COMMAND_NAME="${NXCF_COMMAND_NAME:-$0}"
 DEFAULT_TUNNEL="${NXCF_TUNNEL:-nxctl}"
 DEFAULT_DOMAIN="${NXCF_DOMAIN:-nxctf.my.id}"
 SUBDOMAIN_PREFIX="${NXCF_SUBDOMAIN_PREFIX:-nxctl}"
@@ -13,6 +14,18 @@ DOMAIN="$DEFAULT_DOMAIN"
 STATE_DIR="${NXCF_STATE_DIR:-$HOME/.cloudflared/nxcloudflare}"
 SUBDOMAIN_FILE=""
 LEGACY_STATE_FILE=""
+
+# shellcheck source=lib/args.sh
+source "$PROJECT_DIR/scripts/lib/args.sh"
+# shellcheck source=lib/spinner.sh
+source "$PROJECT_DIR/scripts/lib/spinner.sh"
+# shellcheck source=lib/prompt.sh
+source "$PROJECT_DIR/scripts/lib/prompt.sh"
+
+parse_common_flags "$@"
+set -- "${NXSCRIPT_POSITIONAL_ARGS[@]}"
+
+ACTION="${1:-}"
 
 set_subdomain_file() {
   SUBDOMAIN_FILE="${NXCF_SUBDOMAIN_FILE:-$STATE_DIR/$DOMAIN.subdomain}"
@@ -69,22 +82,10 @@ print_available_tunnels() {
   fi
 }
 
-confirm() {
-  local prompt="$1"
-  local answer
-
-  printf "%s [y/N] " "$prompt"
-  if ! read -r answer; then
-    return 1
-  fi
-
-  [[ "$answer" == "y" || "$answer" == "Y" || "$answer" == "yes" || "$answer" == "YES" ]]
-}
-
 validate_count() {
   if [[ -z "$COUNT" ]]; then
     echo "COUNT wajib diisi"
-    echo "Usage: ./nxcloudflare.sh subdomain create 15 [nxctf.my.id]"
+    echo "Usage: $COMMAND_NAME subdomain create 15 [nxctf.my.id]"
     exit 1
   fi
 
@@ -110,8 +111,7 @@ create_subdomains() {
   fi
 
   if ! command -v openssl >/dev/null 2>&1; then
-    echo "openssl tidak ditemukan, dibutuhkan untuk generate subdomain random"
-    exit 1
+    die "openssl tidak ditemukan, dibutuhkan untuk generate subdomain random"
   fi
 
   if [[ -s "$SUBDOMAIN_FILE" ]]; then
@@ -122,7 +122,7 @@ create_subdomains() {
 
     if ! confirm "Overwrite and generate new subdomains?"; then
       echo "[OK] Keeping existing subdomains"
-      show_subdomains
+      list_subdomains
       return 0
     fi
   fi
@@ -155,51 +155,27 @@ require_subdomains() {
 
   if [[ ! -s "$SUBDOMAIN_FILE" ]]; then
     echo "Subdomain file not found: $SUBDOMAIN_FILE" >&2
-    echo "Run first: ./nxcloudflare.sh subdomain create 15 $DOMAIN" >&2
+    echo "Run first: $COMMAND_NAME subdomain create 15 $DOMAIN" >&2
     exit 1
   fi
 }
 
-show_subdomains() {
+list_subdomains() {
   require_subdomains
 
   echo "========== subdomains =========="
+  echo "File: $SUBDOMAIN_FILE"
+  echo
   cat "$SUBDOMAIN_FILE"
   echo "================================"
-}
-
-info_subdomains() {
-  set_subdomain_file
-
-  echo "========== subdomain info =========="
-  echo "Domain         : $DOMAIN"
-  echo "File           : $SUBDOMAIN_FILE"
-
-  if [[ -s "$SUBDOMAIN_FILE" ]]; then
-    local subdomain_count
-    local first_host
-    local last_host
-    subdomain_count="$(grep -cve '^[[:space:]]*$' "$SUBDOMAIN_FILE" || true)"
-    first_host="$(grep -ve '^[[:space:]]*$' "$SUBDOMAIN_FILE" | head -n 1 || true)"
-    last_host="$(grep -ve '^[[:space:]]*$' "$SUBDOMAIN_FILE" | tail -n 1 || true)"
-    echo "Status         : exists"
-    echo "Count          : $subdomain_count"
-    echo "First          : ${first_host:-none}"
-    echo "Last           : ${last_host:-none}"
-  else
-    echo "Status         : missing"
-    echo "Create         : ./nxcloudflare.sh subdomain create 15 $DOMAIN"
-  fi
-
-  echo "===================================="
 }
 
 delete_tunnel_only() {
   if tunnel_exists; then
     echo "[-] tunnel: $TUNNEL"
-    cloudflared tunnel delete -f "$TUNNEL"
+    run --label "Deleting tunnel $TUNNEL" cloudflared tunnel delete -f "$TUNNEL"
   else
-    echo "[OK] Tunnel not found: $TUNNEL"
+    ok "Tunnel not found: $TUNNEL"
     print_available_tunnels
   fi
 }
@@ -209,10 +185,10 @@ create_tunnel() {
   mkdir -p "$HOME/.cloudflared"
 
   if tunnel_exists; then
-    echo "[OK] Tunnel already exists, reusing: $TUNNEL"
+    ok "Tunnel already exists, reusing: $TUNNEL"
   else
-    echo "[+] Creating tunnel: $TUNNEL"
-    cloudflared tunnel create "$TUNNEL"
+    info "Creating tunnel: $TUNNEL"
+    run --label "Creating tunnel $TUNNEL" cloudflared tunnel create "$TUNNEL"
   fi
 
   local uuid
@@ -229,7 +205,7 @@ create_tunnel() {
   while IFS= read -r host || [[ -n "$host" ]]; do
     [[ -z "$host" ]] && continue
     echo "[+] $host"
-    cloudflared tunnel route dns --overwrite-dns "$TUNNEL" "$host"
+    run --label "Routing $host" cloudflared tunnel route dns --overwrite-dns "$TUNNEL" "$host"
   done < "$SUBDOMAIN_FILE"
 
   echo
@@ -249,7 +225,7 @@ EOF
   done < "$SUBDOMAIN_FILE"
 
   echo "================================"
-  echo "[OK] Done"
+  ok "Done"
 }
 
 print_config() {
@@ -260,7 +236,7 @@ print_config() {
 
   if [[ -z "$uuid" ]]; then
     echo "Tunnel not found: $TUNNEL" >&2
-    echo "Run first: ./nxcloudflare.sh tunnel create $TUNNEL $DOMAIN" >&2
+    echo "Run first: $COMMAND_NAME tunnel create $TUNNEL $DOMAIN" >&2
     exit 1
   fi
 
@@ -292,8 +268,7 @@ delete_tunnel() {
 
 list_tunnels() {
   if ! command -v cloudflared >/dev/null 2>&1; then
-    echo "cloudflared not found" >&2
-    return 1
+    die "cloudflared not found"
   fi
 
   local output
@@ -353,17 +328,37 @@ info_tunnel() {
 
 usage() {
   echo "Usage:"
-  echo "  ./nxcloudflare.sh subdomain create 15 [nxctf.my.id]"
-  echo "  ./nxcloudflare.sh subdomain list [nxctf.my.id]"
-  echo "  ./nxcloudflare.sh subdomain info [nxctf.my.id]"
-  echo "  ./nxcloudflare.sh tunnel create [nxctl] [nxctf.my.id]"
-  echo "  ./nxcloudflare.sh tunnel list"
-  echo "  ./nxcloudflare.sh tunnel info <nxctl>"
-  echo "  ./nxcloudflare.sh tunnel delete [nxctl] [nxctf.my.id]"
-  echo "  ./nxcloudflare.sh config [nxctl] [nxctf.my.id]"
+  echo "  $COMMAND_NAME [common flags] create <nxctl> <count> [nxctf.my.id]"
+  echo "  $COMMAND_NAME [common flags] delete <nxctl> [nxctf.my.id]"
+  echo "  $COMMAND_NAME [common flags] subdomain create 15 [nxctf.my.id]"
+  echo "  $COMMAND_NAME [common flags] subdomain list [nxctf.my.id]"
+  echo "  $COMMAND_NAME [common flags] tunnel create [nxctl] [nxctf.my.id]"
+  echo "  $COMMAND_NAME [common flags] tunnel list"
+  echo "  $COMMAND_NAME [common flags] tunnel info <nxctl>"
+  echo "  $COMMAND_NAME [common flags] tunnel delete [nxctl] [nxctf.my.id]"
+  echo "  $COMMAND_NAME [common flags] config [nxctl] [nxctf.my.id]"
+  echo
+  echo "Common flags: -v, --verbose, --no-spinner, -h, --help"
 }
 
+if [[ "$NXSCRIPT_HELP" -eq 1 ]]; then
+  usage
+  exit 0
+fi
+
 case "$ACTION" in
+  create)
+    TUNNEL="${2:-$DEFAULT_TUNNEL}"
+    COUNT="${3:-}"
+    DOMAIN="${4:-$DEFAULT_DOMAIN}"
+    create_subdomains
+    create_tunnel
+    ;;
+  delete)
+    TUNNEL="${2:-$DEFAULT_TUNNEL}"
+    DOMAIN="${3:-$DEFAULT_DOMAIN}"
+    delete_tunnel
+    ;;
   subdomain)
     case "${2:-}" in
       create)
@@ -371,13 +366,9 @@ case "$ACTION" in
         DOMAIN="${4:-$DEFAULT_DOMAIN}"
         create_subdomains
         ;;
-      list|show)
+      list)
         DOMAIN="${3:-$DEFAULT_DOMAIN}"
-        show_subdomains
-        ;;
-      info)
-        DOMAIN="${3:-$DEFAULT_DOMAIN}"
-        info_subdomains
+        list_subdomains
         ;;
       *)
         usage
@@ -398,7 +389,7 @@ case "$ACTION" in
       info)
         if [[ -z "${3:-}" ]]; then
           echo "Tunnel name wajib diisi"
-          echo "Usage: ./nxcloudflare.sh tunnel info <nxctl>"
+          echo "Usage: $COMMAND_NAME tunnel info <nxctl>"
           exit 1
         fi
         TUNNEL="${3:-}"
@@ -419,6 +410,9 @@ case "$ACTION" in
     TUNNEL="${2:-$DEFAULT_TUNNEL}"
     DOMAIN="${3:-$DEFAULT_DOMAIN}"
     print_config
+    ;;
+  help|--help|-h)
+    usage
     ;;
   *)
     usage

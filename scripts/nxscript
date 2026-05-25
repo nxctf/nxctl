@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="${NXCTL_PROJECT_DIR:-$(cd "$SCRIPT_PATH/.." && pwd)}"
+
+# shellcheck source=lib/args.sh
+source "$PROJECT_DIR/scripts/lib/args.sh"
+
+usage() {
+  cat <<'EOF'
+Usage: nxscript [common flags] <command> [args]
+
+Common flags:
+  -v, --verbose
+  --no-spinner
+  -h, --help
+
+Commands:
+  install
+  uninstall
+  update
+  delete
+  api list|test
+  cloudflared create <tunnel> <count> [domain]
+  cloudflared delete <tunnel> [domain]
+  service start|stop|restart|status
+  completion install|uninstall
+EOF
+}
+
+parse_common_flags "$@"
+set -- "${NXSCRIPT_POSITIONAL_ARGS[@]}"
+
+COMMAND="${1:-help}"
+if [[ $# -gt 0 ]]; then
+  shift
+fi
+
+case "$COMMAND" in
+  install)
+    if [[ "$NXSCRIPT_HELP" -eq 1 ]]; then
+      exec bash "$PROJECT_DIR/scripts/install.sh" --help
+    fi
+    exec bash "$PROJECT_DIR/scripts/install.sh" "$@"
+    ;;
+  uninstall)
+    if [[ "$NXSCRIPT_HELP" -eq 1 ]]; then
+      exec bash "$PROJECT_DIR/scripts/uninstall.sh" --help
+    fi
+    exec bash "$PROJECT_DIR/scripts/uninstall.sh" "$@"
+    ;;
+  update)
+    if [[ "$NXSCRIPT_HELP" -eq 1 ]]; then
+      exec bash "$PROJECT_DIR/scripts/update.sh" --help
+    fi
+    exec bash "$PROJECT_DIR/scripts/update.sh" "$@"
+    ;;
+  delete)
+    if [[ "$NXSCRIPT_HELP" -eq 1 ]]; then
+      exec bash "$PROJECT_DIR/scripts/delete.sh" --help
+    fi
+    exec bash "$PROJECT_DIR/scripts/delete.sh" "$@"
+    ;;
+  api)
+    if [[ "$NXSCRIPT_HELP" -eq 1 ]]; then
+      exec bash "$PROJECT_DIR/scripts/api.sh" "$@" --help
+    fi
+    exec bash "$PROJECT_DIR/scripts/api.sh" "$@"
+    ;;
+  cloudflared|cloudflare)
+    export NXCF_COMMAND_NAME="nxscript cloudflared"
+    if [[ "$NXSCRIPT_HELP" -eq 1 ]]; then
+      exec bash "$PROJECT_DIR/scripts/cloudflared.sh" "$@" --help
+    fi
+    exec bash "$PROJECT_DIR/scripts/cloudflared.sh" "$@"
+    ;;
+  service)
+    if [[ "$NXSCRIPT_HELP" -eq 1 ]]; then
+      exec bash "$PROJECT_DIR/scripts/service.sh" "$@" --help
+    fi
+    exec bash "$PROJECT_DIR/scripts/service.sh" "$@"
+    ;;
+  completion)
+    SUBCOMMAND="${1:-help}"
+    if [[ $# -gt 0 ]]; then
+      shift
+    fi
+    case "$SUBCOMMAND" in
+      install)
+        if [[ "$NXSCRIPT_HELP" -eq 1 ]]; then
+          exec bash "$PROJECT_DIR/scripts/completion/install.sh" --help
+        fi
+        exec bash "$PROJECT_DIR/scripts/completion/install.sh" "$@"
+        ;;
+      uninstall)
+        if [[ "$NXSCRIPT_HELP" -eq 1 ]]; then
+          exec bash "$PROJECT_DIR/scripts/completion/uninstall.sh" --help
+        fi
+        exec bash "$PROJECT_DIR/scripts/completion/uninstall.sh" "$@"
+        ;;
+      help)
+        echo "Usage: nxscript [common flags] completion install|uninstall"
+        ;;
+      *)
+        if [[ "$NXSCRIPT_HELP" -eq 1 ]]; then
+          echo "Usage: nxscript [common flags] completion install|uninstall"
+          exit 0
+        fi
+        echo "Unknown completion command: $SUBCOMMAND" >&2
+        echo "Usage: nxscript completion install|uninstall" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+  help)
+    usage
+    ;;
+  *)
+    if [[ "$NXSCRIPT_HELP" -eq 1 ]]; then
+      usage
+      exit 0
+    fi
+    echo "Unknown nxscript command: $COMMAND" >&2
+    echo "Run: nxscript --help" >&2
+    exit 1
+    ;;
+esac

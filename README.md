@@ -42,8 +42,15 @@ NXCTL is the command-line orchestrator in the NXCTF ecosystem. It simplifies the
 
 ```text
 nxctl/
-|-- setup.sh                    # Interactive installer/uninstaller
-|-- completion/                 # Bash completion scripts
+|-- setup.sh                    # Compatibility bootstrap for installer/service commands
+|-- scripts/                    # Installer, service, completion, and helper wrappers
+|   |-- nxscript                # Maintenance command dispatcher
+|   |-- install.sh
+|   |-- uninstall.sh
+|   |-- api.sh
+|   |-- cloudflared.sh
+|   |-- completion/
+|   `-- service/
 |-- src/
 |   |-- nxctl/                  # CLI and orchestration package
 |   |   |-- app.py              # CLI entry point
@@ -57,14 +64,14 @@ nxctl/
 
 ## Installation
 
-The setup script installs dependencies, registers the global `nxctl` command, and configures bash completion.
+The setup script bootstraps dependencies, registers the global `nxctl` and `nxscript` commands, and configures bash completion.
 
 ```bash
 git clone https://github.com/nxctf/nxctl
 cd nxctl
 
 sudo ./setup.sh install
-sudo ./setup.sh enable-service
+nxscript service start
 
 source ~/.bashrc
 ```
@@ -252,9 +259,49 @@ nxctl export pinggy web/sqli
 nxctl down web/sqli
 ```
 
+Helper commands are grouped under `nxscript`:
+
+```bash
+nxscript cloudflared create nxctl 20 nxctf.my.id
+nxscript cloudflared delete nxctl
+nxscript update
+nxscript delete
+nxscript completion install
+nxscript service status
+```
+
+Use verbose mode when you want installer/helper command output instead of compact loading lines:
+
+```bash
+nxscript --verbose update
+nxscript -v api test
+```
+
+When stdout is not an interactive terminal, `nxscript` helpers skip the spinner and stream command output normally.
+
+## Completion
+
+`nxctl` and `nxscript` use separate bash completion files. They are installed together by the normal installer:
+
+```bash
+nxscript completion install
+source ~/.bashrc
+```
+
+For a one-shell test without modifying shell startup files:
+
+```bash
+source scripts/completion/nxctl-completion.bash
+source scripts/completion/nxscript-completion.bash
+complete -p nxctl
+complete -p nxscript
+```
+
 ## Uninstall
 
 ```bash
+nxscript delete
+# or, from the repository root:
 sudo ./setup.sh uninstall
 ```
 
@@ -268,13 +315,12 @@ sudo ./setup.sh uninstall
 
 
 ```bash
-chmod +x test_api.sh
-API_TOKEN=client123 API_ADMIN_SECRET=aria123 CHALLENGE=simplee ./test_api.sh
-START_API=1 API_TOKEN=client123 API_ADMIN_SECRET=aria123 ./test_api.sh
-RUN_SYNC=1 RUN_ADMIN_GLOBAL=1 API_TOKEN=client123 API_ADMIN_SECRET=aria123 GLOBAL_CURL_TIMEOUT=600 ./test_api.sh
+API_TOKEN=client123 API_ADMIN_SECRET=aria123 CHALLENGE=simplee nxscript api test
+START_API=1 API_TOKEN=client123 API_ADMIN_SECRET=aria123 nxscript api test
+RUN_SYNC=1 RUN_ADMIN_GLOBAL=1 API_TOKEN=client123 API_ADMIN_SECRET=aria123 GLOBAL_CURL_TIMEOUT=600 nxscript api test
 
-API_TOKEN=client123 API_ADMIN_SECRET=aria123 CHALLENGE=FGTE0/FGTE_Corp ./test_api.sh
-API_TOKEN=client123 API_ADMIN_SECRET=aria123 CHALLENGE=FGTE0/FGTE_Corp CHALLENGE_KEY=aria123 ./test_api.sh
+API_TOKEN=client123 API_ADMIN_SECRET=aria123 CHALLENGE=FGTE0/FGTE_Corp nxscript api test
+API_TOKEN=client123 API_ADMIN_SECRET=aria123 CHALLENGE=FGTE0/FGTE_Corp CHALLENGE_KEY=aria123 nxscript api test
 ```
 
 ```bash
@@ -306,7 +352,14 @@ git ls-files "*.sh" "*.bash" | ForEach-Object { git update-index --chmod=+x -- $
 
 git config core.filemode true
 git update-index --chmod=+x setup.sh
-git update-index --chmod=+x test_api.sh
+git update-index --chmod=+x scripts/nxscript
+git update-index --chmod=+x scripts/api.sh
+git update-index --chmod=+x scripts/cloudflared.sh
+git update-index --chmod=+x scripts/delete.sh
+git update-index --chmod=+x scripts/install.sh
+git update-index --chmod=+x scripts/uninstall.sh
+git update-index --chmod=+x scripts/update.sh
+git update-index --chmod=+x scripts/service.sh
 
 git ls-files "*.sh"
 
@@ -318,10 +371,18 @@ git push
 git config core.filemode false
 
 git update-index --chmod=+x setup.sh
-git update-index --chmod=+x test_api.sh
-git update-index --chmod=+x completion/install.sh
-git update-index --chmod=+x completion/uninstall.sh
-git update-index --chmod=+x completion/nxctl-completion.bash
+git update-index --chmod=+x scripts/nxscript
+git update-index --chmod=+x scripts/api.sh
+git update-index --chmod=+x scripts/cloudflared.sh
+git update-index --chmod=+x scripts/delete.sh
+git update-index --chmod=+x scripts/install.sh
+git update-index --chmod=+x scripts/uninstall.sh
+git update-index --chmod=+x scripts/update.sh
+git update-index --chmod=+x scripts/service.sh
+git update-index --chmod=+x scripts/completion/install.sh
+git update-index --chmod=+x scripts/completion/uninstall.sh
+git update-index --chmod=+x scripts/completion/nxctl-completion.bash
+git update-index --chmod=+x scripts/completion/nxscript-completion.bash
 
 git ls-files --stage | Select-String "100755"
 

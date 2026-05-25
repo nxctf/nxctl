@@ -8,6 +8,7 @@ Enhance your terminal experience with smart tab-completion for `nxctl`.
 - Suggest challenge names from the SQLite database when available.
 - Complete tunnel providers: `ngrok`, `localtunnel`, and `pinggy`.
 - Complete common flags such as `--watch`, `--type`, `--host`, and `--port`.
+- Complete `nxscript` helper commands and nested maintenance subcommands.
 
 ## Installation
 
@@ -20,14 +21,19 @@ The completion is automatically installed when you run:
 To install manually:
 
 ```bash
-chmod +x install.sh
-./install.sh
+nxscript completion install
 source ~/.bashrc
+```
+
+To test in the current shell:
+
+```bash
+source scripts/completion/nxctl-completion.bash
+source scripts/completion/nxscript-completion.bash
 ```
 
 ## Removal
 
 ```bash
-chmod +x uninstall.sh
-./uninstall.sh
+nxscript completion uninstall
 ```

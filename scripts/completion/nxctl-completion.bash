@@ -8,6 +8,10 @@ _nxctl_find_root() {
     fi
 
     if [[ -n "${script_dir}" ]]; then
+        if [[ -f "${script_dir}/../../src/nxctl/app.py" ]]; then
+            (cd "${script_dir}/../.." 2>/dev/null && pwd)
+            return 0
+        fi
         if [[ -f "${script_dir}/../src/nxctl/app.py" ]]; then
             (cd "${script_dir}/.." 2>/dev/null && pwd)
             return 0
