@@ -17,15 +17,12 @@ Common flags:
   -h, --help
 
 Commands:
-  install
   uninstall
   update
-  delete
-  api list|test
+  api [1|2|3|4|5|all]
   cloudflared create <tunnel> <count> [domain]
   cloudflared delete <tunnel> [domain]
   service start|stop|restart|status
-  completion install|uninstall
 EOF
 }
 
@@ -38,12 +35,6 @@ if [[ $# -gt 0 ]]; then
 fi
 
 case "$COMMAND" in
-  install)
-    if [[ "$NXSCRIPT_HELP" -eq 1 ]]; then
-      exec bash "$PROJECT_DIR/scripts/install.sh" --help
-    fi
-    exec bash "$PROJECT_DIR/scripts/install.sh" "$@"
-    ;;
   uninstall)
     if [[ "$NXSCRIPT_HELP" -eq 1 ]]; then
       exec bash "$PROJECT_DIR/scripts/uninstall.sh" --help
@@ -55,12 +46,6 @@ case "$COMMAND" in
       exec bash "$PROJECT_DIR/scripts/update.sh" --help
     fi
     exec bash "$PROJECT_DIR/scripts/update.sh" "$@"
-    ;;
-  delete)
-    if [[ "$NXSCRIPT_HELP" -eq 1 ]]; then
-      exec bash "$PROJECT_DIR/scripts/delete.sh" --help
-    fi
-    exec bash "$PROJECT_DIR/scripts/delete.sh" "$@"
     ;;
   api)
     if [[ "$NXSCRIPT_HELP" -eq 1 ]]; then
@@ -81,38 +66,6 @@ case "$COMMAND" in
     fi
     exec bash "$PROJECT_DIR/scripts/service.sh" "$@"
     ;;
-  completion)
-    SUBCOMMAND="${1:-help}"
-    if [[ $# -gt 0 ]]; then
-      shift
-    fi
-    case "$SUBCOMMAND" in
-      install)
-        if [[ "$NXSCRIPT_HELP" -eq 1 ]]; then
-          exec bash "$PROJECT_DIR/scripts/completion/install.sh" --help
-        fi
-        exec bash "$PROJECT_DIR/scripts/completion/install.sh" "$@"
-        ;;
-      uninstall)
-        if [[ "$NXSCRIPT_HELP" -eq 1 ]]; then
-          exec bash "$PROJECT_DIR/scripts/completion/uninstall.sh" --help
-        fi
-        exec bash "$PROJECT_DIR/scripts/completion/uninstall.sh" "$@"
-        ;;
-      help)
-        echo "Usage: nxscript [common flags] completion install|uninstall"
-        ;;
-      *)
-        if [[ "$NXSCRIPT_HELP" -eq 1 ]]; then
-          echo "Usage: nxscript [common flags] completion install|uninstall"
-          exit 0
-        fi
-        echo "Unknown completion command: $SUBCOMMAND" >&2
-        echo "Usage: nxscript completion install|uninstall" >&2
-        exit 1
-        ;;
-    esac
-    ;;
   help)
     usage
     ;;
@@ -120,6 +73,21 @@ case "$COMMAND" in
     if [[ "$NXSCRIPT_HELP" -eq 1 ]]; then
       usage
       exit 0
+    fi
+    if [[ "$COMMAND" == "install" ]]; then
+      echo "nxscript install has been removed; use ./setup.sh install instead" >&2
+      echo "Run: ./setup.sh install" >&2
+      exit 1
+    fi
+    if [[ "$COMMAND" == "delete" ]]; then
+      echo "nxscript delete is not a public command; use scripts/delete.sh directly if needed" >&2
+      echo "Run: bash scripts/delete.sh --help" >&2
+      exit 1
+    fi
+    if [[ "$COMMAND" == "completion" ]]; then
+      echo "nxscript completion is not a public command; use scripts/completion/*.sh directly if needed" >&2
+      echo "Run: bash scripts/completion/install.sh --help" >&2
+      exit 1
     fi
     echo "Unknown nxscript command: $COMMAND" >&2
     echo "Run: nxscript --help" >&2

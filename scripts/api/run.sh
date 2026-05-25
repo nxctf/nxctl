@@ -15,34 +15,31 @@ case "$COMMAND" in
     api_list_tests
     ;;
   test)
+    die "nxscript api test is no longer supported; use nxscript api [1|2|3|4|5|all]"
+    ;;
+  help|--help|-h)
+    api_list_tests
+    ;;
+  *)
     api_load_tests
-    if [[ $# -eq 0 || "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-      api_list_tests
-      exit 0
-    fi
-
-    mapfile -t selected < <(api_selected_tests "$@")
+    mapfile -t selected < <(api_selected_tests "$COMMAND" "$@")
     api_prepare
 
     for id in "${selected[@]}"; do
       test_func="api_test_${id}"
       section "Test ${id}: ${API_TEST_NAMES[$id]}"
       printf "%s\n" "${API_TEST_DESCS[$id]}"
+      start_pass="$PASS_COUNT"
+      start_fail="$FAIL_COUNT"
+      start_skip="$SKIP_COUNT"
       "$test_func"
+      printf "Test %s summary: %s passed, %s failed, %s skipped\n" \
+        "$id" \
+        "$((PASS_COUNT - start_pass))" \
+        "$((FAIL_COUNT - start_fail))" \
+        "$((SKIP_COUNT - start_skip))"
     done
 
     api_summary
-    ;;
-  help|--help|-h)
-    cat <<'EOF'
-Usage:
-  nxscript api list
-  nxscript api test
-  nxscript api test all
-  nxscript api test 1 3
-EOF
-    ;;
-  *)
-    die "Unknown api runner command: $COMMAND"
     ;;
 esac

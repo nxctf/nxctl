@@ -203,6 +203,25 @@ Read endpoints that can expose challenge names or tunnel endpoints (`/status`,
 `/challenges`, `/list`, `/inspect/{name}`, and `/test`) only return challenges
 authorized by the submitted challenge key or admin secret.
 
+## API Test Harness
+
+`nxscript api` runs the FastAPI test harness from the repository scripts without
+the old `test` subcommand.
+
+```bash
+./scripts/nxscript api
+./scripts/nxscript api 1
+./scripts/nxscript api 2 3
+./scripts/nxscript api 1 3 4
+./scripts/nxscript api all
+./scripts/nxscript api 2 4 -v
+```
+
+`nxscript uninstall` is intentionally interactive and will stop all nxctl
+runtimes, kill nxctl-owned provider processes, and then stop/disable the
+`nxctl-daemon` service before removing wrappers and completion. `nxscript
+update` only refreshes the command wrappers and leaves the service untouched.
+
 ## Configuration
 
 Key settings in `config.yml`:

@@ -4,7 +4,7 @@
 _nxscript_completion() {
     local cur command subcommand arg_index
     local common_flags="-v --verbose --no-spinner -h --help"
-    local top_commands="install uninstall update delete api cloudflared service completion"
+    local top_commands="uninstall update api cloudflared service"
     local words=()
     local word
 
@@ -48,9 +48,7 @@ _nxscript_completion() {
             ;;
         api)
             if [[ "$arg_index" -eq 1 ]]; then
-                COMPREPLY=( $(compgen -W "$common_flags list test" -- "$cur") )
-            elif [[ "$subcommand" == "test" ]]; then
-                COMPREPLY=( $(compgen -W "$common_flags all" -- "$cur") )
+                COMPREPLY=( $(compgen -W "$common_flags 1 2 3 4 5 all" -- "$cur") )
             fi
             ;;
         cloudflared|cloudflare)

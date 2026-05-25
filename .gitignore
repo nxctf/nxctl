@@ -1,3 +1,4 @@
+# Ignore nxctl runtimes, logs, and exports
 HPone
 _tmp
 /data/
@@ -17,6 +18,8 @@ downloads/
 eggs/
 .eggs/
 lib/
+!scripts/lib/
+!scripts/lib/**
 lib64/
 parts/
 sdist/

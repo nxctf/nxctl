@@ -96,6 +96,22 @@ api_load_tests() {
   done
 }
 
+api_usage() {
+  cat <<'EOF'
+Usage:
+  nxscript api [1|2|3|4|5|all] [-v|--verbose] [--no-spinner]
+
+Examples:
+  nxscript api
+  nxscript api 1
+  nxscript api 2 3
+  nxscript api 1 3 4
+  nxscript api all
+  nxscript api 2 4 -v
+  nxscript -v api all
+EOF
+}
+
 api_list_tests() {
   local id
   api_load_tests
@@ -106,10 +122,7 @@ api_list_tests() {
     printf "   %s\n" "${API_TEST_DESCS[$id]}"
   done
   echo
-  echo "Run examples:"
-  echo "  nxscript api test 1"
-  echo "  nxscript api test 1 4"
-  echo "  nxscript api test all"
+  api_usage
 }
 
 api_has_test() {
@@ -123,23 +136,62 @@ api_has_test() {
 
 api_selected_tests() {
   local selected=()
+  local -A seen=()
   local arg part
+  local saw_all=0
+
+  api_load_tests
+
+  if [[ $# -eq 0 ]]; then
+    api_list_tests
+    return 1
+  fi
 
   for arg in "$@"; do
-    if [[ "$arg" == "all" ]]; then
-      printf "%s\n" "${API_TEST_IDS[@]}"
-      return 0
-    fi
+    case "$arg" in
+      test)
+        die "nxscript api test is no longer supported; use nxscript api [1|2|3|4|5|all]"
+        ;;
+      list|help|--help|-h)
+        die "nxscript api uses direct targets; run nxscript api with no args to list tests"
+        ;;
+    esac
 
     IFS=',' read -ra parts <<< "$arg"
     for part in "${parts[@]}"; do
       [[ -z "$part" ]] && continue
-      if ! api_has_test "$part"; then
-        die "Unknown API test: $part"
-      fi
-      selected+=("$part")
+      case "$part" in
+        all)
+          if [[ "${#selected[@]}" -gt 0 ]]; then
+            die "'all' must be the only API target after common flags are removed"
+          fi
+          saw_all=1
+          selected+=("all")
+          ;;
+        [1-5])
+          if [[ "$saw_all" -eq 1 ]]; then
+            die "'all' must be the only API target after common flags are removed"
+          fi
+          if ! api_has_test "$part"; then
+            die "Unknown API test: $part"
+          fi
+          if [[ -n "${seen[$part]:-}" ]]; then
+            die "Duplicate API test: $part"
+          fi
+          seen["$part"]=1
+          selected+=("$part")
+          ;;
+        *)
+          die "Unknown API test target: $part"
+          ;;
+      esac
     done
   done
+
+  if [[ "${#selected[@]}" -eq 0 ]]; then
+    api_list_tests
+    return 1
+  fi
 
   printf "%s\n" "${selected[@]}"
 }
@@ -182,6 +234,32 @@ pretty_json() {
   fi
 }
 
+api_verbose_enabled() {
+  [[ "${NXSCRIPT_VERBOSE:-0}" -eq 1 ]]
+}
+
+api_redact_header() {
+  local header="$1"
+
+  case "$header" in
+    Authorization:*)
+      printf '%s\n' 'Authorization: [redacted]'
+      ;;
+    X-NXCTL-Token:*)
+      printf '%s\n' 'X-NXCTL-Token: [redacted]'
+      ;;
+    X-NXCTL-Admin-Secret:*)
+      printf '%s\n' 'X-NXCTL-Admin-Secret: [redacted]'
+      ;;
+    X-NXCTL-Challenge-Key:*)
+      printf '%s\n' 'X-NXCTL-Challenge-Key: [redacted]'
+      ;;
+    *)
+      printf '%s\n' "$header"
+      ;;
+  esac
+}
+
 expected_matches() {
   local actual="$1"
   local expected_csv="$2"
@@ -204,12 +282,24 @@ make_request() {
   local timeout="${6:-$CURL_TIMEOUT}"
   local url="${API_URL}${path}"
   local body_file
+  local headers_file
   body_file="$(mktemp)"
+  headers_file="$(mktemp)"
 
   local args=(
     --silent
     --show-error
     --max-time "$timeout"
+    --dump-header "$headers_file"
+    --output "$body_file"
+    --write-out "%{http_code}"
+    --request "$method"
+  )
+  local display_args=(
+    --silent
+    --show-error
+    --max-time "$timeout"
+    --dump-header "$headers_file"
     --output "$body_file"
     --write-out "%{http_code}"
     --request "$method"
@@ -219,41 +309,83 @@ make_request() {
     public)
       ;;
     client)
-      [[ -n "$API_TOKEN" ]] && args+=(--header "Authorization: Bearer ${API_TOKEN}")
-      [[ -n "$CHALLENGE_KEY" ]] && args+=(--header "X-NXCTL-Challenge-Key: ${CHALLENGE_KEY}")
+      if [[ -n "$API_TOKEN" ]]; then
+        args+=(--header "Authorization: Bearer ${API_TOKEN}")
+        display_args+=(--header "$(api_redact_header "Authorization: Bearer ${API_TOKEN}")")
+      fi
+      if [[ -n "$CHALLENGE_KEY" ]]; then
+        args+=(--header "X-NXCTL-Challenge-Key: ${CHALLENGE_KEY}")
+        display_args+=(--header "$(api_redact_header "X-NXCTL-Challenge-Key: ${CHALLENGE_KEY}")")
+      fi
       ;;
     client-x)
-      [[ -n "$API_TOKEN" ]] && args+=(--header "X-NXCTL-Token: ${API_TOKEN}")
-      [[ -n "$CHALLENGE_KEY" ]] && args+=(--header "X-NXCTL-Challenge-Key: ${CHALLENGE_KEY}")
+      if [[ -n "$API_TOKEN" ]]; then
+        args+=(--header "X-NXCTL-Token: ${API_TOKEN}")
+        display_args+=(--header "$(api_redact_header "X-NXCTL-Token: ${API_TOKEN}")")
+      fi
+      if [[ -n "$CHALLENGE_KEY" ]]; then
+        args+=(--header "X-NXCTL-Challenge-Key: ${CHALLENGE_KEY}")
+        display_args+=(--header "$(api_redact_header "X-NXCTL-Challenge-Key: ${CHALLENGE_KEY}")")
+      fi
       ;;
     admin)
-      [[ -n "$API_TOKEN" ]] && args+=(--header "Authorization: Bearer ${API_TOKEN}")
-      [[ -n "$API_ADMIN_SECRET" ]] && args+=(--header "X-NXCTL-Admin-Secret: ${API_ADMIN_SECRET}")
+      if [[ -n "$API_TOKEN" ]]; then
+        args+=(--header "Authorization: Bearer ${API_TOKEN}")
+        display_args+=(--header "$(api_redact_header "Authorization: Bearer ${API_TOKEN}")")
+      fi
+      if [[ -n "$API_ADMIN_SECRET" ]]; then
+        args+=(--header "X-NXCTL-Admin-Secret: ${API_ADMIN_SECRET}")
+        display_args+=(--header "$(api_redact_header "X-NXCTL-Admin-Secret: ${API_ADMIN_SECRET}")")
+      fi
       ;;
     admin-only)
-      [[ -n "$API_ADMIN_SECRET" ]] && args+=(--header "X-NXCTL-Admin-Secret: ${API_ADMIN_SECRET}")
+      if [[ -n "$API_ADMIN_SECRET" ]]; then
+        args+=(--header "X-NXCTL-Admin-Secret: ${API_ADMIN_SECRET}")
+        display_args+=(--header "$(api_redact_header "X-NXCTL-Admin-Secret: ${API_ADMIN_SECRET}")")
+      fi
       ;;
     wrong-admin)
-      [[ -n "$API_TOKEN" ]] && args+=(--header "Authorization: Bearer ${API_TOKEN}")
+      if [[ -n "$API_TOKEN" ]]; then
+        args+=(--header "Authorization: Bearer ${API_TOKEN}")
+        display_args+=(--header "$(api_redact_header "Authorization: Bearer ${API_TOKEN}")")
+      fi
       args+=(--header "X-NXCTL-Admin-Secret: definitely-wrong")
+      display_args+=(--header "$(api_redact_header "X-NXCTL-Admin-Secret: definitely-wrong")")
       ;;
     wrong-client)
       args+=(--header "Authorization: Bearer definitely-wrong")
+      display_args+=(--header "$(api_redact_header "Authorization: Bearer definitely-wrong")")
       ;;
     *)
       fail "internal script error: unknown auth mode '$auth'"
-      rm -f "$body_file"
+      rm -f "$body_file" "$headers_file"
       return 1
       ;;
   esac
 
   local status
+  if api_verbose_enabled; then
+    printf "\n%s\n" "$label"
+    printf "  method: %s\n" "$method"
+    printf "  url: %s\n" "$url"
+    printf "  curl:"
+    local display_part
+    for display_part in "${display_args[@]}" "$url"; do
+      printf " %q" "$display_part"
+    done
+    printf "\n"
+  fi
+
   if ! status="$(curl "${args[@]}" "$url" 2>"${body_file}.err")"; then
     LAST_STATUS="curl-error"
     LAST_BODY="$(cat "${body_file}.err")"
     fail "$label -> curl failed"
-    printf "%s\n" "$LAST_BODY"
-    rm -f "$body_file" "${body_file}.err"
+    if api_verbose_enabled; then
+      printf "  curl error: %s\n" "$LAST_BODY"
+    else
+      printf "%s\n" "$LAST_BODY"
+    fi
+    rm -f "$body_file" "$headers_file" "${body_file}.err"
     return 1
   fi
 
@@ -266,13 +398,21 @@ make_request() {
     fail "$label -> expected HTTP $expected, got $status"
   fi
 
-  if [[ -n "$LAST_BODY" ]]; then
-    printf "%s\n" "$LAST_BODY" | pretty_json | sed 's/^/  /'
-  else
-    printf "  %s(empty response)%s\n" "$DIM" "$RESET"
+  if api_verbose_enabled; then
+    printf "  HTTP status: %s\n" "$status"
+    if [[ -s "$headers_file" ]]; then
+      printf "  Response headers:\n"
+      sed 's/^/    /' "$headers_file"
+    fi
+    if [[ -n "$LAST_BODY" ]]; then
+      printf "  Response body:\n"
+      printf "%s\n" "$LAST_BODY" | pretty_json | sed 's/^/    /'
+    else
+      printf "  Response body: (empty)\n"
+    fi
   fi
 
-  rm -f "$body_file" "${body_file}.err"
+  rm -f "$body_file" "$headers_file" "${body_file}.err"
 }
 
 assert_no_secret_leak() {
@@ -343,7 +483,7 @@ api_prepare() {
       printf "\nStart it first, for example:\n"
       printf "  nxctl api --host 127.0.0.1 --port 8000\n"
       printf "or:\n"
-      printf "  START_API=1 nxscript api test 1\n"
+      printf "  START_API=1 nxscript api 1\n"
       exit 1
     fi
   fi
