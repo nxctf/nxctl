@@ -196,12 +196,15 @@ class NgrokProvider(ExportProvider):
 
     def _extract_public_url(self, log_text: str) -> Optional[str]:
         """Extract the public HTTPS URL from this process log."""
-        matches = re.findall(r"url=(https://[^\s]+)", log_text or "")
+        matches = []
+        for line in (log_text or "").splitlines():
+            if "started tunnel" not in line or "url=https://" not in line:
+                continue
+            matches.extend(re.findall(r"url=(https://[^\s]+)", line))
         if matches:
             return matches[-1].strip().strip('"')
 
-        matches = re.findall(r"https://[^\s]+", log_text or "")
-        return matches[-1].strip().strip('"') if matches else None
+        return None
 
     def _summarize_error(self, logs: str) -> str:
         """Extract a compact ngrok failure from noisy agent logs."""

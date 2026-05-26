@@ -172,6 +172,9 @@ EOF
         fi
     fi
 
+    info "Installing/updating daemon service..."
+    bash "$PROJECT_DIR/scripts/service.sh" install-start
+
     echo
     ok "NXCTL installed successfully (system-wide)."
     echo "Restart your shell or run: ${YELLOW}source ~/.bashrc${RST}"
