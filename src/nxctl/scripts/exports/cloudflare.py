@@ -248,11 +248,18 @@ class CloudflareProvider(ExportProvider):
 
         return sorted(pids)
 
-    def _stop_owned_named_tunnel_processes(self, pids: list[int] | None = None) -> int:
+    def _stop_owned_named_tunnel_processes(
+        self,
+        pids: list[int] | None = None,
+        exclude_pids: set[int] | None = None,
+    ) -> int:
         """Stop only recorded nxctl-owned cloudflared named tunnel PIDs."""
         owned_pids = sorted(set(pids if pids is not None else self._collect_owned_named_tunnel_pids()))
+        exclude_pids = exclude_pids or set()
         stopped = 0
         for pid in owned_pids:
+            if pid in exclude_pids:
+                continue
             if not self._is_named_pid_owned(pid):
                 logger.info("Skipping Cloudflare PID %s; commandline does not match nxctl named tunnel", pid)
                 continue
@@ -284,6 +291,44 @@ class CloudflareProvider(ExportProvider):
         with open(config_path, "w", encoding="utf-8") as cf:
             yaml.safe_dump(config_data, cf, default_flow_style=False)
         return config_path
+
+    def _config_contains_mapping(self, hostname: str, host_port: int) -> bool:
+        config_path = self._get_global_config_file()
+        if not config_path.exists():
+            return False
+        try:
+            config_data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            return False
+
+        expected_host = self._hostname_from_url(hostname)
+        expected_service = f"http://localhost:{int(host_port)}"
+        for rule in config_data.get("ingress") or []:
+            if not isinstance(rule, dict):
+                continue
+            rule_host = self._hostname_from_url(str(rule.get("hostname") or ""))
+            rule_service = str(rule.get("service") or "")
+            if rule_host == expected_host and rule_service == expected_service:
+                return True
+        return False
+
+    def _save_pending_mapping_state(self, hostname: str, host_port: int) -> None:
+        state_path = self._get_state_file(host_port)
+        now = int(time.time())
+        save_state_file(
+            state_path,
+            {
+                "pid": 0,
+                "public_url": f"https://{hostname}",
+                "host_port": host_port,
+                "log_file": str(self._get_log_file(host_port)),
+                "config_file": str(self._get_global_config_file()),
+                "tunnel_name": self.tunnel_name,
+                "pending": True,
+                "started_at": now,
+                "updated_at": now,
+            },
+        )
 
     def _spawn_global_tunnel(self, ingress_mappings: list[tuple[str, int]], log_port: int) -> int:
         """Write global config and spawn a single cloudflared process.
@@ -467,6 +512,7 @@ class CloudflareProvider(ExportProvider):
                     "log_file": log_file,
                     "config_file": config_file,
                     "tunnel_name": self.tunnel_name,
+                    "pending": False,
                     "started_at": now,
                     "updated_at": now,
                 })
@@ -551,9 +597,20 @@ class CloudflareProvider(ExportProvider):
             if state:
                 state_pid = int(state.get("pid", 0))
                 state_url = str(state.get("public_url", ""))
-                if state_pid and state_url and self._is_cloudflare_pid(state_pid, host_port):
+                state_hostname = self._hostname_from_url(state_url)
+                if (
+                    state_pid
+                    and state_url
+                    and self._is_cloudflare_pid(state_pid, host_port)
+                    and self._config_contains_mapping(state_hostname, host_port)
+                ):
                     logger.info(f"Reusing existing cloudflare named tunnel: {state_url}")
                     return ExportResult(url=state_url, pid=state_pid)
+                if state_pid and state_url:
+                    logger.info(
+                        "Ignoring Cloudflare state for port %s because PID/config mapping is not current",
+                        host_port,
+                    )
                 logger.info("Ignoring stale cloudflare named tunnel state for port %s", host_port)
                 delete_state_file(self._get_state_file(host_port))
                 delete_state_file(self._get_legacy_state_file(host_port))
@@ -562,8 +619,14 @@ class CloudflareProvider(ExportProvider):
                 export_port = int(export.get("host_port") or 0)
                 export_pid = int(export.get("pid") or 0)
                 export_url = str(export.get("public_url") or "")
-                if export_port == host_port and export_pid and export_url and self._is_named_pid_owned(export_pid):
-                    hostname = self._hostname_from_url(export_url)
+                hostname = self._hostname_from_url(export_url)
+                if (
+                    export_port == host_port
+                    and export_pid
+                    and export_url
+                    and self._is_named_pid_owned(export_pid)
+                    and self._config_contains_mapping(hostname, host_port)
+                ):
                     self._sync_mapping_states([(hostname, host_port)], export_pid, host_port)
                     logger.info(f"Reusing existing cloudflare named tunnel from DB: {export_url}")
                     return ExportResult(url=export_url, pid=export_pid)
@@ -587,10 +650,12 @@ class CloudflareProvider(ExportProvider):
             previous_pids = self._collect_owned_named_tunnel_pids()
 
             # Generate the replacement config before stopping the current process.
+            self._save_pending_mapping_state(allocated_subdomain, host_port)
             self._write_global_config(new_mappings)
             try:
                 self._stop_owned_named_tunnel_processes(previous_pids)
                 real_pid = self._spawn_global_tunnel(new_mappings, log_port=host_port)
+                self._stop_owned_named_tunnel_processes(exclude_pids={real_pid})
             except Exception as start_exc:
                 logger.warning(
                     "Failed to restart Cloudflare named tunnel for %s; attempting rollback: %s",
@@ -793,6 +858,7 @@ class CloudflareProvider(ExportProvider):
                 if remaining_mappings:
                     first_port = remaining_mappings[0][1]
                     real_pid = self._spawn_global_tunnel(remaining_mappings, log_port=first_port)
+                    self._stop_owned_named_tunnel_processes(exclude_pids={real_pid})
                     self._sync_mapping_states(remaining_mappings, real_pid, first_port)
                     self._update_active_db_pids(
                         real_pid,

@@ -463,6 +463,15 @@ class ExportManager:
                     elif not port_in_use:
                         logger.info("Local port %s for %s is not active, marking unhealthy.", export.get("port"), export.get("challenge"))
                         should_recreate = True
+                    elif (
+                        export.get("provider") == EXPORT_PROVIDER_CLOUDFLARE
+                        and "missing cloudflare ingress mapping" in str(error).lower()
+                    ):
+                        logger.info(
+                            "Cloudflare ingress mapping for %s is missing, marking unhealthy.",
+                            export.get("challenge"),
+                        )
+                        should_recreate = True
                     else:
                         provider = self.get_provider(export.get("provider") or "")
                         if provider:
@@ -529,7 +538,32 @@ class ExportManager:
         if not endpoint:
             return False, "missing endpoint"
 
-        if export.get("provider") in {EXPORT_PROVIDER_LOCALTUNNEL, EXPORT_PROVIDER_CLOUDFLARE}:
+        if export.get("provider") == EXPORT_PROVIDER_CLOUDFLARE:
+            if export.get("status") == "dead":
+                return False, "process is not running"
+            provider = self.get_provider(EXPORT_PROVIDER_CLOUDFLARE)
+            if not provider:
+                return False, "cloudflare provider unavailable"
+            try:
+                port = int(export.get("port") or 0)
+                if not provider.is_running(export.get("challenge") or "", port):
+                    return False, "process is not running"
+                if hasattr(provider, "_named_mode") and provider._named_mode():
+                    hostname = (
+                        provider._hostname_from_url(endpoint)
+                        if hasattr(provider, "_hostname_from_url")
+                        else endpoint.replace("https://", "").replace("http://", "").strip("/")
+                    )
+                    if (
+                        hasattr(provider, "_config_contains_mapping")
+                        and not provider._config_contains_mapping(hostname, port)
+                    ):
+                        return False, "missing cloudflare ingress mapping"
+                return True, ""
+            except Exception as exc:
+                return False, str(exc)
+
+        if export.get("provider") == EXPORT_PROVIDER_LOCALTUNNEL:
             if export.get("status") == "dead":
                 return False, "process is not running"
             return self._test_dns_endpoint(endpoint)
