@@ -5,6 +5,7 @@ import os
 import time
 from types import SimpleNamespace
 from nxctl.core.constants import PROTOCOL_TCP, EXPORT_PROVIDER_PINGGY, EXPORT_PROVIDER_LOCALTUNNEL, EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_CLOUDFLARE, EXPORT_PROVIDER_BORE
+from nxctl.core.utils import LifecycleLock, LockUnavailable
 from nxctl.scripts.cli.base import (
     get_services,
     green,
@@ -174,33 +175,34 @@ def _cmd_up_one(name: str, challenge_service, runtime_service, export_manager) -
 
 def cmd_up(args) -> int:
     try:
-        _, challenge_service, runtime_service, export_manager = get_services()
+        config, challenge_service, runtime_service, export_manager = get_services()
 
-        if getattr(args, "all", False):
-            challenges = [challenge for challenge in challenge_service.list_challenges() if challenge.enabled]
-            if not challenges:
-                print(f"{yellow('No enabled challenges found')}")
-                return 0
+        with LifecycleLock(config):
+            if getattr(args, "all", False):
+                challenges = [challenge for challenge in challenge_service.list_challenges() if challenge.enabled]
+                if not challenges:
+                    print(f"{yellow('No enabled challenges found')}")
+                    return 0
 
-            print(f"{blue(f'Starting all enabled challenges ({len(challenges)})...')}")
-            ok_count = 0
-            failed_count = 0
-            for challenge in challenges:
-                if _cmd_up_one(challenge.name, challenge_service, runtime_service, export_manager):
-                    ok_count += 1
-                else:
-                    failed_count += 1
+                print(f"{blue(f'Starting all enabled challenges ({len(challenges)})...')}")
+                ok_count = 0
+                failed_count = 0
+                for challenge in challenges:
+                    if _cmd_up_one(challenge.name, challenge_service, runtime_service, export_manager):
+                        ok_count += 1
+                    else:
+                        failed_count += 1
 
-            print(f"{green(OK)} Up --all complete")
-            print(f"  Started: {ok_count}")
-            print(f"  Failed:  {failed_count}")
-            return 1 if failed_count else 0
+                print(f"{green(OK)} Up --all complete")
+                print(f"  Started: {ok_count}")
+                print(f"  Failed:  {failed_count}")
+                return 1 if failed_count else 0
 
-        if not getattr(args, "name", None):
-            print(f"{red(ERR)} Please provide a challenge name or use --all")
-            return 1
+            if not getattr(args, "name", None):
+                print(f"{red(ERR)} Please provide a challenge name or use --all")
+                return 1
 
-        return 0 if _cmd_up_one(args.name, challenge_service, runtime_service, export_manager) else 1
+            return 0 if _cmd_up_one(args.name, challenge_service, runtime_service, export_manager) else 1
     except Exception as e:
         print(f"{red(ERR)} Up failed: {str(e)}")
         return 1
@@ -208,43 +210,44 @@ def cmd_up(args) -> int:
 
 def cmd_down(args) -> int:
     try:
-        _, challenge_service, runtime_service, export_manager = get_services()
+        config, challenge_service, runtime_service, export_manager = get_services()
 
-        if getattr(args, "all", False):
-            print(f"{blue('Stopping all challenges...')}")
-            stopped_count = 0
+        with LifecycleLock(config):
+            if getattr(args, "all", False):
+                print(f"{blue('Stopping all challenges...')}")
+                stopped_count = 0
 
-            for challenge in challenge_service.list_challenges(include_disabled=True):
-                runtime = runtime_service.status(challenge.name)
-                exports = export_manager.list_exports(challenge.name, check_health=False)
-                if runtime.status != "running" and not exports:
-                    continue
+                for challenge in challenge_service.list_challenges(include_disabled=True):
+                    runtime = runtime_service.status(challenge.name)
+                    exports = export_manager.list_exports(challenge.name, check_health=False)
+                    if runtime.status != "running" and not exports:
+                        continue
 
-                print(f"{blue(f'  {BULLET}')} {challenge.name}")
-                _stop_challenge_completely(
-                    challenge.name,
-                    challenge_service,
-                    runtime_service,
-                    export_manager,
-                )
-                stopped_count += 1
+                    print(f"{blue(f'  {BULLET}')} {challenge.name}")
+                    _stop_challenge_completely(
+                        challenge.name,
+                        challenge_service,
+                        runtime_service,
+                        export_manager,
+                    )
+                    stopped_count += 1
 
-            killed = export_manager.kill_all_tunnel_processes()
-            export_manager.mark_all_exports_inactive()
+                killed = export_manager.kill_all_tunnel_processes()
+                export_manager.mark_all_exports_inactive()
 
+                print(f"{green(OK)} Down complete")
+                print(f"  Challenges handled: {stopped_count}")
+                print(f"  Tunnel processes killed: {killed}")
+                return 0
+
+            if not args.name:
+                print(f"{red(ERR)} Please provide a challenge name or use --all")
+                return 1
+
+            print(f"{blue('Stopping...')}")
+            _stop_challenge_completely(args.name, challenge_service, runtime_service, export_manager)
             print(f"{green(OK)} Down complete")
-            print(f"  Challenges handled: {stopped_count}")
-            print(f"  Tunnel processes killed: {killed}")
             return 0
-
-        if not args.name:
-            print(f"{red(ERR)} Please provide a challenge name or use --all")
-            return 1
-
-        print(f"{blue('Stopping...')}")
-        _stop_challenge_completely(args.name, challenge_service, runtime_service, export_manager)
-        print(f"{green(OK)} Down complete")
-        return 0
     except Exception as e:
         print(f"{red(ERR)} Down failed: {str(e)}")
         return 1
@@ -252,54 +255,55 @@ def cmd_down(args) -> int:
 
 def cmd_restart(args) -> int:
     try:
-        _, challenge_service, runtime_service, export_manager = get_services()
+        config, challenge_service, runtime_service, export_manager = get_services()
 
-        # 1. Check Cooldown
-        remaining = runtime_service.check_restart_cooldown(args.name)
-        if remaining:
-            print(f"{red(ERR)} Restart denied: Cooldown active. Please wait {remaining}s.")
-            return 1
+        with LifecycleLock(config):
+            # 1. Check Cooldown
+            remaining = runtime_service.check_restart_cooldown(args.name)
+            if remaining:
+                print(f"{red(ERR)} Restart denied: Cooldown active. Please wait {remaining}s.")
+                return 1
 
-        # 2. Determine what to restart
-        restart_all = not (args.container or args.provider)
-        do_container = restart_all or args.container
-        do_provider = restart_all or args.provider
+            # 2. Determine what to restart
+            restart_all = not (args.container or args.provider)
+            do_container = restart_all or args.container
+            do_provider = restart_all or args.provider
 
-        challenge = challenge_service.get_challenge(args.name)
-        if not challenge:
-            print(f"{red(ERR)} Challenge not found: {args.name}")
-            return 1
-
-        print(f"{blue('Restarting...')}")
-
-        # Handle Provider Stop
-        if do_provider:
-            for export in export_manager.stop_all_exports(args.name):
-                print(f"{blue(f'  {BULLET} Stopped export:')} {export['provider']}")
-
-        # Handle Container Restart
-        if do_container:
-            runtime_service.stop(args.name)
-            runtime_service.start(args.name)
-            # Re-fetch challenge for updated data
             challenge = challenge_service.get_challenge(args.name)
-            print(f"{green(f'  {BULLET} Container restarted')}")
+            if not challenge:
+                print(f"{red(ERR)} Challenge not found: {args.name}")
+                return 1
 
-        # Re-start provider if needed
-        if do_provider:
-            ports = challenge_service.list_challenge_ports(args.name)
-            exports, failures = _start_available_exports(export_manager, args.name, challenge, ports)
-            for export in exports:
-                print(f"{green(f'  {BULLET} Export restarted via')} {export['provider']} ({export['type']})")
-                print(f"    URL: {export['url']}")
-            for failure in failures:
-                print(f"{yellow(f'  {BULLET} Export failed:')} {failure['provider']} - {format_error(failure['error'])}")
+            print(f"{blue('Restarting...')}")
 
-        # 3. Update last_restart time
-        runtime_service.update_restart_time(args.name)
+            # Handle Provider Stop
+            if do_provider:
+                for export in export_manager.stop_all_exports(args.name):
+                    print(f"{blue(f'  {BULLET} Stopped export:')} {export['provider']}")
 
-        print(f"{green(OK)} Restart complete")
-        return 0
+            # Handle Container Restart
+            if do_container:
+                runtime_service.stop(args.name)
+                runtime_service.start(args.name)
+                # Re-fetch challenge for updated data
+                challenge = challenge_service.get_challenge(args.name)
+                print(f"{green(f'  {BULLET} Container restarted')}")
+
+            # Re-start provider if needed
+            if do_provider:
+                ports = challenge_service.list_challenge_ports(args.name)
+                exports, failures = _start_available_exports(export_manager, args.name, challenge, ports)
+                for export in exports:
+                    print(f"{green(f'  {BULLET} Export restarted via')} {export['provider']} ({export['type']})")
+                    print(f"    URL: {export['url']}")
+                for failure in failures:
+                    print(f"{yellow(f'  {BULLET} Export failed:')} {failure['provider']} - {format_error(failure['error'])}")
+
+            # 3. Update last_restart time
+            runtime_service.update_restart_time(args.name)
+
+            print(f"{green(OK)} Restart complete")
+            return 0
     except Exception as e:
         print(f"{red(ERR)} Restart failed: {str(e)}")
         return 1
@@ -312,29 +316,33 @@ def cmd_status(args) -> int:
         watch_mode = getattr(args, "watch", False)
 
         while True:
-            # 1. Handle auto-shutdown for expired runtimes
-            from nxctl.core.db import get_db_connection, close_db_connection
-            conn = get_db_connection(config.db_file)
-            cursor = conn.cursor()
             try:
-                cursor.execute("""
-                    SELECT c.name
-                    FROM runtime_instances r
-                    JOIN challenges c ON r.challenge_id = c.id
-                    WHERE r.status = 'running'
-                    AND r.expires_at IS NOT NULL
-                    AND r.expires_at < datetime('now', 'localtime')
-                """)
-                expired = [row["name"] for row in cursor.fetchall()]
-            finally:
-                close_db_connection(conn)
+                with LifecycleLock(config, blocking=False):
+                    # 1. Handle auto-shutdown for expired runtimes
+                    from nxctl.core.db import get_db_connection, close_db_connection
+                    conn = get_db_connection(config.db_file)
+                    cursor = conn.cursor()
+                    try:
+                        cursor.execute("""
+                            SELECT c.name
+                            FROM runtime_instances r
+                            JOIN challenges c ON r.challenge_id = c.id
+                            WHERE r.status = 'running'
+                            AND r.expires_at IS NOT NULL
+                            AND r.expires_at < datetime('now', 'localtime')
+                        """)
+                        expired = [row["name"] for row in cursor.fetchall()]
+                    finally:
+                        close_db_connection(conn)
 
-            for name in expired:
-                logger.info(f"Auto-stopping expired challenge: {name}")
-                _stop_challenge_completely(name, challenge_service, runtime_service, export_manager)
+                    for name in expired:
+                        logger.info(f"Auto-stopping expired challenge: {name}")
+                        _stop_challenge_completely(name, challenge_service, runtime_service, export_manager)
 
-            # 2. Reconcile exports (mark dead PIDs)
-            export_manager.reconcile_exports()
+                    # 2. Reconcile exports (mark dead PIDs)
+                    export_manager.reconcile_exports()
+            except LockUnavailable:
+                logger.info("Skipping status reconciliation because lifecycle lock is held")
 
             # 3. Get data for display
             challenges = [challenge_service.get_challenge(args.name)] if args.name else challenge_service.list_challenges()
@@ -403,8 +411,9 @@ def cmd_status(args) -> int:
 
 def cmd_extend(args) -> int:
     try:
-        _, _, runtime_service, _ = get_services()
-        runtime = runtime_service.extend_time(args.name)
+        config, _, runtime_service, _ = get_services()
+        with LifecycleLock(config):
+            runtime = runtime_service.extend_time(args.name)
 
         from datetime import datetime
         remaining = runtime.expires_at - datetime.now()
@@ -418,6 +427,80 @@ def cmd_extend(args) -> int:
     except Exception as e:
         print(f"{red(ERR)} Extend failed: {str(e)}")
         return 1
+
+
+def _daemon_cycle(config, challenge_service, runtime_service, export_manager, last_endpoint_check: float) -> float:
+    endpoint_check_interval = int(
+        getattr(config, "export_endpoint_check_interval_seconds", 120) or 120
+    )
+
+    # 1. Fetch data from DB
+    from nxctl.core.db import get_db_connection, close_db_connection
+    conn = get_db_connection(config.db_file)
+    cursor = conn.cursor()
+    try:
+        # Get expired runtimes
+        cursor.execute("""
+            SELECT c.name
+            FROM runtime_instances r
+            JOIN challenges c ON r.challenge_id = c.id
+            WHERE r.status = 'running'
+            AND r.expires_at IS NOT NULL
+            AND r.expires_at < datetime('now', 'localtime')
+        """)
+        expired = [row["name"] for row in cursor.fetchall()]
+
+        # Get all running runtimes for auto-heal
+        cursor.execute("""
+            SELECT c.name
+            FROM runtime_instances r
+            JOIN challenges c ON r.challenge_id = c.id
+            WHERE r.status = 'running'
+            AND c.enabled = 1
+        """)
+        running_names = [row["name"] for row in cursor.fetchall()]
+    finally:
+        close_db_connection(conn)
+
+    # 2. Handle auto-shutdown for expired runtimes
+    for name in expired:
+        print(f"{yellow('[daemon]')} Auto-stopping expired challenge: {name}")
+        _stop_challenge_completely(name, challenge_service, runtime_service, export_manager)
+        if name in running_names:
+            running_names.remove(name)
+
+    # 3. Reconcile exports (mark dead PIDs as 'dead')
+    export_manager.reconcile_exports()
+
+    # 3b. Actively test tunnel endpoints at a slower cadence.
+    if endpoint_check_interval > 0 and time.time() - last_endpoint_check >= endpoint_check_interval:
+        last_endpoint_check = time.time()
+        endpoint_results = export_manager.test_tunnel_exports(mark_unhealthy=True)
+        export_manager.sweep_orphan_tunnel_processes()
+        for result in endpoint_results:
+            if not result.get("reachable"):
+                print(
+                    f"{yellow('[daemon]')} "
+                    f"Endpoint failed: {result.get('challenge')} "
+                    f"{result.get('provider')} "
+                    f"{result.get('url') or result.get('endpoint')} "
+                    f"({format_error(result.get('error'))}); scheduling auto-heal"
+                )
+
+    # 4. Auto-heal missing exports for running challenges
+    if config.auto_heal_exports:
+        for name in running_names:
+            try:
+                challenge = challenge_service.get_challenge(name)
+                if runtime_service.status(name).status != "running":
+                    continue
+                ports = challenge_service.list_challenge_ports(name)
+                _start_available_exports(export_manager, name, challenge, ports)
+            except Exception as heal_err:
+                print(f"{red('[daemon]')} Heal failed for {name}: {heal_err}")
+
+    return last_endpoint_check
+
 
 def cmd_daemon(args) -> int:
     try:
@@ -444,77 +527,19 @@ def cmd_daemon(args) -> int:
 
         print(f"{blue('[daemon]')} Monitoring challenges for auto-shutdown & auto-heal...")
         last_endpoint_check = 0.0
-        endpoint_check_interval = int(
-            getattr(config, "export_endpoint_check_interval_seconds", 120) or 120
-        )
 
         while True:
             try:
-                # 1. Fetch data from DB
-                from nxctl.core.db import get_db_connection, close_db_connection
-                conn = get_db_connection(config.db_file)
-                cursor = conn.cursor()
-                try:
-                    # Get expired runtimes
-                    cursor.execute("""
-                        SELECT c.name
-                        FROM runtime_instances r
-                        JOIN challenges c ON r.challenge_id = c.id
-                        WHERE r.status = 'running'
-                        AND r.expires_at IS NOT NULL
-                        AND r.expires_at < datetime('now', 'localtime')
-                    """)
-                    expired = [row["name"] for row in cursor.fetchall()]
-
-                    # Get all running runtimes for auto-heal
-                    cursor.execute("""
-                        SELECT c.name
-                        FROM runtime_instances r
-                        JOIN challenges c ON r.challenge_id = c.id
-                        WHERE r.status = 'running'
-                        AND c.enabled = 1
-                    """)
-                    running_names = [row["name"] for row in cursor.fetchall()]
-                finally:
-                    close_db_connection(conn)
-
-                # 2. Handle auto-shutdown for expired runtimes
-                for name in expired:
-                    print(f"{yellow('[daemon]')} Auto-stopping expired challenge: {name}")
-                    _stop_challenge_completely(name, challenge_service, runtime_service, export_manager)
-                    if name in running_names:
-                        running_names.remove(name)
-
-                # 3. Reconcile exports (mark dead PIDs as 'dead')
-                export_manager.reconcile_exports()
-
-                # 3b. Actively test tunnel endpoints at a slower cadence.
-                if endpoint_check_interval > 0 and time.time() - last_endpoint_check >= endpoint_check_interval:
-                    last_endpoint_check = time.time()
-                    endpoint_results = export_manager.test_tunnel_exports(mark_unhealthy=True)
-                    export_manager.sweep_orphan_tunnel_processes()
-                    for result in endpoint_results:
-                        if not result.get("reachable"):
-                            print(
-                                f"{yellow('[daemon]')} "
-                                f"Endpoint failed: {result.get('challenge')} "
-                                f"{result.get('provider')} "
-                                f"{result.get('url') or result.get('endpoint')} "
-                                f"({format_error(result.get('error'))}); scheduling auto-heal"
-                            )
-
-                # 4. Auto-heal missing exports for running challenges
-                if config.auto_heal_exports:
-                    for name in running_names:
-                        try:
-                            challenge = challenge_service.get_challenge(name)
-                            if runtime_service.status(name).status != "running":
-                                continue
-                            ports = challenge_service.list_challenge_ports(name)
-                            _start_available_exports(export_manager, name, challenge, ports)
-                        except Exception as heal_err:
-                            print(f"{red('[daemon]')} Heal failed for {name}: {heal_err}")
-
+                with LifecycleLock(config, blocking=False):
+                    last_endpoint_check = _daemon_cycle(
+                        config,
+                        challenge_service,
+                        runtime_service,
+                        export_manager,
+                        last_endpoint_check,
+                    )
+            except LockUnavailable:
+                logger.info("Skipping daemon cycle because lifecycle lock is held")
             except Exception as e:
                 print(f"{red('[daemon] Error:')} {e}")
 

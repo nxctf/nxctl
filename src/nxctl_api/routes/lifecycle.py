@@ -12,6 +12,7 @@ from nxctl_api.serializers import (
     build_extend_availability,
     compute_remaining_seconds,
 )
+from nxctl.core.utils import LifecycleLock
 from nxctl_api.services import start_challenge_payload
 from nxctl.scripts.cli.base import get_services
 from nxctl.scripts.cli.lifecycle import (
@@ -28,17 +29,18 @@ async def up_challenge(
     access: ApiAccessContext = Depends(get_api_access_context),
 ):
     try:
-        _, challenge_service, runtime_service, export_manager = get_services()
-        challenge = require_challenge_access(
-            challenge_service.get_challenge(name),
-            access,
-        )
-        return start_challenge_payload(
-            challenge.name,
-            challenge_service,
-            runtime_service,
-            export_manager,
-        )
+        config, challenge_service, runtime_service, export_manager = get_services()
+        with LifecycleLock(config):
+            challenge = require_challenge_access(
+                challenge_service.get_challenge(name),
+                access,
+            )
+            return start_challenge_payload(
+                challenge.name,
+                challenge_service,
+                runtime_service,
+                export_manager,
+            )
     except HTTPException:
         raise
     except Exception as exc:
@@ -57,30 +59,31 @@ async def up_all_challenges(all: bool = False):
         )
 
     try:
-        _, challenge_service, runtime_service, export_manager = get_services()
-        results = []
-        failures = []
+        config, challenge_service, runtime_service, export_manager = get_services()
+        with LifecycleLock(config):
+            results = []
+            failures = []
 
-        for challenge in challenge_service.list_challenges():
-            if not challenge.enabled:
-                continue
-            try:
-                results.append(start_challenge_payload(
-                    challenge.name,
-                    challenge_service,
-                    runtime_service,
-                    export_manager,
-                ))
-            except HTTPException as exc:
-                failures.append({
-                    "challenge": challenge.name,
-                    "error": exc.detail,
-                })
-            except Exception as exc:
-                failures.append({
-                    "challenge": challenge.name,
-                    "error": str(exc),
-                })
+            for challenge in challenge_service.list_challenges():
+                if not challenge.enabled:
+                    continue
+                try:
+                    results.append(start_challenge_payload(
+                        challenge.name,
+                        challenge_service,
+                        runtime_service,
+                        export_manager,
+                    ))
+                except HTTPException as exc:
+                    failures.append({
+                        "challenge": challenge.name,
+                        "error": exc.detail,
+                    })
+                except Exception as exc:
+                    failures.append({
+                        "challenge": challenge.name,
+                        "error": str(exc),
+                    })
 
         return {
             "ok": not failures,
@@ -104,13 +107,14 @@ async def up_all_challenges(all: bool = False):
 @router.post("/down/{name:path}", dependencies=[Depends(verify_admin_secret)])
 async def down_challenge(name: str):
     try:
-        _, challenge_service, runtime_service, export_manager = get_services()
-        _stop_challenge_completely(
-            name,
-            challenge_service,
-            runtime_service,
-            export_manager,
-        )
+        config, challenge_service, runtime_service, export_manager = get_services()
+        with LifecycleLock(config):
+            _stop_challenge_completely(
+                name,
+                challenge_service,
+                runtime_service,
+                export_manager,
+            )
         return {
             "ok": True,
             "message": f"Challenge {name} stopped",
@@ -131,31 +135,32 @@ async def down_all_challenges(all: bool = False):
         )
 
     try:
-        _, challenge_service, runtime_service, export_manager = get_services()
-        handled = []
-        failures = []
+        config, challenge_service, runtime_service, export_manager = get_services()
+        with LifecycleLock(config):
+            handled = []
+            failures = []
 
-        for challenge in challenge_service.list_challenges(include_disabled=True):
-            try:
-                runtime = runtime_service.status(challenge.name)
-                exports = export_manager.list_exports(challenge.name, check_health=False)
-                if runtime.status != "running" and not exports:
-                    continue
-                _stop_challenge_completely(
-                    challenge.name,
-                    challenge_service,
-                    runtime_service,
-                    export_manager,
-                )
-                handled.append(challenge.name)
-            except Exception as exc:
-                failures.append({
-                    "challenge": challenge.name,
-                    "error": str(exc),
-                })
+            for challenge in challenge_service.list_challenges(include_disabled=True):
+                try:
+                    runtime = runtime_service.status(challenge.name)
+                    exports = export_manager.list_exports(challenge.name, check_health=False)
+                    if runtime.status != "running" and not exports:
+                        continue
+                    _stop_challenge_completely(
+                        challenge.name,
+                        challenge_service,
+                        runtime_service,
+                        export_manager,
+                    )
+                    handled.append(challenge.name)
+                except Exception as exc:
+                    failures.append({
+                        "challenge": challenge.name,
+                        "error": str(exc),
+                    })
 
-        killed = export_manager.kill_all_tunnel_processes()
-        export_manager.mark_all_exports_inactive()
+            killed = export_manager.kill_all_tunnel_processes()
+            export_manager.mark_all_exports_inactive()
 
         return {
             "ok": not failures,
@@ -184,43 +189,44 @@ async def restart_challenge(
     access: ApiAccessContext = Depends(get_api_access_context),
 ):
     try:
-        _, challenge_service, runtime_service, export_manager = get_services()
-        challenge = require_challenge_access(
-            challenge_service.get_challenge(name),
-            access,
-        )
-        remaining = runtime_service.check_restart_cooldown(name)
-
-        if remaining:
-            raise HTTPException(
-                status_code=429,
-                detail=f"Restart cooldown active. Wait {remaining}s",
+        config, challenge_service, runtime_service, export_manager = get_services()
+        with LifecycleLock(config):
+            challenge = require_challenge_access(
+                challenge_service.get_challenge(name),
+                access,
             )
+            remaining = runtime_service.check_restart_cooldown(name)
 
-        restart_all = not (container or provider)
-        do_container = restart_all or container
-        do_provider = restart_all or provider
+            if remaining:
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Restart cooldown active. Wait {remaining}s",
+                )
 
-        if do_provider:
-            export_manager.stop_all_exports(name)
+            restart_all = not (container or provider)
+            do_container = restart_all or container
+            do_provider = restart_all or provider
 
-        if do_container:
-            runtime_service.stop(name)
-            runtime_service.start(name)
-            challenge = challenge_service.get_challenge(name)
+            if do_provider:
+                export_manager.stop_all_exports(name)
 
-        if do_provider:
-            ports = challenge_service.list_challenge_ports(name)
-            exports, failures = _start_available_exports(
-                export_manager,
-                name,
-                challenge,
-                ports,
-            )
-        else:
-            exports, failures = [], []
+            if do_container:
+                runtime_service.stop(name)
+                runtime_service.start(name)
+                challenge = challenge_service.get_challenge(name)
 
-        runtime_service.update_restart_time(name)
+            if do_provider:
+                ports = challenge_service.list_challenge_ports(name)
+                exports, failures = _start_available_exports(
+                    export_manager,
+                    name,
+                    challenge,
+                    ports,
+                )
+            else:
+                exports, failures = [], []
+
+            runtime_service.update_restart_time(name)
 
         return {
             "message": f"Challenge {name} restarted",
@@ -242,45 +248,46 @@ async def extend_challenge(
 ):
     try:
         config, challenge_service, runtime_service, _ = get_services()
-        challenge = require_challenge_access(
-            challenge_service.get_challenge(name),
-            access,
-        )
-        runtime = runtime_service.status(name)
-        extend_availability = build_extend_availability(
-            runtime_service,
-            config,
-            challenge.name,
-            runtime,
-        )
-
-        cooldown = extend_availability["cooldown_remaining_seconds"]
-        if cooldown:
-            raise HTTPException(
-                status_code=429,
-                detail={
-                    "message": "Extend cooldown active",
-                    "remaining_seconds": cooldown,
-                    "extend": extend_availability,
-                },
+        with LifecycleLock(config):
+            challenge = require_challenge_access(
+                challenge_service.get_challenge(name),
+                access,
+            )
+            runtime = runtime_service.status(name)
+            extend_availability = build_extend_availability(
+                runtime_service,
+                config,
+                challenge.name,
+                runtime,
             )
 
-        if not extend_availability["can_extend"]:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "message": "Extend not yet eligible",
-                    "extend": extend_availability,
-                },
-            )
+            cooldown = extend_availability["cooldown_remaining_seconds"]
+            if cooldown:
+                raise HTTPException(
+                    status_code=429,
+                    detail={
+                        "message": "Extend cooldown active",
+                        "remaining_seconds": cooldown,
+                        "extend": extend_availability,
+                    },
+                )
 
-        runtime = runtime_service.extend_time(name)
-        extend_after = build_extend_availability(
-            runtime_service,
-            config,
-            challenge.name,
-            runtime,
-        )
+            if not extend_availability["can_extend"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "message": "Extend not yet eligible",
+                        "extend": extend_availability,
+                    },
+                )
+
+            runtime = runtime_service.extend_time(name)
+            extend_after = build_extend_availability(
+                runtime_service,
+                config,
+                challenge.name,
+                runtime,
+            )
 
         return {
             "message": f"Challenge {name} extended",

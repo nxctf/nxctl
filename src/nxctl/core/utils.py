@@ -4,6 +4,7 @@ import socket
 import os
 import signal
 import time
+import threading
 from typing import Optional
 from pathlib import Path
 import json
@@ -16,6 +17,19 @@ COLOR_YELLOW = "\033[33m"
 COLOR_BLUE = "\033[34m"
 COLOR_RESET = "\033[0m"
 COLOR_BOLD = "\033[1m"
+
+_LIFECYCLE_THREAD_LOCK_GUARD = threading.Lock()
+_LIFECYCLE_THREAD_LOCKS: dict[str, threading.RLock] = {}
+
+
+def _lifecycle_thread_lock(lock_file: Path) -> threading.RLock:
+    key = str(lock_file.resolve())
+    with _LIFECYCLE_THREAD_LOCK_GUARD:
+        lock = _LIFECYCLE_THREAD_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _LIFECYCLE_THREAD_LOCKS[key] = lock
+        return lock
 
 
 def green(text: str) -> str:
@@ -97,6 +111,124 @@ def get_runtime_compose_dir(config=None) -> Path:
     path = config.compose_dir.resolve()
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+class LockUnavailable(RuntimeError):
+    """Raised when a non-blocking runtime lock is already held."""
+
+
+class LifecycleLock:
+    """Cross-process lock for global lifecycle mutations."""
+
+    def __init__(self, config_or_path=None, blocking: bool = True):
+        if config_or_path is not None and hasattr(config_or_path, "locks_dir"):
+            locks_dir = get_challenge_locks_dir(config_or_path)
+        elif config_or_path is not None:
+            locks_dir = Path(config_or_path)
+            if locks_dir.name != "locks":
+                locks_dir = locks_dir / "locks"
+            locks_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            locks_dir = get_challenge_locks_dir()
+
+        self.lock_file = locks_dir / "lifecycle.lock"
+        self.blocking = blocking
+        self.fd = None
+        self.thread_lock = _lifecycle_thread_lock(self.lock_file)
+        self.thread_lock_acquired = False
+
+    def __enter__(self):
+        self.lock_file.parent.mkdir(parents=True, exist_ok=True)
+        if self.blocking:
+            self.thread_lock.acquire()
+            self.thread_lock_acquired = True
+        elif not self.thread_lock.acquire(blocking=False):
+            raise LockUnavailable("lifecycle lock is already held")
+        else:
+            self.thread_lock_acquired = True
+
+        self.fd = open(self.lock_file, "a+", encoding="utf-8")
+        try:
+            if os.name == "nt":
+                import msvcrt
+                self.fd.seek(0)
+                mode = msvcrt.LK_LOCK if self.blocking else msvcrt.LK_NBLCK
+                msvcrt.locking(self.fd.fileno(), mode, 1)
+            else:
+                import fcntl
+                flags = fcntl.LOCK_EX
+                if not self.blocking:
+                    flags |= fcntl.LOCK_NB
+                fcntl.flock(self.fd.fileno(), flags)
+
+            metadata = {
+                "pid": os.getpid(),
+                "hostname": socket.gethostname(),
+                "timestamp": int(time.time()),
+                "lock": "lifecycle",
+                "status": "acquired",
+            }
+            self.fd.seek(0)
+            self.fd.truncate()
+            json.dump(metadata, self.fd, ensure_ascii=True, indent=2)
+            self.fd.write("\n")
+            self.fd.flush()
+            os.fsync(self.fd.fileno())
+            return self
+        except (BlockingIOError, OSError) as exc:
+            try:
+                self.fd.close()
+            finally:
+                self.fd = None
+                if self.thread_lock_acquired:
+                    self.thread_lock.release()
+                    self.thread_lock_acquired = False
+            if not self.blocking:
+                raise LockUnavailable("lifecycle lock is already held") from exc
+            raise
+        except Exception:
+            try:
+                self.fd.close()
+            finally:
+                self.fd = None
+                if self.thread_lock_acquired:
+                    self.thread_lock.release()
+                    self.thread_lock_acquired = False
+            raise
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if not self.fd:
+            if self.thread_lock_acquired:
+                self.thread_lock.release()
+                self.thread_lock_acquired = False
+            return
+        try:
+            metadata = {
+                "pid": os.getpid(),
+                "hostname": socket.gethostname(),
+                "timestamp": int(time.time()),
+                "lock": "lifecycle",
+                "status": "released",
+            }
+            self.fd.seek(0)
+            self.fd.truncate()
+            json.dump(metadata, self.fd, ensure_ascii=True, indent=2)
+            self.fd.write("\n")
+            self.fd.flush()
+            os.fsync(self.fd.fileno())
+            if os.name == "nt":
+                import msvcrt
+                self.fd.seek(0)
+                msvcrt.locking(self.fd.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self.fd.fileno(), fcntl.LOCK_UN)
+        finally:
+            self.fd.close()
+            self.fd = None
+            if self.thread_lock_acquired:
+                self.thread_lock.release()
+                self.thread_lock_acquired = False
 
 
 def is_pid_alive(pid: int) -> bool:
