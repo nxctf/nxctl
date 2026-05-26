@@ -53,13 +53,20 @@ tunnels:
   cloudflare:
     enabled: true
     tunnel_name: nxctl
-    credentials_file: ~/.cloudflared/d9195db7-52a3-4fa9-a1f7-5ea7c6a4d47d.json
+    credentials_file: ~/.cloudflared/cb878f95-5b6e-4bc5-9f30-4a857352b9d3.json
     subdomains:
-      - 519abcb392.nxctf.my.id
-      - d269b17a7b.nxctf.my.id
-      - b8ed9102c0.nxctf.my.id
-      - c8f09c37aa.nxctf.my.id
-      - d0870760dc.nxctf.my.id
+      - nxctl-930273bb71.nxctf.my.id
+      - nxctl-d2508e37a4.nxctf.my.id
+      - nxctl-6f8923160d.nxctf.my.id
+      - nxctl-4a6319c7f0.nxctf.my.id
+      - nxctl-1de7d745c0.nxctf.my.id
+      - nxctl-894fcdbc34.nxctf.my.id
+      - nxctl-839bce0dc3.nxctf.my.id
+      - nxctl-9cf2518e64.nxctf.my.id
+      - nxctl-9b96011bd5.nxctf.my.id
+      - nxctl-d62e28b09d.nxctf.my.id
+      - nxctl-0be2498fce.nxctf.my.id
+      - nxctl-0a06ec2994.nxctf.my.id
 
   localtunnel:
     enabled: false
