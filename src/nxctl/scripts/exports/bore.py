@@ -60,6 +60,11 @@ class BoreProvider(ExportProvider):
         state = load_state_file(state_path, self._get_legacy_state_files(host_port))
         return state_path, state
 
+    def supports_protocol(self, protocol: str) -> bool:
+        if bool(getattr(self.config, "bore_only_tcp", True)) and protocol != PROTOCOL_TCP:
+            return False
+        return super().supports_protocol(protocol)
+
     def _extract_endpoint(self, text: str, protocol: str) -> tuple[str, int]:
         """Extract host and port from bore output."""
         match_listen = re.search(r"listening at ([a-zA-Z0-9.-]+):(\d+)", text)
@@ -117,6 +122,8 @@ class BoreProvider(ExportProvider):
         """
         if protocol not in self.supported_protocols:
             raise RuntimeError(f"Bore only supports HTTP and TCP protocols, got {protocol}")
+        if not self.supports_protocol(protocol):
+            raise RuntimeError("Bore HTTP exports are disabled; set tunnels.bore.only_tcp: false to allow HTTP")
 
         logger.info(f"Starting bore tunnel for {challenge_name}:{host_port}")
 

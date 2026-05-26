@@ -34,14 +34,18 @@ from nxctl.scripts.cli.render import (
 logger = logging.getLogger(__name__)
 
 
-def _provider_priority(service_type: str) -> list[str]:
+def _provider_priority(service_type: str, config=None) -> list[str]:
     if service_type == PROTOCOL_TCP:
         return [EXPORT_PROVIDER_PINGGY, EXPORT_PROVIDER_BORE]
-    return [EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_CLOUDFLARE, EXPORT_PROVIDER_LOCALTUNNEL, EXPORT_PROVIDER_BORE]
+
+    providers = [EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_CLOUDFLARE, EXPORT_PROVIDER_LOCALTUNNEL]
+    if not bool(getattr(config, "bore_only_tcp", True)):
+        providers.append(EXPORT_PROVIDER_BORE)
+    return providers
 
 
 def _start_with_fallback(export_manager, challenge_name: str, challenge, provider_name: str | None = None) -> tuple[str, str]:
-    providers = [provider_name] if provider_name else _provider_priority(challenge.service_type)
+    providers = [provider_name] if provider_name else _provider_priority(challenge.service_type, export_manager.config)
     last_error = None
 
     for provider in providers:
@@ -91,7 +95,7 @@ def _start_available_exports(export_manager, challenge_name: str, challenge, por
             exports, failures = export_manager.start_available_exports(
                 challenge_name,
                 port_challenge,
-                default_providers=_provider_priority(port_challenge.service_type),
+                default_providers=_provider_priority(port_challenge.service_type, export_manager.config),
             )
             all_exports.extend(exports)
             all_failures.extend(failures)

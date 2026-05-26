@@ -181,7 +181,11 @@ class ExportManager:
         """Return the existing protocol-based default tunnel providers."""
         if protocol == PROTOCOL_TCP:
             return [EXPORT_PROVIDER_PINGGY, EXPORT_PROVIDER_BORE]
-        return [EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_CLOUDFLARE, EXPORT_PROVIDER_LOCALTUNNEL, EXPORT_PROVIDER_BORE]
+
+        providers = [EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_CLOUDFLARE, EXPORT_PROVIDER_LOCALTUNNEL]
+        if not bool(getattr(self.config, "bore_only_tcp", True)):
+            providers.append(EXPORT_PROVIDER_BORE)
+        return providers
 
     def stop_export(self, challenge_name: str, provider_name: str, host_port: int = 0) -> bool:
         """Stop an export."""

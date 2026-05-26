@@ -74,3 +74,4 @@ tunnels:
   bore:
     enabled: true
     server: bore.pub
+    only_tcp: true

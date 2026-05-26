@@ -1,7 +1,9 @@
 """Runtime management service for Docker containers."""
 
+import copy
 import logging
 import random
+import socket
 from pathlib import Path
 from typing import Optional
 import yaml
@@ -242,6 +244,7 @@ class RuntimeService:
                 port not in used_ports
                 and port not in reserved_ports
                 and not is_port_in_use(port)
+                and self._host_port_available_for_bind(port)
             )
 
         if randomize:
@@ -256,6 +259,41 @@ class RuntimeService:
                 return port
 
         raise RuntimeError(f"Could not find free runtime port in range {start}-{end}")
+
+    def _host_port_available_for_bind(self, port: int) -> bool:
+        """Return True when Docker should be able to bind 0.0.0.0:port."""
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.bind(("0.0.0.0", int(port)))
+            return True
+        except OSError:
+            return False
+
+    def _is_port_bind_conflict(self, error: Exception) -> bool:
+        message = str(error).lower()
+        return any(
+            marker in message
+            for marker in (
+                "address already in use",
+                "failed to bind host port",
+                "port is already allocated",
+                "bind: address already in use",
+            )
+        )
+
+    def _cleanup_failed_compose_start(self, compose_path: Path, cwd: Path, challenge_name: str) -> None:
+        try:
+            run_docker_compose_down_with_cleanup(
+                compose_path,
+                cwd=cwd,
+                remove_orphans=True,
+            )
+        except Exception as cleanup_error:
+            logger.warning(
+                "Failed cleaning up partial Docker start for %s: %s",
+                challenge_name,
+                cleanup_error,
+            )
 
     def _parse_compose_port_spec(self, port_spec, service_name: str = "") -> Optional[dict]:
         """Parse a compose port spec enough to remap host ports."""
@@ -553,50 +591,74 @@ class RuntimeService:
                     "is_primary": True,
                 }]
 
-            allocated_ports = []
-            used_ports = set()
-            reserved_ports = self._running_host_ports_from_db(challenge.id)
-            for index, port_info in enumerate(configured_ports):
-                desired_port = self._allocate_runtime_port(used_ports, reserved_ports)
-                used_ports.add(desired_port)
-                allocated = dict(port_info)
-                allocated["host_port"] = desired_port
-                allocated["is_primary"] = bool(port_info.get("is_primary")) or index == 0
-                allocated_ports.append(allocated)
-
-            # Update ports in compose
-            if 'services' in compose_data:
-                for service_name, service_config in compose_data['services'].items():
-                    if isinstance(service_config, dict) and 'ports' in service_config:
-                        new_ports = []
-                        for port_spec in service_config['ports']:
-                            parsed = self._parse_compose_port_spec(port_spec, service_name)
-                            replacement = None
-                            if parsed:
-                                for port_info in allocated_ports:
-                                    if (
-                                        int(port_info["internal_port"]) == int(parsed["internal_port"])
-                                        and str(port_info.get("protocol") or "tcp") == str(parsed.get("protocol") or "tcp")
-                                    ):
-                                        replacement = self._format_compose_port_spec(port_spec, int(port_info["host_port"]))
-                                        break
-                            new_ports.append(replacement if replacement is not None else port_spec)
-                        service_config['ports'] = new_ports
-
             # Write modified compose to runtime state, outside the challenge cache.
             docker_compose_run = self._runtime_compose_file(challenge_name)
             docker_compose_run.parent.mkdir(parents=True, exist_ok=True)
-            with open(docker_compose_run, "w", encoding="utf-8") as f:
-                yaml.safe_dump(compose_data, f, default_flow_style=False, sort_keys=False)
-            if not docker_compose_run.exists():
-                raise RuntimeError(f"Generated compose file was not created: {docker_compose_run}")
+            start_attempts = max(1, int(getattr(self.config, "runtime_start_port_attempts", 5) or 5))
+            failed_ports: set[int] = set()
+            last_start_error: Exception | None = None
 
-            primary_port = int(allocated_ports[0]["host_port"])
-            self._replace_challenge_ports(challenge.id, allocated_ports)
-            challenge.service_port = primary_port
+            for attempt in range(1, start_attempts + 1):
+                compose_attempt = copy.deepcopy(compose_data)
+                allocated_ports = []
+                used_ports = set()
+                reserved_ports = self._running_host_ports_from_db(challenge.id) | failed_ports
+                for index, port_info in enumerate(configured_ports):
+                    desired_port = self._allocate_runtime_port(used_ports, reserved_ports)
+                    used_ports.add(desired_port)
+                    allocated = dict(port_info)
+                    allocated["host_port"] = desired_port
+                    allocated["is_primary"] = bool(port_info.get("is_primary")) or index == 0
+                    allocated_ports.append(allocated)
 
-            logger.info(f"Starting challenge: {challenge_name} on port {primary_port}")
-            run_docker_compose_up(docker_compose_run, cwd=challenge_dir, detach=True)
+                # Update ports in compose
+                if 'services' in compose_attempt:
+                    for service_name, service_config in compose_attempt['services'].items():
+                        if isinstance(service_config, dict) and 'ports' in service_config:
+                            new_ports = []
+                            for port_spec in service_config['ports']:
+                                parsed = self._parse_compose_port_spec(port_spec, service_name)
+                                replacement = None
+                                if parsed:
+                                    for port_info in allocated_ports:
+                                        if (
+                                            int(port_info["internal_port"]) == int(parsed["internal_port"])
+                                            and str(port_info.get("protocol") or "tcp") == str(parsed.get("protocol") or "tcp")
+                                        ):
+                                            replacement = self._format_compose_port_spec(port_spec, int(port_info["host_port"]))
+                                            break
+                                new_ports.append(replacement if replacement is not None else port_spec)
+                            service_config['ports'] = new_ports
+
+                with open(docker_compose_run, "w", encoding="utf-8") as f:
+                    yaml.safe_dump(compose_attempt, f, default_flow_style=False, sort_keys=False)
+                if not docker_compose_run.exists():
+                    raise RuntimeError(f"Generated compose file was not created: {docker_compose_run}")
+
+                primary_port = int(allocated_ports[0]["host_port"])
+                self._replace_challenge_ports(challenge.id, allocated_ports)
+                challenge.service_port = primary_port
+
+                try:
+                    logger.info(f"Starting challenge: {challenge_name} on port {primary_port}")
+                    run_docker_compose_up(docker_compose_run, cwd=challenge_dir, detach=True)
+                    break
+                except DockerError as start_error:
+                    last_start_error = start_error
+                    self._cleanup_failed_compose_start(docker_compose_run, challenge_dir, challenge_name)
+                    if self._is_port_bind_conflict(start_error) and attempt < start_attempts:
+                        failed_ports.update(int(port["host_port"]) for port in allocated_ports)
+                        logger.warning(
+                            "Port bind conflict starting %s on %s; retrying with a new port (%s/%s)",
+                            challenge_name,
+                            ", ".join(str(port) for port in sorted(failed_ports)),
+                            attempt,
+                            start_attempts,
+                        )
+                        continue
+                    raise
+            else:
+                raise DockerError(str(last_start_error or "Start failed"))
 
             # Set expiry
             expires_at = datetime.now() + timedelta(minutes=self.config.default_ttl_minutes)

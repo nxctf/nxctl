@@ -116,6 +116,7 @@ class CloudflareConfig(BaseModel):
 class BoreConfig(BaseModel):
     enabled: bool = True
     server: str = "bore.pub"
+    only_tcp: bool = True
 
     class Config:
         extra = "allow"
@@ -228,6 +229,10 @@ class Config(BaseModel):
     @property
     def bore_server(self) -> str:
         return self.tunnels.bore.server
+
+    @property
+    def bore_only_tcp(self) -> bool:
+        return self.tunnels.bore.only_tcp
 
     @property
     def local_port_start(self) -> int:
@@ -426,6 +431,7 @@ class Config(BaseModel):
             "enable_cloudflare": ("tunnels", "cloudflare", "enabled"),
             "enable_bore": ("tunnels", "bore", "enabled"),
             "bore_server": ("tunnels", "bore", "server"),
+            "bore_only_tcp": ("tunnels", "bore", "only_tcp"),
             "ngrok_tokens": ("tunnels", "ngrok", "tokens"),
             "ngrok_max_sessions_per_token": ("tunnels", "ngrok", "max_sessions_per_token"),
         }
