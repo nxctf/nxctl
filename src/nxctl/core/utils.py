@@ -236,6 +236,12 @@ def is_pid_alive(pid: int) -> bool:
     if pid <= 0:
         return False
     try:
+        import psutil
+        if psutil.Process(pid).status() == psutil.STATUS_ZOMBIE:
+            return False
+    except Exception:
+        pass
+    try:
         os.kill(pid, 0)
         return True
     except OSError:

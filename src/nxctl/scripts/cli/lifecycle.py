@@ -348,7 +348,10 @@ def cmd_down(args) -> int:
                 cleanup = ProgressReporter(indent=2)
                 with cleanup.step("Cleaning tunnel processes", "Tunnel cleanup complete"):
                     killed = export_manager.kill_all_tunnel_processes()
+                defunct_count = export_manager.count_defunct_tunnel_processes()
                 cleanup.ok(f"Tunnel processes killed: {killed}")
+                if defunct_count:
+                    cleanup.warn(f"Defunct tunnel entries skipped: {defunct_count} (already exited)")
                 with cleanup.step("Marking remaining exports inactive", "Export state cleanup complete"):
                     inactive_count = export_manager.mark_all_exports_inactive()
                 cleanup.ok(f"Export rows marked inactive: {inactive_count}")
@@ -368,7 +371,10 @@ def cmd_down(args) -> int:
             result = _stop_challenge_completely(args.name, challenge_service, runtime_service, export_manager, reporter)
             with reporter.step("Sweeping orphan tunnel processes", "Tunnel sweep complete"):
                 killed = export_manager.sweep_orphan_tunnel_processes()
+            defunct_count = export_manager.count_defunct_tunnel_processes()
             reporter.ok(f"Orphan tunnel processes killed: {killed}")
+            if defunct_count:
+                reporter.warn(f"Defunct tunnel entries skipped: {defunct_count} (already exited)")
             if _stop_result_has_errors(result):
                 reporter.warn("Down completed with warnings")
             print(f"{green(OK)} Down complete")

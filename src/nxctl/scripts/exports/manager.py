@@ -235,9 +235,11 @@ class ExportManager:
             return killed
 
         current_pid = os.getpid()
-        for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+        for proc in psutil.process_iter(["pid", "name", "cmdline", "status"]):
             try:
                 if proc.info["pid"] == current_pid:
+                    continue
+                if proc.info.get("status") == psutil.STATUS_ZOMBIE:
                     continue
 
                 cmdline = proc.info.get("cmdline") or []
@@ -258,6 +260,33 @@ class ExportManager:
                 logger.warning("Failed killing tunnel process PID %s: %s", proc.info.get("pid"), exc)
 
         return killed
+
+    def count_defunct_tunnel_processes(self) -> int:
+        """Return tunnel-like zombie process count.
+
+        Zombie/defunct entries have already exited; they cannot be killed
+        directly and disappear only when their parent reaps them.
+        """
+        try:
+            import psutil
+        except Exception:
+            return 0
+
+        count = 0
+        current_pid = os.getpid()
+        for proc in psutil.process_iter(["pid", "name", "cmdline", "status"]):
+            try:
+                if proc.info["pid"] == current_pid:
+                    continue
+                if proc.info.get("status") != psutil.STATUS_ZOMBIE:
+                    continue
+                if self._is_tunnel_process(proc.info.get("name") or "", proc.info.get("cmdline") or []):
+                    count += 1
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+            except Exception:
+                continue
+        return count
 
     def sweep_orphan_tunnel_processes(self, active_exports: Optional[list[dict]] = None) -> int:
         """Kill duplicate/orphan tunnel processes not represented by active export records."""
@@ -284,9 +313,11 @@ class ExportManager:
         seen_keys: set[tuple[str, int]] = set()
         killed = 0
 
-        for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+        for proc in psutil.process_iter(["pid", "name", "cmdline", "status"]):
             try:
                 pid = int(proc.info.get("pid") or 0)
+                if proc.info.get("status") == psutil.STATUS_ZOMBIE:
+                    continue
                 cmdline = proc.info.get("cmdline") or []
                 parsed = self._parse_tunnel_process(proc.info.get("name") or "", cmdline)
                 if not parsed:

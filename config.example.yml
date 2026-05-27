@@ -31,8 +31,8 @@ daemon:
 
 exports:
   auto_heal: true
-  endpoint_check_interval_seconds: 120
-  endpoint_check_timeout_seconds: 20
+  endpoint_check_interval_seconds: 150
+  endpoint_check_timeout_seconds: 30
 
 ports:
   local_start: 40000

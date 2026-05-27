@@ -287,6 +287,9 @@ def _list_tunnel_processes() -> str:
         for line in result.stdout.splitlines()
         if "pinggy" in line or "ngrok" in line or "lt --port" in line or "cloudflared" in line or "bore" in line
     ]
+    if any("<defunct>" in line for line in lines):
+        lines.append("")
+        lines.append("Note: <defunct> entries are already exited zombie processes; they disappear when their parent process reaps them.")
     return "\n".join(lines)
 
 
