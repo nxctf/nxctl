@@ -9,19 +9,19 @@ from nxctl.scripts.cli.base import (
     green,
     red,
     yellow,
-    blue,
     bold,
 )
 from nxctl.scripts.cli.render import (
-    BULLET,
     ERR,
     OK,
+    ProgressReporter,
     box,
     exports_table,
     format_datetime,
     format_duration,
     panel,
     status_text,
+    table,
     ttl_remaining,
 )
 
@@ -60,14 +60,22 @@ def cmd_sync(args) -> int:
             token=config.access_token,
         )
 
-        print(f"{blue('Syncing challenges...')}")
-        challenges = challenge_service.sync_challenges(git_repo)
-        print(f"{green(OK)} Synced {len(challenges)} challenges")
+        print(f"{bold('Syncing challenges')}")
+        reporter = ProgressReporter(indent=2)
+        reporter.ok(f"Repository: {config.github_repo}")
+        reporter.ok(f"Branch: {config.branch}")
+        with reporter.step("Fetching repository and discovering challenges"):
+            challenges = challenge_service.sync_challenges(git_repo)
+        reporter.ok(f"Synced {len(challenges)} challenges")
         stale_count = getattr(challenge_service, "last_sync_disabled_stale_count", 0)
         if stale_count:
-            print(f"{yellow('!')} Disabled {stale_count} stale challenge(s)")
-        for challenge in challenges:
-            print(f"  {BULLET} {challenge.name} ({_ports_text(challenge_service, challenge)})")
+            reporter.warn(f"Disabled {stale_count} stale challenge(s)")
+        if challenges:
+            rows = [
+                [challenge.name, _ports_text(challenge_service, challenge), challenge.path]
+                for challenge in challenges
+            ]
+            print(table(["Challenge", "Ports", "Path"], rows, [36, 42, 64]))
         return 0
     except GitError as e:
         print(f"{red(ERR)} Sync failed: {str(e)}")

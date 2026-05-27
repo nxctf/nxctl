@@ -2,6 +2,7 @@
 
 import logging
 import os
+import socket
 import time
 from types import SimpleNamespace
 from nxctl.core.constants import PROTOCOL_TCP, EXPORT_PROVIDER_PINGGY, EXPORT_PROVIDER_LOCALTUNNEL, EXPORT_PROVIDER_NGROK, EXPORT_PROVIDER_CLOUDFLARE, EXPORT_PROVIDER_BORE
@@ -15,9 +16,9 @@ from nxctl.scripts.cli.base import (
     bold,
 )
 from nxctl.scripts.cli.render import (
-    BULLET,
     ERR,
     OK,
+    ProgressReporter,
     box,
     exports_table,
     format_error,
@@ -32,6 +33,26 @@ from nxctl.scripts.cli.render import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_listen_port(host: str, port: int) -> None:
+    """Fail early if the requested API listen address is not bindable."""
+    last_error: Exception | None = None
+    try:
+        infos = socket.getaddrinfo(host, int(port), type=socket.SOCK_STREAM)
+    except socket.gaierror:
+        infos = socket.getaddrinfo("0.0.0.0", int(port), type=socket.SOCK_STREAM)
+
+    for family, socktype, proto, _, sockaddr in infos:
+        try:
+            with socket.socket(family, socktype, proto) as sock:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.bind(sockaddr)
+            return
+        except OSError as exc:
+            last_error = exc
+
+    raise RuntimeError(f"Cannot bind {host}:{port}: {last_error}")
 
 
 def _provider_priority(service_type: str, config=None) -> list[str]:
@@ -103,43 +124,121 @@ def _start_available_exports(export_manager, challenge_name: str, challenge, por
         return all_exports, all_failures
 
 
-def _stop_challenge_completely(name: str, challenge_service, runtime_service, export_manager):
+def _export_stop_label(export: dict, fallback_port: int | None = None) -> str:
+    provider = str(export.get("provider") or "export")
+    port = export.get("port") or fallback_port
+    pid = export.get("pid")
+    details = []
+    if port:
+        details.append(f"port {port}")
+    if pid:
+        details.append(f"pid {pid}")
+    return f"{provider} ({', '.join(details)})" if details else provider
+
+
+def _stop_exports_for_challenge(name: str, challenge, export_manager, reporter: ProgressReporter | None = None) -> list[dict]:
+    exports = export_manager.list_exports(name, check_health=False, latest_only=False)
+    if not exports:
+        if reporter:
+            reporter.skip("No active exports")
+        return []
+
+    stopped_exports = []
+    for export in exports:
+        provider = export.get("provider") or ""
+        host_port = int(export.get("port") or getattr(challenge, "service_port", 0) or 0)
+        label = _export_stop_label(export, host_port)
+        try:
+            if reporter:
+                with reporter.step(f"Stopping {label}", f"{provider or 'export'} stopped"):
+                    stopped = export_manager.stop_export(name, provider, host_port)
+            else:
+                stopped = export_manager.stop_export(name, provider, host_port)
+            export["stopped"] = stopped
+        except Exception as exc:
+            export["stopped"] = False
+            export["error"] = str(exc)
+            logger.error("Failed to stop export %s for %s: %s", provider, name, exc)
+        stopped_exports.append(export)
+    return stopped_exports
+
+
+def _stop_challenge_completely(name: str, challenge_service, runtime_service, export_manager, reporter: ProgressReporter | None = None):
     """Stop both exports and container for a challenge."""
     from nxctl.core.utils import ChallengeLock
+
+    result = {
+        "container_stopped": False,
+        "exports": [],
+        "late_exports": [],
+        "errors": [],
+    }
 
     with ChallengeLock(name, export_manager.config):
         challenge = challenge_service.get_challenge(name)
         if challenge:
             # Mark stopped first so the daemon cannot auto-heal tunnels during down.
             try:
-                runtime_service.mark_stopped(name)
+                if reporter:
+                    with reporter.step("Marking runtime stopped", "Runtime marked stopped"):
+                        runtime_service.mark_stopped(name)
+                else:
+                    runtime_service.mark_stopped(name)
             except Exception as e:
+                result["errors"].append(f"runtime mark stopped: {e}")
                 logger.warning(f"Failed to pre-mark runtime stopped for {name}: {e}")
 
             # 1. Stop container
             try:
-                runtime_service.stop(name)
+                if reporter:
+                    with reporter.step("Stopping Docker runtime", "Docker runtime stopped; compose cleanup complete"):
+                        runtime_service.stop(name)
+                else:
+                    runtime_service.stop(name)
+                result["container_stopped"] = True
                 logger.info(f"Stopped container for {name}")
             except Exception as e:
+                result["errors"].append(f"docker stop: {e}")
                 logger.error(f"Failed to stop container for {name}: {e}")
 
             # 2. Stop exports after runtime is no longer considered running.
-            for export in export_manager.stop_all_exports(name):
-                if export.get("error"):
-                    logger.error(f"Failed to stop export {export['provider']} for {name}: {export['error']}")
-                else:
-                    logger.info(f"Stopped {export['provider']} export for {name}")
+            result["exports"] = _stop_exports_for_challenge(name, challenge, export_manager, reporter)
 
             # One more pass catches tunnels created by an overlapping daemon tick.
-            for export in export_manager.stop_all_exports(name):
-                if export.get("error"):
-                    logger.error(f"Failed to stop late export {export['provider']} for {name}: {export['error']}")
+            try:
+                if reporter:
+                    with reporter.step("Checking for late exports", "Late export check complete"):
+                        late_exports = export_manager.list_exports(name, check_health=False, latest_only=False)
+                else:
+                    late_exports = export_manager.list_exports(name, check_health=False, latest_only=False)
+                if late_exports:
+                    result["late_exports"] = _stop_exports_for_challenge(name, challenge, export_manager, reporter)
+                elif reporter:
+                    reporter.skip("No late exports found")
+            except Exception as e:
+                result["errors"].append(f"late export check: {e}")
+                logger.error(f"Failed to stop late exports for {name}: {e}")
         else:
             # Fallback if challenge not in DB but maybe runtime exists
             try:
-                runtime_service.stop(name)
+                if reporter:
+                    with reporter.step("Stopping Docker runtime", "Docker runtime stopped; compose cleanup complete"):
+                        runtime_service.stop(name)
+                else:
+                    runtime_service.stop(name)
+                result["container_stopped"] = True
             except Exception:
                 pass
+    return result
+
+
+def _stop_result_has_errors(result: dict) -> bool:
+    if result.get("errors"):
+        return True
+    for export in [*result.get("exports", []), *result.get("late_exports", [])]:
+        if export.get("error"):
+            return True
+    return False
 
 
 def _cmd_up_one(name: str, challenge_service, runtime_service, export_manager) -> bool:
@@ -220,6 +319,7 @@ def cmd_down(args) -> int:
             if getattr(args, "all", False):
                 print(f"{blue('Stopping all challenges...')}")
                 stopped_count = 0
+                failed_count = 0
 
                 for challenge in challenge_service.list_challenges(include_disabled=True):
                     runtime = runtime_service.status(challenge.name)
@@ -227,20 +327,35 @@ def cmd_down(args) -> int:
                     if runtime.status != "running" and not exports:
                         continue
 
-                    print(f"{blue(f'  {BULLET}')} {challenge.name}")
-                    _stop_challenge_completely(
+                    print()
+                    print(f"{bold(challenge.name)}")
+                    reporter = ProgressReporter(indent=2)
+                    result = _stop_challenge_completely(
                         challenge.name,
                         challenge_service,
                         runtime_service,
                         export_manager,
+                        reporter,
                     )
                     stopped_count += 1
+                    if _stop_result_has_errors(result):
+                        failed_count += 1
+                        reporter.warn(f"{challenge.name} stopped with warnings")
+                    else:
+                        reporter.ok(f"{challenge.name} stopped")
 
-                killed = export_manager.kill_all_tunnel_processes()
-                export_manager.mark_all_exports_inactive()
+                print()
+                cleanup = ProgressReporter(indent=2)
+                with cleanup.step("Cleaning tunnel processes", "Tunnel cleanup complete"):
+                    killed = export_manager.kill_all_tunnel_processes()
+                cleanup.ok(f"Tunnel processes killed: {killed}")
+                with cleanup.step("Marking remaining exports inactive", "Export state cleanup complete"):
+                    inactive_count = export_manager.mark_all_exports_inactive()
+                cleanup.ok(f"Export rows marked inactive: {inactive_count}")
 
                 print(f"{green(OK)} Down complete")
                 print(f"  Challenges handled: {stopped_count}")
+                print(f"  Challenges with warnings: {failed_count}")
                 print(f"  Tunnel processes killed: {killed}")
                 return 0
 
@@ -248,8 +363,14 @@ def cmd_down(args) -> int:
                 print(f"{red(ERR)} Please provide a challenge name or use --all")
                 return 1
 
-            print(f"{blue('Stopping...')}")
-            _stop_challenge_completely(args.name, challenge_service, runtime_service, export_manager)
+            print(f"{bold(f'Stopping challenge: {args.name}')}")
+            reporter = ProgressReporter(indent=2)
+            result = _stop_challenge_completely(args.name, challenge_service, runtime_service, export_manager, reporter)
+            with reporter.step("Sweeping orphan tunnel processes", "Tunnel sweep complete"):
+                killed = export_manager.sweep_orphan_tunnel_processes()
+            reporter.ok(f"Orphan tunnel processes killed: {killed}")
+            if _stop_result_has_errors(result):
+                reporter.warn("Down completed with warnings")
             print(f"{green(OK)} Down complete")
             return 0
     except Exception as e:
@@ -278,33 +399,38 @@ def cmd_restart(args) -> int:
                 print(f"{red(ERR)} Challenge not found: {args.name}")
                 return 1
 
-            print(f"{blue('Restarting...')}")
+            print(f"{bold(f'Restarting challenge: {args.name}')}")
+            reporter = ProgressReporter(indent=2)
 
             # Handle Provider Stop
             if do_provider:
-                for export in export_manager.stop_all_exports(args.name):
-                    print(f"{blue(f'  {BULLET} Stopped export:')} {export['provider']}")
+                stopped_exports = _stop_exports_for_challenge(args.name, challenge, export_manager, reporter)
+                if any(export.get("error") for export in stopped_exports):
+                    reporter.warn("Some exports failed to stop; continuing restart")
 
             # Handle Container Restart
             if do_container:
-                runtime_service.stop(args.name)
-                runtime_service.start(args.name)
+                with reporter.step("Stopping Docker runtime", "Docker runtime stopped; compose cleanup complete"):
+                    runtime_service.stop(args.name)
+                with reporter.step("Starting Docker runtime", "Docker runtime started"):
+                    runtime_service.start(args.name)
                 # Re-fetch challenge for updated data
                 challenge = challenge_service.get_challenge(args.name)
-                print(f"{green(f'  {BULLET} Container restarted')}")
+                ports = challenge_service.list_challenge_ports(args.name)
+                reporter.ok(f"Allocated host ports: {_port_summary(ports)}")
 
             # Re-start provider if needed
             if do_provider:
                 ports = challenge_service.list_challenge_ports(args.name)
-                exports, failures = _start_available_exports(export_manager, args.name, challenge, ports)
-                for export in exports:
-                    print(f"{green(f'  {BULLET} Export restarted via')} {export['provider']} ({export['type']})")
-                    print(f"    URL: {export['url']}")
+                with reporter.step("Creating exports", "Export creation complete"):
+                    exports, failures = _start_available_exports(export_manager, args.name, challenge, ports)
+                print(box("Exports", exports_table(exports), width=116))
                 for failure in failures:
-                    print(f"{yellow(f'  {BULLET} Export failed:')} {failure['provider']} - {format_error(failure['error'])}")
+                    reporter.warn(f"{failure['provider']} export failed: {format_error(failure['error'])}")
 
             # 3. Update last_restart time
-            runtime_service.update_restart_time(args.name)
+            with reporter.step("Updating restart cooldown", "Restart cooldown updated"):
+                runtime_service.update_restart_time(args.name)
 
             print(f"{green(OK)} Restart complete")
             return 0
@@ -341,10 +467,20 @@ def cmd_status(args) -> int:
 
                     for name in expired:
                         logger.info(f"Auto-stopping expired challenge: {name}")
-                        _stop_challenge_completely(name, challenge_service, runtime_service, export_manager)
+                        if not watch_mode:
+                            step_warn(f"Expired runtime detected; stopping {name}")
+                        _stop_challenge_completely(
+                            name,
+                            challenge_service,
+                            runtime_service,
+                            export_manager,
+                            ProgressReporter(indent=2) if not watch_mode else None,
+                        )
 
                     # 2. Reconcile exports (mark dead PIDs)
-                    export_manager.reconcile_exports()
+                    reconciled = export_manager.reconcile_exports()
+                    if reconciled and not watch_mode:
+                        step_warn(f"Reconciled {reconciled} stale export/process record(s)")
             except LockUnavailable:
                 logger.info("Skipping status reconciliation because lifecycle lock is held")
 
@@ -513,14 +649,19 @@ def cmd_daemon(args) -> int:
         interval = getattr(args, "interval", None) or config.daemon_interval
         with_api = getattr(args, "with_api", False)
 
-        print(f"{blue('[daemon]')} Starting NXCTL Daemon")
-        print(f"{blue('[daemon]')} Interval: {interval}s")
+        print(f"{bold('Starting NXCTL daemon')}")
+        reporter = ProgressReporter(indent=2)
+        reporter.ok(f"Data dir: {config.data_dir}")
+        reporter.ok(f"Interval: {interval}s")
+        reporter.ok(f"Auto-heal: {'enabled' if config.auto_heal_exports else 'disabled'}")
 
         if with_api:
             import threading
             import uvicorn
             host = getattr(args, "host", "0.0.0.0")
             port = getattr(args, "port", 8000)
+            with reporter.step(f"Validating API listen port {host}:{port}", "API listen port available"):
+                _validate_listen_port(host, port)
 
             def run_api():
                 print(f"{blue('[api]')} Starting Web API on {host}:{port} (background)")
@@ -528,9 +669,12 @@ def cmd_daemon(args) -> int:
 
             api_thread = threading.Thread(target=run_api, daemon=True)
             api_thread.start()
+            reporter.ok("API background thread started")
 
+        reporter.ok("Daemon ready")
         print(f"{blue('[daemon]')} Monitoring challenges for auto-shutdown & auto-heal...")
         last_endpoint_check = 0.0
+        last_heartbeat = time.time()
 
         while True:
             try:
@@ -547,6 +691,10 @@ def cmd_daemon(args) -> int:
             except Exception as e:
                 print(f"{red('[daemon] Error:')} {e}")
 
+            if time.time() - last_heartbeat >= max(60, int(interval)):
+                print(f"{blue('[daemon]')} Heartbeat: monitoring active")
+                last_heartbeat = time.time()
+
             time.sleep(interval)
 
     except KeyboardInterrupt:
@@ -562,10 +710,17 @@ def cmd_api(args) -> int:
         host = getattr(args, "host", "0.0.0.0")
         port = getattr(args, "port", 8000)
 
-        print(f"{blue('[api]')} Starting NXCTL Web API on {host}:{port}")
-        print(f"{blue('[api]')} Swagger UI: http://{host}:{port}/docs")
+        print(f"{bold('Starting NXCTL Web API')}")
+        reporter = ProgressReporter(indent=2)
+        reporter.ok(f"Host: {host}")
+        reporter.ok(f"Port: {port}")
+        with reporter.step(f"Validating listen port {host}:{port}", "Listen port available"):
+            _validate_listen_port(host, port)
+        docs_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else host
+        reporter.ok(f"Swagger UI: http://{docs_host}:{port}/docs")
+        reporter.ok("Starting server; press Ctrl+C to stop")
 
-        uvicorn.run("nxctl_api:app", host=host, port=port, reload=False)
+        uvicorn.run("nxctl_api:app", host=host, port=port, reload=False, log_level="warning")
         return 0
     except KeyboardInterrupt:
         return 0

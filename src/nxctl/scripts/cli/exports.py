@@ -15,7 +15,18 @@ from nxctl.scripts.cli.base import (
     red,
     yellow,
 )
-from nxctl.scripts.cli.render import ERR, OK, box, exports_table, format_error, step_ok, step_warn, table
+from nxctl.scripts.cli.render import (
+    ERR,
+    OK,
+    ProgressReporter,
+    bold,
+    box,
+    exports_table,
+    format_error,
+    step_ok,
+    step_warn,
+    table,
+)
 from nxctl.scripts.cli.lifecycle import _start_available_exports, _start_with_fallback
 
 
@@ -45,8 +56,13 @@ def cmd_export(args) -> int:
                 print(f"\n{red(ERR)} Challenge not running\n")
                 return 1
 
+            print(f"{bold(f'Creating export: {challenge_name}')}")
+            reporter = ProgressReporter(indent=2)
+            reporter.ok("Runtime is running")
+
             if provider_name:
-                provider_name, endpoint = _start_with_fallback(export_manager, challenge_name, challenge, provider_name)
+                with reporter.step(f"Starting {provider_name} export", f"{provider_name} export started"):
+                    provider_name, endpoint = _start_with_fallback(export_manager, challenge_name, challenge, provider_name)
                 exports = [{
                     "provider": provider_name,
                     "type": "tunnel",
@@ -56,7 +72,8 @@ def cmd_export(args) -> int:
                 }]
                 failures = []
             else:
-                exports, failures = _start_available_exports(export_manager, challenge_name, challenge)
+                with reporter.step("Starting available exports", "Export creation complete"):
+                    exports, failures = _start_available_exports(export_manager, challenge_name, challenge)
 
         print()
         print(box("Exports", exports_table(exports), width=116))
@@ -83,11 +100,20 @@ def cmd_unexport(args) -> int:
                 print(f"\n{yellow('No active exports found')}\n")
                 return 0
 
+            print(f"{bold(f'Stopping exports: {args.name}')}")
+            reporter = ProgressReporter(indent=2)
+            failed = 0
             for export in exports:
-                export_manager.stop_export(args.name, export["provider"], export.get("port") or challenge.service_port)
-                step_ok(f"Stopped {export['provider']}")
+                provider = export["provider"]
+                host_port = int(export.get("port") or challenge.service_port)
+                label = f"{provider} ({host_port})" if host_port else provider
+                try:
+                    with reporter.step(f"Stopping {label}", f"{provider} stopped"):
+                        export_manager.stop_export(args.name, provider, host_port)
+                except Exception:
+                    failed += 1
         print()
-        return 0
+        return 1 if failed else 0
     except Exception as e:
         print(f"\n{red(ERR)} Unexport failed: {str(e)}\n")
         return 1
@@ -120,8 +146,21 @@ def cmd_test(args) -> int:
                 print(f"\n{red(ERR)} Challenge not found: {challenge_name}\n")
                 return 1
 
-            results = export_manager.test_tunnel_exports(challenge_name, mark_unhealthy=True)
-            killed = export_manager.sweep_orphan_tunnel_processes()
+            print(f"{bold('Testing tunnel endpoints')}")
+            reporter = ProgressReporter(indent=2)
+            timeout = float(getattr(config, "export_endpoint_check_timeout_seconds", 5) or 5)
+            queued_exports = [
+                export
+                for export in export_manager.list_exports(challenge_name, check_health=False)
+                if export.get("provider") != "base_ip" and export.get("type") != "direct"
+            ]
+            reporter.ok(f"Endpoints queued: {len(queued_exports)}")
+            reporter.ok(f"Timeout per endpoint: {timeout:g}s")
+
+            with reporter.step(f"Probing {len(queued_exports)} endpoint(s)", "Endpoint probe complete"):
+                results = export_manager.test_tunnel_exports(challenge_name, mark_unhealthy=True)
+            with reporter.step("Sweeping orphan tunnel processes", "Orphan tunnel sweep complete"):
+                killed = export_manager.sweep_orphan_tunnel_processes()
 
             healed_exports = []
             heal_failures = []
@@ -145,13 +184,16 @@ def cmd_test(args) -> int:
                     if not has_tunnel:
                         affected_names.add(challenge.name)
 
+            if affected_names:
+                reporter.ok(f"Auto-heal candidates: {len(affected_names)}")
             for name in sorted(affected_names):
                 try:
                     challenge = challenge_service.get_challenge(name)
                     if not challenge or runtime_service.status(name).status != "running":
                         continue
                     ports = challenge_service.list_challenge_ports(name)
-                    exports, failures = _start_available_exports(export_manager, name, challenge, ports)
+                    with reporter.step(f"Auto-healing exports for {name}", f"{name} auto-heal complete"):
+                        exports, failures = _start_available_exports(export_manager, name, challenge, ports)
                     for export in exports:
                         export["challenge"] = name
                     healed_exports.extend(exports)

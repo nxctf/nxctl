@@ -187,6 +187,45 @@ def step_error(text: str) -> None:
     print(f"{red(ERR)} {text}")
 
 
+def step_skip(text: str) -> None:
+    print(f"{gray('-')} {text}")
+
+
+class ProgressReporter:
+    """Compact progress output for blocking CLI operations.
+
+    In TTY mode this uses the existing spinner. In non-TTY/CI logs it prints a
+    deterministic "..." line before the operation and a final status line after.
+    """
+
+    def __init__(self, indent: int = 0):
+        self.prefix = " " * max(0, indent)
+
+    def ok(self, text: str) -> None:
+        print(f"{self.prefix}{green(OK)} {text}")
+
+    def warn(self, text: str) -> None:
+        print(f"{self.prefix}{yellow(WARN)} {text}")
+
+    def error(self, text: str) -> None:
+        print(f"{self.prefix}{red(ERR)} {text}")
+
+    def skip(self, text: str) -> None:
+        print(f"{self.prefix}{gray('-')} {text}")
+
+    @contextmanager
+    def step(self, label: str, success: str | None = None, failure: str | None = None):
+        try:
+            with spinner(f"{self.prefix}{label}"):
+                yield
+        except Exception as exc:
+            message = failure or f"{label} failed"
+            self.error(f"{message}: {format_error(exc)}")
+            raise
+        if success:
+            self.ok(success)
+
+
 @contextmanager
 def suppress_input():
     """Temporarily suppress terminal input and flush the buffer (Linux/Unix only)."""
