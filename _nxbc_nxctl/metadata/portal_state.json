@@ -2,21 +2,21 @@
   "instances": {
     "6i_Dj8RN5fwYypDnlSQc7S2m4_xPsGckb9UCOCLNAYE:04-convergence": {
       "chain_id": 31337,
-      "challenge_address": "0xF1f95D70344E1cef71c6b219545E1841FFffFaBD",
+      "challenge_address": "0x28C5C5A851519876c042Fcb9cdefC22E90f8e6AD",
       "challenge_id": "04-convergence",
-      "created_at": "2026-05-27T18:36:32.000007+00:00",
-      "expires_at": "2026-05-27T19:06:32.000007+00:00",
+      "created_at": "2026-05-27T19:18:03.702276+00:00",
+      "expires_at": "2026-05-27T19:48:03.702276+00:00",
       "factory_address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
-      "fund_tx": "abaebc913146dd23e6ab3c45546cae3ef877e9db10d4a7558ded605d1d509691",
+      "fund_tx": "6556903e8375defa8641b646ac3b61eebd48ecc38935ca095755be6652456431",
       "id": "6i_Dj8RN5fwYypDnlSQc7S2m4_xPsGckb9UCOCLNAYE:04-convergence",
-      "private_key": "0x4c01fc5c75a7e06b84f72363b9e235c9567cf5365f35be62618aef440237b13f",
+      "private_key": "0x7e9230815d8737d76323cd2225e7cb99e1ea19b8f9194bf5ff15770a5d91d6fa",
       "rpc_url": "http://localhost:8545",
       "session_id": "6i_Dj8RN5fwYypDnlSQc7S2m4_xPsGckb9UCOCLNAYE",
-      "setup_address": "0xeEBe00Ac0756308ac4AaBfD76c05c4F3088B8883",
+      "setup_address": "0x10C6E9530F1C1AF873a391030a1D9E8ed0630D26",
       "solved": true,
-      "spawn_tx": "736cb363ef4827173ba9b6c6160637b4a4548f5c81ee32bd6bbb379bb798689f",
+      "spawn_tx": "b0ed090175166cb5c76b694f6b1a2957e38b37d6ba5a58a67bb63bc200457f95",
       "user_id": "user-local",
-      "wallet_address": "0x60A3C511350B22a272F37cE2557f48376c041245"
+      "wallet_address": "0xeca4d804E067293A2956eC8195FbAEb5A58d58Ac"
     },
     "JxzB9CPR-kjKkuV49-68CabX1ZpHZV1AkJ1hlyQB1qI:04-convergence": {
       "chain_id": 31337,
@@ -206,6 +206,17 @@
       "user_id": "user-local",
       "zero_prefix": "000"
     },
+    "5SUjFd0Qq4W_QAQsaa7i0neoOdeQcFZX": {
+      "created_at": "2026-05-27T18:56:57.776687+00:00",
+      "digest": "000b5a81809d008d0c71480818a5c282e6a81f7217caba29a1ef9a1155ee4a29",
+      "expires_at": "2026-05-27T18:58:57.776673+00:00",
+      "prefix": "59cf55027c8c300f3f7457e5ea4f8045",
+      "solution": "2125",
+      "solved_at": "2026-05-27T18:56:57.816228+00:00",
+      "used": true,
+      "user_id": "user-local",
+      "zero_prefix": "000"
+    },
     "61CUN-btRwRs9FXA_1O5KNHCa47UrNHb": {
       "created_at": "2026-05-27T18:36:29.472430+00:00",
       "digest": "0000b315cef7d9e856a5af7c0be7d2635b1eb1870265746644e44faff5242c3d",
@@ -213,6 +224,28 @@
       "prefix": "c2e029253e2650d22ae0e21b28f0cf4e",
       "solution": "3780",
       "solved_at": "2026-05-27T18:36:29.627252+00:00",
+      "used": true,
+      "user_id": "user-local",
+      "zero_prefix": "000"
+    },
+    "7XET7PH3MnuMOM4HhUGHW9lxEr1ILgWw": {
+      "created_at": "2026-05-27T19:18:02.527546+00:00",
+      "digest": "0006dd50be391ee4206c5c659235c5c2d6db47e073cda4e538358282ca480b3a",
+      "expires_at": "2026-05-27T19:20:02.527532+00:00",
+      "prefix": "78025f9e49e86033d7aa58180a52a5ac",
+      "solution": "2041",
+      "solved_at": "2026-05-27T19:18:02.568977+00:00",
+      "used": true,
+      "user_id": "user-local",
+      "zero_prefix": "000"
+    },
+    "8YYksFVI-1DA9TBgsnWJnxY1x9pwF8I1": {
+      "created_at": "2026-05-27T19:19:45.822691+00:00",
+      "digest": "000ad227634f1798152bbe315a844f97a496d7e07d6a343f4975b7dc44ea460c",
+      "expires_at": "2026-05-27T19:21:45.822680+00:00",
+      "prefix": "cac14406dcee0a8ff6da125618ab7ce9",
+      "solution": "5678",
+      "solved_at": "2026-05-27T19:19:45.950270+00:00",
       "used": true,
       "user_id": "user-local",
       "zero_prefix": "000"
@@ -252,6 +285,17 @@
       "user_id": "user-locala",
       "zero_prefix": "000"
     },
+    "ERXsDHwhR5L8YPv0rSMe1_pv040mg_bj": {
+      "created_at": "2026-05-27T18:57:00.356377+00:00",
+      "digest": "0003570aa343ac3900564919900c03ba61f42617d31b19812898c56431a294f8",
+      "expires_at": "2026-05-27T18:59:00.356361+00:00",
+      "prefix": "9940122d79334e607b144af883fbe41c",
+      "solution": "459",
+      "solved_at": "2026-05-27T18:57:00.375693+00:00",
+      "used": true,
+      "user_id": "user-local",
+      "zero_prefix": "000"
+    },
     "EtuVpIgB8yVzEJjvqPUHC_vEfUtOdWMu": {
       "created_at": "2026-05-27T18:32:15.897322+00:00",
       "expires_at": "2026-05-27T18:34:15.897310+00:00",
@@ -260,12 +304,34 @@
       "user_id": "user-locala",
       "zero_prefix": "000"
     },
+    "FauxlXicsKFGQRjv-ZyLgF048GDvwHDf": {
+      "created_at": "2026-05-27T19:01:39.312134+00:00",
+      "digest": "000b4b89c9a7061a671fa2da3c602d2122e5383eaaea9fb7f7513353070d414f",
+      "expires_at": "2026-05-27T19:03:39.312121+00:00",
+      "prefix": "4144f9a4b8b96880311e504ef27cba41",
+      "solution": "6165",
+      "solved_at": "2026-05-27T19:01:39.473536+00:00",
+      "used": true,
+      "user_id": "user-local",
+      "zero_prefix": "000"
+    },
     "GZIcI6KMWfzeirA0zRn7VwHbt-Vh1IM0": {
       "created_at": "2026-05-27T18:32:47.167813+00:00",
       "expires_at": "2026-05-27T18:34:47.167800+00:00",
       "prefix": "9d19b0a07a9a20b451e266b4262fd3d0",
       "used": false,
       "user_id": "user-locala",
+      "zero_prefix": "000"
+    },
+    "GoMreXlzsDXpeki8MWWF2pCNN-TgX3-U": {
+      "created_at": "2026-05-27T18:56:54.775757+00:00",
+      "digest": "000cd3cb09eecbc5c2004c61da47e59e1e3f36908ec45123451facd86ddc1bb1",
+      "expires_at": "2026-05-27T18:58:54.775745+00:00",
+      "prefix": "57718b59394c68d46b3021922f578846",
+      "solution": "1515",
+      "solved_at": "2026-05-27T18:56:54.800350+00:00",
+      "used": true,
+      "user_id": "user-local",
       "zero_prefix": "000"
     },
     "HvuuB6fswwsYt8DIRQinel6jq42UJSEo": {
@@ -282,6 +348,17 @@
       "prefix": "4f0571b948b38984a223acb1fb65ab39",
       "used": false,
       "user_id": "user-locala",
+      "zero_prefix": "000"
+    },
+    "JjmeSm-GK6OS85eB2XO6OhUitugoMR_K": {
+      "created_at": "2026-05-27T18:57:03.359023+00:00",
+      "digest": "00086a00103fa5fd71888136ff4c01cc9f9ca7d3bac66f1243afb8100822f97a",
+      "expires_at": "2026-05-27T18:59:03.359011+00:00",
+      "prefix": "574e43b068baf3d5199b451e6d16057a",
+      "solution": "5755",
+      "solved_at": "2026-05-27T18:57:03.494258+00:00",
+      "used": true,
+      "user_id": "user-local",
       "zero_prefix": "000"
     },
     "K3z18a_V0P1mb1Ts1A2Mf1orEnjpRkVF": {
@@ -319,6 +396,17 @@
       "user_id": "user-local",
       "zero_prefix": "000"
     },
+    "MaynuwTXQW0l6EsScSejDwmNlOtwYFQ1": {
+      "created_at": "2026-05-27T19:19:38.360956+00:00",
+      "digest": "000a2a45ef10b4693c12592a6cc6d4d7cdd3ecbf3accccbb37ecbf38e037b3c4",
+      "expires_at": "2026-05-27T19:21:38.360941+00:00",
+      "prefix": "ae1d27cac12851bdf6484ff0ac6caa30",
+      "solution": "584",
+      "solved_at": "2026-05-27T19:19:38.384286+00:00",
+      "used": true,
+      "user_id": "user-local",
+      "zero_prefix": "000"
+    },
     "Ny7LeWi_5Eszk8shtyW-QaVb4HvAdeTf": {
       "created_at": "2026-05-27T18:32:46.817159+00:00",
       "expires_at": "2026-05-27T18:34:46.817146+00:00",
@@ -327,11 +415,33 @@
       "user_id": "user-locala",
       "zero_prefix": "000"
     },
+    "PuuEwGQe5Yuz52hJFwZtcSlHEOcye3GF": {
+      "created_at": "2026-05-27T19:19:37.184632+00:00",
+      "digest": "0004e94897e0823b286361938d4619f9c3cedb0bd25db822dddf9ffb32070a43",
+      "expires_at": "2026-05-27T19:21:37.184621+00:00",
+      "prefix": "db5d0f35966511d0fb9785f0aa67c3dc",
+      "solution": "2056",
+      "solved_at": "2026-05-27T19:19:37.230511+00:00",
+      "used": true,
+      "user_id": "user-local",
+      "zero_prefix": "000"
+    },
     "RCSsPLd9IFyTZpM-HceC2q8BLo_RCC1W": {
       "created_at": "2026-05-27T18:32:14.071602+00:00",
       "expires_at": "2026-05-27T18:34:14.071590+00:00",
       "prefix": "e115db571f0abe1a27e774a0c3fa7d94",
       "used": false,
+      "user_id": "user-local",
+      "zero_prefix": "000"
+    },
+    "RhSbdjzGcbOYVfSU-kAG44qq_WmuaSYS": {
+      "created_at": "2026-05-27T18:56:53.525300+00:00",
+      "digest": "000599accb2a3c9a3ce0d217cecec6612ee2f108dfeaec1c4b3444392cfc5ce9",
+      "expires_at": "2026-05-27T18:58:53.525288+00:00",
+      "prefix": "1197665dd093c5368f1cead15141dde7",
+      "solution": "9999",
+      "solved_at": "2026-05-27T18:56:53.776787+00:00",
+      "used": true,
       "user_id": "user-local",
       "zero_prefix": "000"
     },
@@ -362,6 +472,17 @@
       "user_id": "user-locala",
       "zero_prefix": "000"
     },
+    "SqoxAg3axicMYa1d09lZyMSXEWmyoX6M": {
+      "created_at": "2026-05-27T18:56:58.681043+00:00",
+      "digest": "0008bc14ac3f168c9c93481f60fca8b55af78ccc641ba49f176d58bacec78926",
+      "expires_at": "2026-05-27T18:58:58.681029+00:00",
+      "prefix": "1671ca8eb632c704468ed0d7ff939772",
+      "solution": "2319",
+      "solved_at": "2026-05-27T18:56:58.736252+00:00",
+      "used": true,
+      "user_id": "user-local",
+      "zero_prefix": "000"
+    },
     "T0kiTdtisXa1peOL4PbCbM52CRzUenWe": {
       "created_at": "2026-05-27T18:37:28.667004+00:00",
       "digest": "000d1246945dd834c713e6fb635a4027c9e5a83236dff5a1159593ac6fda3bb6",
@@ -388,6 +509,28 @@
       "prefix": "dc10142263e54110075f54321b521c05",
       "solution": "2021",
       "solved_at": "2026-05-27T18:34:58.198956+00:00",
+      "used": true,
+      "user_id": "user-local",
+      "zero_prefix": "000"
+    },
+    "Z1DIRGVsHeZKV9ReVHz6RexNQ1gP9YF1": {
+      "created_at": "2026-05-27T19:19:35.326600+00:00",
+      "digest": "0001e1536333b2c7057d7a15af0d23e59293edf7ba586e75388d05ea512cf6fc",
+      "expires_at": "2026-05-27T19:21:35.326587+00:00",
+      "prefix": "9c8406d0192415acb75a0bc3f3e402c4",
+      "solution": "704",
+      "solved_at": "2026-05-27T19:19:35.354367+00:00",
+      "used": true,
+      "user_id": "user-local",
+      "zero_prefix": "000"
+    },
+    "bYb7z3FZfbhphMqjpkzWPJMazPQrmBOQ": {
+      "created_at": "2026-05-27T19:19:27.485580+00:00",
+      "digest": "0009ede7f195c745960b637b92c752ec910108b3ebfadc818473b9f2b00560cd",
+      "expires_at": "2026-05-27T19:21:27.485564+00:00",
+      "prefix": "d65cfa75f3b27b8416cf92a85da188b6",
+      "solution": "194",
+      "solved_at": "2026-05-27T19:19:27.512349+00:00",
       "used": true,
       "user_id": "user-local",
       "zero_prefix": "000"
@@ -427,6 +570,17 @@
       "user_id": "user-local",
       "zero_prefix": "000"
     },
+    "fKNPVQEcUfpgYqitBo27DI_J27zQqTZB": {
+      "created_at": "2026-05-27T18:56:59.478253+00:00",
+      "digest": "000515ba5e414225bb4e244ef08e2caddbf26ed9b254ed715234190089fd027e",
+      "expires_at": "2026-05-27T18:58:59.478236+00:00",
+      "prefix": "f35500e8c6c555a010f177561b3c1fe7",
+      "solution": "1970",
+      "solved_at": "2026-05-27T18:56:59.514646+00:00",
+      "used": true,
+      "user_id": "user-local",
+      "zero_prefix": "000"
+    },
     "fpW7jqvluIonCXMuq0D_MAeoSb_6uXDA": {
       "created_at": "2026-05-27T18:27:22.540323+00:00",
       "expires_at": "2026-05-27T18:29:22.540313+00:00",
@@ -441,6 +595,17 @@
       "prefix": "edb07b0022253c6eee7c75a0f6daf6f6",
       "used": false,
       "user_id": "user-locala",
+      "zero_prefix": "000"
+    },
+    "g0NIN1SI_TjXNcXYlqHLGANKtlz5EFbJ": {
+      "created_at": "2026-05-27T19:19:39.133195+00:00",
+      "digest": "00058920050acf0a82089fc05ff8f1142291599a02299abd38fd69af4884c257",
+      "expires_at": "2026-05-27T19:21:39.133182+00:00",
+      "prefix": "eee127e891bfe53dcd4369b772d7d745",
+      "solution": "11868",
+      "solved_at": "2026-05-27T19:19:39.429340+00:00",
+      "used": true,
+      "user_id": "user-local",
       "zero_prefix": "000"
     },
     "gB0O2G0bxGzPn6ruuj-h5S-asGpcKU6F": {
@@ -470,6 +635,17 @@
       "user_id": "user-local",
       "zero_prefix": "000"
     },
+    "jFvf8BxpSH3QlkkJtCu2-Ba_eVYYxJjX": {
+      "created_at": "2026-05-27T19:19:30.430564+00:00",
+      "digest": "000472dad3b07ba1d8b077f9fbf36a8c38bc95ba26dac95e0807c9aa98687107",
+      "expires_at": "2026-05-27T19:21:30.430553+00:00",
+      "prefix": "4f2ce686cd487a074f2915699c2c78d0",
+      "solution": "8334",
+      "solved_at": "2026-05-27T19:19:30.631569+00:00",
+      "used": true,
+      "user_id": "user-local",
+      "zero_prefix": "000"
+    },
     "jU-r8muSVb-mURBqI_Efe9FyletXmvkR": {
       "created_at": "2026-05-27T18:32:15.149277+00:00",
       "expires_at": "2026-05-27T18:34:15.149265+00:00",
@@ -494,12 +670,56 @@
       "user_id": "user-locala",
       "zero_prefix": "000"
     },
+    "lMVikAZ27MEDgiRQHk2qEcp-DgC1G3oc": {
+      "created_at": "2026-05-27T18:57:02.229056+00:00",
+      "digest": "00023e3831135149a3de97d5b91532c14430a0b526ca4aa03163bf70a647f33f",
+      "expires_at": "2026-05-27T18:59:02.229046+00:00",
+      "prefix": "5f717353c397d7e29b901e13484f0f9b",
+      "solution": "7725",
+      "solved_at": "2026-05-27T18:57:02.409315+00:00",
+      "used": true,
+      "user_id": "user-local",
+      "zero_prefix": "000"
+    },
+    "lwvrRmpk3JDirH8vtqoJ6hptaGeZ_HaK": {
+      "created_at": "2026-05-27T18:56:56.455611+00:00",
+      "digest": "0002103e5c41a21c2d329353f53a154bdfde4110cbb3ac90d48c247369eb96c9",
+      "expires_at": "2026-05-27T18:58:56.455599+00:00",
+      "prefix": "ac86b889a03f03ce20c1956128933335",
+      "solution": "9708",
+      "solved_at": "2026-05-27T18:56:56.681607+00:00",
+      "used": true,
+      "user_id": "user-local",
+      "zero_prefix": "000"
+    },
+    "m7pHfNlgD84KwTFIAwJUhK_oqFCIlHRU": {
+      "created_at": "2026-05-27T18:57:01.339174+00:00",
+      "digest": "000d439f7d2fb12a9d0bd606ddd2b8a52986ee2e472cd963bc981ae7736efb94",
+      "expires_at": "2026-05-27T18:59:01.339160+00:00",
+      "prefix": "776593784de6774ce55a9dccf191ff79",
+      "solution": "12068",
+      "solved_at": "2026-05-27T18:57:01.636527+00:00",
+      "used": true,
+      "user_id": "user-local",
+      "zero_prefix": "000"
+    },
     "oAFg-vg9wPmcsbD8PDP-Krgua-V4Bl-d": {
       "created_at": "2026-05-27T18:32:15.713268+00:00",
       "expires_at": "2026-05-27T18:34:15.713256+00:00",
       "prefix": "88531eae937304bc9707d04328528ab3",
       "used": false,
       "user_id": "user-locala",
+      "zero_prefix": "000"
+    },
+    "r0O5TZfntO9b07IGEQV9RTh9ZfLXzt0e": {
+      "created_at": "2026-05-27T18:56:55.272404+00:00",
+      "digest": "0002c25a2a73f0fd57549bc85fb2e706e9db9d66ed186fe324f640510d8468aa",
+      "expires_at": "2026-05-27T18:58:55.272393+00:00",
+      "prefix": "122db66cc9b2a7e5e85cd18a3a8f925c",
+      "solution": "1408",
+      "solved_at": "2026-05-27T18:56:55.297588+00:00",
+      "used": true,
+      "user_id": "user-local",
       "zero_prefix": "000"
     },
     "r9nBg6xYhjiFpjM_4MYKikOXoIgsbvSb": {
@@ -519,6 +739,28 @@
       "prefix": "7946249d1b919bd591dcb2d8a275dfd9",
       "used": false,
       "user_id": "user-locala",
+      "zero_prefix": "000"
+    },
+    "tbKVOv4MU4qZVdhleruS64Q1K2mc6il1": {
+      "created_at": "2026-05-27T19:18:00.450332+00:00",
+      "digest": "0008ebeebcbd0a5c8e8f27deead3d0913617dea2856d1b9a91250c2aea7b7563",
+      "expires_at": "2026-05-27T19:20:00.449612+00:00",
+      "prefix": "0c163092d8081186c26ccd5318f20a4b",
+      "solution": "9259",
+      "solved_at": "2026-05-27T19:18:00.773400+00:00",
+      "used": true,
+      "user_id": "user-local",
+      "zero_prefix": "000"
+    },
+    "vZO7aQcrHwdZCE6CEw-0TVT1M7WuGy4H": {
+      "created_at": "2026-05-27T19:19:40.306877+00:00",
+      "digest": "000048ee4f05f37d1abd795d61ecd8d6fc0496e641082f5f5b2147acb365630e",
+      "expires_at": "2026-05-27T19:21:40.306867+00:00",
+      "prefix": "dff3b498e11f4c747105f903f9a5472b",
+      "solution": "2021",
+      "solved_at": "2026-05-27T19:19:40.354001+00:00",
+      "used": true,
+      "user_id": "user-local",
       "zero_prefix": "000"
     },
     "w951fwFjJSkbgzoM3ywig2gQNr9tzmU6": {
@@ -560,8 +802,8 @@
   "sessions": {
     "6i_Dj8RN5fwYypDnlSQc7S2m4_xPsGckb9UCOCLNAYE": {
       "created_at": "2026-05-27T18:36:29.644899+00:00",
-      "expires_at": "2026-05-28T18:37:28.723516+00:00",
-      "updated_at": "2026-05-27T18:37:28.723529+00:00",
+      "expires_at": "2026-05-28T19:19:45.969630+00:00",
+      "updated_at": "2026-05-27T19:19:45.969639+00:00",
       "user_id": "user-local"
     },
     "JxzB9CPR-kjKkuV49-68CabX1ZpHZV1AkJ1hlyQB1qI": {
@@ -579,9 +821,9 @@
   },
   "solves": {
     "6i_Dj8RN5fwYypDnlSQc7S2m4_xPsGckb9UCOCLNAYE:04-convergence": {
-      "setup_address": "0xeEBe00Ac0756308ac4AaBfD76c05c4F3088B8883",
-      "solved_at": "2026-05-27T18:37:15.473426+00:00",
-      "wallet_address": "0x60A3C511350B22a272F37cE2557f48376c041245"
+      "setup_address": "0x10C6E9530F1C1AF873a391030a1D9E8ed0630D26",
+      "solved_at": "2026-05-27T19:19:34.102520+00:00",
+      "wallet_address": "0xeca4d804E067293A2956eC8195FbAEb5A58d58Ac"
     },
     "user-local1111:04-convergence": {
       "setup_address": "0x603E1BD79259EbcbAaeD0c83eeC09cA0B89a5bcC",
