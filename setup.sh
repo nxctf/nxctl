@@ -17,6 +17,9 @@ if [[ $# -gt 0 ]]; then
 fi
 
 case "$COMMAND" in
+  nxbcl)
+    exec bash "$PROJECT_DIR/nxbcl/setup.sh" "$@"
+    ;;
   install)
     if [[ "$NXSCRIPT_HELP" -eq 1 ]]; then
       exec bash "$PROJECT_DIR/scripts/install.sh" --help
@@ -30,20 +33,26 @@ case "$COMMAND" in
     exec bash "$PROJECT_DIR/scripts/uninstall.sh" "$@"
     ;;
   help|--help|-h)
-    echo "Usage: $0 [install|uninstall]"
+    echo "Usage: $0 [install|uninstall|nxbcl]"
     echo
     echo "Preferred command after install:"
     echo "  nxscript update"
     echo "  nxscript delete"
     echo "  nxscript service start|stop|restart|status"
+    echo
+    echo "NXBCL launcher:"
+    echo "  $0 nxbcl install"
+    echo "  $0 nxbcl frontend-install"
+    echo "  $0 nxbcl frontend-build"
+    echo "  $0 nxbcl uninstall"
     ;;
   *)
     if [[ "$NXSCRIPT_HELP" -eq 1 ]]; then
-      echo "Usage: $0 [install|uninstall]"
+      echo "Usage: $0 [install|uninstall|nxbcl]"
       exit 0
     fi
     echo "Unknown setup command: $COMMAND" >&2
-    echo "Usage: $0 [install|uninstall]" >&2
+    echo "Usage: $0 [install|uninstall|nxbcl]" >&2
     exit 1
     ;;
 esac

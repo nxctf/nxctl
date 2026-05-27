@@ -2,8 +2,11 @@
 HPone
 _tmp
 /data/
+/data_nxbcl/
 /exports/
 /config.yml
+/nxbcl/frontend/node_modules/
+/nxbcl/launcher/static/
 
 # Python
 __pycache__/
@@ -61,4 +64,4 @@ docker-compose.run.yml
 *.sqlite
 *.sqlite3
 
-artifacts
+_nxbc*
