@@ -24,7 +24,7 @@ router = APIRouter()
 
 
 @router.post("/up/{name:path}")
-async def up_challenge(
+def up_challenge(
     name: str,
     access: ApiAccessContext = Depends(get_api_access_context),
 ):
@@ -48,7 +48,7 @@ async def up_challenge(
 
 
 @router.post("/up", dependencies=[Depends(verify_admin_secret)])
-async def up_all_challenges(all: bool = False):
+def up_all_challenges(all: bool = False):
     if not all:
         raise HTTPException(
             status_code=400,
@@ -105,7 +105,7 @@ async def up_all_challenges(all: bool = False):
 
 
 @router.post("/down/{name:path}", dependencies=[Depends(verify_admin_secret)])
-async def down_challenge(name: str):
+def down_challenge(name: str):
     try:
         config, challenge_service, runtime_service, export_manager = get_services()
         with LifecycleLock(config):
@@ -124,7 +124,7 @@ async def down_challenge(name: str):
 
 
 @router.post("/down", dependencies=[Depends(verify_admin_secret)])
-async def down_all_challenges(all: bool = False):
+def down_all_challenges(all: bool = False):
     if not all:
         raise HTTPException(
             status_code=400,
@@ -182,7 +182,7 @@ async def down_all_challenges(all: bool = False):
 
 
 @router.post("/restart/{name:path}")
-async def restart_challenge(
+def restart_challenge(
     name: str,
     container: bool = False,
     provider: bool = False,
@@ -242,7 +242,7 @@ async def restart_challenge(
 
 
 @router.post("/extend/{name:path}")
-async def extend_challenge(
+def extend_challenge(
     name: str,
     access: ApiAccessContext = Depends(get_api_access_context),
 ):

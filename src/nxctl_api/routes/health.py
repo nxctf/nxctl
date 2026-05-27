@@ -14,7 +14,7 @@ router = APIRouter()
 
 
 @router.get("/test")
-async def test_exports(
+def test_exports(
     name: str | None = None,
     access: ApiAccessContext = Depends(get_api_access_context),
 ):
@@ -62,8 +62,8 @@ async def test_exports(
 
 
 @router.post("/test")
-async def post_test_exports(
+def post_test_exports(
     name: str | None = None,
     access: ApiAccessContext = Depends(get_api_access_context),
 ):
-    return await test_exports(name, access)
+    return test_exports(name, access)

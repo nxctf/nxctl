@@ -54,7 +54,7 @@ def _status_payload(config, runtime_service, export_manager, challenge):
 
 
 @router.get("/status")
-async def get_all_status(
+def get_all_status(
     name: list[str] | None = Query(default=None),
     access: ApiAccessContext = Depends(get_api_access_context),
 ):
@@ -104,7 +104,7 @@ async def get_all_status(
 
 
 @router.get("/inspect/{name:path}")
-async def inspect_challenge(
+def inspect_challenge(
     name: str,
     access: ApiAccessContext = Depends(get_api_access_context),
 ):

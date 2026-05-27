@@ -19,7 +19,7 @@ router = APIRouter()
 
 
 @router.get("/challenges")
-async def list_challenges(
+def list_challenges(
     access: ApiAccessContext = Depends(get_api_access_context),
 ):
     _, challenge_service, runtime_service, _ = get_services()
@@ -42,7 +42,7 @@ async def list_challenges(
 
 
 @router.get("/list")
-async def list_challenges_basic(
+def list_challenges_basic(
     access: ApiAccessContext = Depends(get_api_access_context),
 ):
     _, challenge_service, _, _ = get_services()
@@ -56,7 +56,7 @@ async def list_challenges_basic(
 
 
 @router.post("/sync", dependencies=[Depends(verify_admin_secret)])
-async def sync_challenges():
+def sync_challenges():
     try:
         config, challenge_service, _, _ = get_services()
         git_repo = GitRepository(
