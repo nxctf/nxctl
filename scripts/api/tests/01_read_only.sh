@@ -9,6 +9,7 @@ api_test_1() {
   assert_no_secret_leak "GET /list"
   make_request "GET /challenges" client GET "/challenges" "200"
   make_request "GET /status" client GET "/status" "200"
+  make_request "GET /status?name=${CHALLENGE}" client GET "/status?name=${CHALLENGE_ENC}" "200,404"
   make_request "GET /inspect/${CHALLENGE}" client GET "/inspect/${CHALLENGE_ENC}" "200,404"
   make_request "GET /test?name=${CHALLENGE}" client GET "/test?name=${CHALLENGE_ENC}" "200,404"
 }
