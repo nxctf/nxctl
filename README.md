@@ -466,3 +466,72 @@ cloudflared tunnel run edge
 # cloudflared tunnel delete edge
 cloudflared tunnel create nxctl
 ```
+
+## Blockchain Challenge Example
+```bash
+cd _tmp/nxctl-blockchain-poc
+docker compose up --build
+
+ls metadata/metadata.json
+cat metadata/metadata.json
+# {
+#   "kind": "blockchain_rpc",
+#   "protocol": "http",
+#   "chain_family": "evm",
+#   "chain_id": 31337,
+#   "rpc_url": "http://localhost:8545",
+#   "rpc_port": 8545,
+#   "contract_address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+#   "abi": "artifacts/SampleChallenge.abi.json",
+#   "deployment_mode": "static",
+#   "isolation_scope": "shared_chain"
+# }
+
+curl -s http://localhost:8545 \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}'
+# {"jsonrpc":"2.0","id":1,"result":"0x7a69"}
+
+curl -s http://localhost:8545 \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"eth_getCode","params":["0x5FbDB2315678afecb367f032d93F642f64180aa3","latest"]}'
+# {"jsonrpc":"2.0","id":1,"result":"0x6080604052348015600e575f80fd5b5060043610603a575f3560e01c806364d98f6e14603e578063890d6908146058578063c1b8411a146060575b5f80fd5b5f5460ff1660405190151581526020015b60405180910390f35b605e609d565b005b60867f000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb9226681565b6040516001600160a01b039091168152602001604f565b5f805460ff1916600117815560405133917f0bc74ec5d8b1557c26ff0939198ee528d125a4f4d198e1c680170389ec1389a291a256fea264697066735822122094a75712bdfa73445c8ce1233155ee1a02db2265c6361e675595f5a309a2012464736f6c63430008180033"}
+
+curl -s http://localhost:8545 \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"eth_call","params":[{"to":"0x5FbDB2315678afecb367f032d93F642f64180aa3","data":"0x64d98f6e"},"latest"]}'
+# {"jsonrpc":"2.0","id":1,"result":"0x0000000000000000000000000000000000000000000000000000000000000000"}
+
+docker compose exec anvil cast send \
+  --rpc-url http://rpc:8545 \
+  --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+  0x5FbDB2315678afecb367f032d93F642f64180aa3 \
+  "solve()"
+# blockHash            0x5ac474e81a52733dcd58db32bffcf90a9897e7af9899d68388ebf236b32ffe16
+# blockNumber          2
+# contractAddress
+# cumulativeGasUsed    44472
+# effectiveGasPrice    1
+# from                 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+# gasUsed              44472
+# logs                 [{"address":"0x5fbdb2315678afecb367f032d93f642f64180aa3","topics":["0x0bc74ec5d8b1557c26ff0939198ee528d125a4f4d198e1c680170389ec1389a2","0x000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266"],"data":"0x","blockHash":"0x5ac474e81a52733dcd58db32bffcf90a9897e7af9899d68388ebf236b32ffe16","blockNumber":"0x2","blockTimestamp":"0x6a17080f","transactionHash":"0x53feaa9d96bd42018db37634ce58f5c3f31a4bd6c8084a74c35d6112d8b6d281","transactionIndex":"0x0","logIndex":"0x0","removed":false}]
+# logsBloom            0x00000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000040000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000000000000000040000000200000000000000000000000002000000002000000000000000000000000000000000000000000000000000000000000000000000000000000
+# root
+# status               1 (success)
+# transactionHash      0x53feaa9d96bd42018db37634ce58f5c3f31a4bd6c8084a74c35d6112d8b6d281
+# transactionIndex     0
+# type                 2
+# blobGasPrice         1
+# blobGasUsed
+# to                   0x5FbDB2315678afecb367f032d93F642f64180aa3
+
+curl -s http://localhost:8545 \
+-H "Content-Type: application/json" \
+-d '{"jsonrpc":"2.0","id":1,"method":"eth_call","params":[{"to":"0x5FbDB2315678afecb367f032d93F642f64180aa3","data":"0x64d98f6e"},"latest"]}'
+# {"jsonrpc":"2.0","id":1,"result":"0x0000000000000000000000000000000000000000000000000000000000000001"}
+
+curl -s http://localhost:8545 \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"anvil_reset","params":[]}'
+# {"jsonrpc": "2.0", "id": 1, "error": {"code": -32601, "message": "Method not allowed"}}
+```

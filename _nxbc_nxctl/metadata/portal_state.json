@@ -1,0 +1,24 @@
+{
+  "faucet": {
+    "0x8ed914fa9f78673979a552dd104926f82f8b0d2a": {
+      "amount_eth": "0.2",
+      "funded_at": "2026-05-27T17:48:57.212750+00:00",
+      "tx_hash": "b40f97f9bbdebcdbdc52dadaad6fe7ccc7906a4e20bd49d9a28aff89a3678a4b",
+      "user_id": "user-local",
+      "wallet_address": "0x8ed914fA9f78673979A552DD104926f82F8b0d2A"
+    }
+  },
+  "nonces": {},
+  "solves": {
+    "user-local:04-convergence": {
+      "solved_at": "2026-05-27T17:49:14.060694+00:00",
+      "wallet_address": "0x8ed914fA9f78673979A552DD104926f82F8b0d2A"
+    }
+  },
+  "wallets": {
+    "user-local": {
+      "bound_at": "2026-05-27T17:49:13.968949+00:00",
+      "wallet_address": "0x8ed914fA9f78673979A552DD104926f82F8b0d2A"
+    }
+  }
+}
