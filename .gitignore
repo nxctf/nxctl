@@ -3,7 +3,7 @@ HPone
 _tmp
 /data/
 /exports/
-config.yml
+/config.yml
 
 # Python
 __pycache__/

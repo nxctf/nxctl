@@ -54,15 +54,17 @@ tunnels:
 
   cloudflare:
     enabled: false
-    # To use Named Tunnels, fill these out. Otherwise, TryCloudflare (Quick Tunnel) will be used.
-    tunnel_name: ${CLOUDFLARE_TUNNEL_NAME}
-    credentials_file: ${CLOUDFLARE_CREDENTIALS_FILE}
-    subdomains:
-      - ${CLOUDFLARE_SUBDOMAIN_A}
-      - ${CLOUDFLARE_SUBDOMAIN_B}
-      - ${CLOUDFLARE_SUBDOMAIN_C}
-      - ${CLOUDFLARE_SUBDOMAIN_D}
-      - ${CLOUDFLARE_SUBDOMAIN_E}
+    # Leave these empty to use TryCloudflare (Quick Tunnel).
+    # Fill direct config values below to use Cloudflare Named Tunnels.
+    tunnel_name: ""
+    credentials_file: ""
+    subdomains: []
+    # Example:
+    # tunnel_name: edge
+    # credentials_file: ~/.cloudflared/2b865acf-2600-4e55-bfc9-d48294f6b6a4.json
+    # subdomains:
+    #   - a.nxctf.my.id
+    #   - b.nxctf.my.id
 
   pinggy:
     enabled: true
@@ -70,6 +72,7 @@ tunnels:
     # tokens:
     #   - ${PINGGY_TOKEN_1}
     #   - ${PINGGY_TOKEN_2}
+    # Tokens is optional for Pinggy
 
   bore:
     enabled: true

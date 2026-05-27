@@ -165,11 +165,14 @@ EOF
     info "Installing bash completion..."
     bash "$PROJECT_DIR/scripts/completion/install.sh"
 
-    if [ ! -f "$PROJECT_DIR/config.yml" ]; then
-        if [ -f "$PROJECT_DIR/config.example.yml" ]; then
-            cp "$PROJECT_DIR/config.example.yml" "$PROJECT_DIR/config.yml"
-            warn "Created default config.yml from template."
-        fi
+    if [ ! -f "$PROJECT_DIR/config.yml" ] && [ -f "$PROJECT_DIR/config.example.yml" ]; then
+        cp "$PROJECT_DIR/config.example.yml" "$PROJECT_DIR/config.yml"
+        warn "Created default config.yml from config.example.yml."
+    fi
+
+    if [ ! -f "$PROJECT_DIR/.env" ] && [ -f "$PROJECT_DIR/.env.example" ]; then
+        cp "$PROJECT_DIR/.env.example" "$PROJECT_DIR/.env"
+        warn "Created default .env from .env.example."
     fi
 
     info "Installing/updating daemon service..."
