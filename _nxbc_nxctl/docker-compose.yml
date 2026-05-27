@@ -54,7 +54,8 @@ services:
       CHALLENGE_NAME: "04-convergence"
       FACTORY_CONTRACT: "contracts/ChallengeFactory.sol:ChallengeFactory"
       SETUP_CONTRACT: "contracts/Setup.sol:Setup"
-      CHECKER: "ChallengeFactory.isSolved(address)"
+      SPAWN_FUNCTION: "spawnFor(address)"
+      CHECKER: "Setup.isSolved()"
     volumes:
       - ./:/workspace
     entrypoint: ["/bin/sh", "/workspace/scripts/deploy.sh"]

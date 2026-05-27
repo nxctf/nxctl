@@ -3,13 +3,16 @@
 
 Required env:
   RPC_URL       public/local RPC URL, for example http://localhost:8545
-  PRIVKEY       player private key
+  PRIVKEY       launcher-generated player private key
+
+Optional env:
+  SETUP_ADDR    launcher-generated setup contract address
   FACTORY_ADDR  deployed ChallengeFactory address from metadata/metadata.json
 
 Example:
   export RPC_URL=http://localhost:8545
-  export PRIVKEY=0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d
-  export FACTORY_ADDR=$(python3 -c "import json; print(json.load(open('metadata/metadata.json'))['factory_address'])")
+  export PRIVKEY=0x...
+  export SETUP_ADDR=0x...
   python3 solver.py
 """
 
@@ -161,6 +164,19 @@ def load_factory_addr() -> str:
     sys.exit(1)
 
 
+def load_setup_addr(factory, player: str) -> str:
+    env_value = os.getenv("SETUP_ADDR", "").strip()
+    if env_value:
+        return env_value
+
+    setup_addr = factory.functions.setupOf(player).call()
+    if int(setup_addr, 16) == 0:
+        print("missing env: SETUP_ADDR, and factory has no setup for this wallet", file=sys.stderr)
+        print("run the launcher first: POST /launch/04-convergence", file=sys.stderr)
+        sys.exit(1)
+    return setup_addr
+
+
 def main():
     rpc_url = require_env("RPC_URL")
     private_key = normalize_private_key(require_env("PRIVKEY"))
@@ -180,20 +196,7 @@ def main():
     print(f"player:   {player}")
     print(f"factory:  {factory_addr}")
 
-    setup_addr = factory.functions.setupOf(player).call()
-    if int(setup_addr, 16) == 0:
-        print("[*] spawning player setup")
-        receipt = send_tx(
-            w3,
-            account,
-            factory.functions.spawn().build_transaction({"from": player}),
-        )
-        print(f"spawn tx: {receipt.transactionHash.hex()}")
-        setup_addr = factory.functions.setupOf(player).call()
-    else:
-        print("[*] player setup already exists")
-
-    setup_addr = Web3.to_checksum_address(setup_addr)
+    setup_addr = Web3.to_checksum_address(load_setup_addr(factory, player))
     setup = w3.eth.contract(address=setup_addr, abi=SETUP_ABI)
     challenge_addr = Web3.to_checksum_address(setup.functions.challenge().call())
     challenge = w3.eth.contract(address=challenge_addr, abi=CHALLENGE_ABI)
@@ -228,7 +231,7 @@ def main():
     )
     print(f"transcend tx: {receipt.transactionHash.hex()}")
 
-    solved = factory.functions.isSolved(player).call()
+    solved = setup.functions.isSolved().call()
     ascended = challenge.functions.ascended().call()
     print(f"ascended: {ascended}")
     print(f"solved:   {solved}")

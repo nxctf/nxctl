@@ -10,6 +10,7 @@ CHALLENGE_NAME="${CHALLENGE_NAME:-blockchain-challenge}"
 FACTORY_CONTRACT="${FACTORY_CONTRACT:-contracts/ChallengeFactory.sol:ChallengeFactory}"
 SETUP_CONTRACT="${SETUP_CONTRACT:-}"
 CHECKER="${CHECKER:-ChallengeFactory.isSolved(address)}"
+SPAWN_FUNCTION="${SPAWN_FUNCTION:-spawnFor(address)}"
 
 if [ -z "$DEPLOYER_PRIVATE_KEY" ]; then
   echo "DEPLOYER_PRIVATE_KEY is required" >&2
@@ -70,7 +71,7 @@ cat > metadata/metadata.json <<EOF
   "setup_abi": ${SETUP_ABI_JSON},
   "deployment_mode": "static_factory",
   "isolation_scope": "shared_chain_per_player_contract",
-  "spawn_function": "spawn()",
+  "spawn_function": "${SPAWN_FUNCTION}",
   "checker": "${CHECKER}"
 }
 EOF

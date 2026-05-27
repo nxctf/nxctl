@@ -4,14 +4,22 @@ pragma solidity ^0.8.20;
 import "./Challenge.sol";
 
 contract Setup {
+    address public immutable player;
     Challenge public challenge;
     mapping(bytes32 => bool) public chronicles;
 
-    constructor() {
-        challenge = new Challenge(address(this));
+    constructor(address player_) {
+        require(player_ != address(0), "invalid player");
+        player = player_;
+        challenge = new Challenge(address(this), player_);
     }
 
-    function sealDestiny(bytes calldata manifestation) external {
+    modifier onlyPlayer() {
+        require(msg.sender == player, "not player");
+        _;
+    }
+
+    function sealDestiny(bytes calldata manifestation) external onlyPlayer {
         (bytes[] memory threads, bytes[] memory anchors, uint256[][] memory weights) =
             abi.decode(manifestation, (bytes[], bytes[], uint256[][]));
 
@@ -36,7 +44,7 @@ contract Setup {
         chronicles[seal] = true;
     }
 
-    function bindPact(bytes calldata agreement) external {
+    function bindPact(bytes calldata agreement) external onlyPlayer {
         (SoulFragment[] memory fragments,,, address binder, address witness) =
             abi.decode(agreement, (SoulFragment[], bytes32, uint32, address, address));
 
@@ -55,6 +63,6 @@ contract Setup {
     }
 
     function isSolved() external view returns (bool) {
-        return challenge.ascended() != address(0);
+        return challenge.ascended() == player;
     }
 }

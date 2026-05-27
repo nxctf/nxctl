@@ -60,3 +60,5 @@ docker-compose.run.yml
 *.db
 *.sqlite
 *.sqlite3
+
+artifacts

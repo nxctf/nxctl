@@ -13,6 +13,7 @@ struct SoulFragment {
 
 contract Challenge {
     ISetup public setup;
+    address public immutable player;
 
     address public ascended;
 
@@ -34,18 +35,24 @@ contract Challenge {
     event ConvergenceAchieved(address indexed seeker, uint256 points);
     event Transcended(address indexed ascended);
 
-    constructor(address setup_) {
+    constructor(address setup_, address player_) {
         setup = ISetup(setup_);
+        player = player_;
     }
 
-    function registerSeeker() external {
+    modifier onlyPlayer() {
+        require(msg.sender == player, "not player");
+        _;
+    }
+
+    function registerSeeker() external onlyPlayer {
         require(!seekers[msg.sender], "Already a seeker");
         seekers[msg.sender] = true;
         seekerSince[msg.sender] = block.timestamp;
         emit SeekerRegistered(msg.sender, block.timestamp);
     }
 
-    function offerDestiny(bytes calldata manifestation) external {
+    function offerDestiny(bytes calldata manifestation) external onlyPlayer {
         require(seekers[msg.sender], "Not a seeker");
 
         bytes32 seal = keccak256(abi.encodePacked(msg.sender, manifestation));
@@ -70,7 +77,7 @@ contract Challenge {
         emit DestinyOffered(msg.sender, power);
     }
 
-    function harvestSouls(bytes calldata agreement) external {
+    function harvestSouls(bytes calldata agreement) external onlyPlayer {
         require(seekers[msg.sender], "Not a seeker");
 
         bytes32 seal = keccak256(abi.encodePacked(msg.sender, agreement));
@@ -92,7 +99,7 @@ contract Challenge {
         emit SoulsHarvested(msg.sender, essence);
     }
 
-    function achieveConvergence(bytes calldata destinyData, bytes calldata soulData) external {
+    function achieveConvergence(bytes calldata destinyData, bytes calldata soulData) external onlyPlayer {
         require(seekers[msg.sender], "Not a seeker");
 
         bytes32 destinySeal = keccak256(abi.encodePacked(msg.sender, destinyData));
@@ -120,7 +127,7 @@ contract Challenge {
         emit ConvergenceAchieved(msg.sender, points);
     }
 
-    function transcend(bytes calldata truth) external {
+    function transcend(bytes calldata truth) external onlyPlayer {
         require(seekers[msg.sender], "Not a seeker");
         require(ascended == address(0), "Another has already ascended");
 

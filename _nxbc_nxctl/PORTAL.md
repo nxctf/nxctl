@@ -1,38 +1,42 @@
-# 04 Convergence Local Portal
+# NXBC Launcher POC
 
-This is a local NXCTF-like backend for the blockchain POC. It proves the safer flag flow:
+This is a TCP1P-style launcher for `04-convergence`.
 
 ```text
-user session -> bound wallet -> Factory.isSolved(wallet) -> return flag
+user session -> launch -> temporary wallet + setup -> solve -> check -> flag
 ```
 
-The real flag is only in the backend service environment. It is not stored in the contract, ABI, public metadata, or frontend.
+The real flag stays in the backend service environment. It is not stored in the contract, ABI, metadata, or frontend.
 
 ## Start
 
+Because the contracts changed for launcher mode, recreate the compose stack:
+
 ```sh
+docker compose down
 docker compose up --build
 ```
 
 Services:
 
 ```text
-http://localhost:8545  public filtered JSON-RPC
-http://localhost:8080  local portal/checker API
+http://localhost:8545  filtered shared JSON-RPC
+http://localhost:8080  launcher web UI
 ```
+
+Open `http://localhost:8080`, enter a local user id, click Launch, then copy the solver env from the page.
+
+The web UI solves a small launcher challenge first, then receives a session cookie. `X-User-Id` is only a local label in this POC; launch/check do not trust user id alone.
 
 ## End-To-End Test
 
 From `_nxbc_nxctl`:
 
 ```sh
-python3 scripts/test_portal_flow.
-
-rm metadata/portal_state.json
-python3 scripts/test_portal_flow.py
+RESET_PORTAL_STATE=1 python3 scripts/test_portal_flow.py
 ```
 
-The script generates a wallet if `PRIVKEY` is not set, binds it to `USER_ID=user-local`, asks the portal faucet for ETH, runs `solver.py`, then calls the checker endpoint. Expected final output includes:
+The script calls Launch, receives a disposable wallet/private key/setup address, runs `solver.py`, then calls Check. Expected final output includes:
 
 ```json
 {
@@ -41,86 +45,85 @@ The script generates a wallet if `PRIVKEY` is not set, binds it to `USER_ID=user
 }
 ```
 
-If you previously ran the old team-based prototype and see `wallet is already bound to another user`, reset the local POC state:
-
-```sh
-RESET_PORTAL_STATE=1 python3 scripts/test_portal_flow.py
-```
-
 ## Manual Flow
 
-In this POC, `X-User-Id` simulates the logged-in user session. In real NXCTF, the backend should get this from auth/session, not from a user-controlled header.
+In this POC, `/challenge` and `/solution` simulate TCP1P-style launcher auth and set a random `nxbc_session` cookie. In real NXCTF, backend code should get `user_id` from the auth/session, not from a user-controlled header.
 
-Get challenge metadata:
+Get a launcher challenge:
 
 ```sh
-curl -s http://localhost:8080/api/challenges/04-convergence \
+curl -s -c cookies.txt -b cookies.txt -X POST http://localhost:8080/challenge \
   -H "X-User-Id: user-a"
 ```
 
-Generate or choose a wallet:
+Find a `solution` where:
 
-```sh
-python3 scripts/new_wallet.py
-export WALLET_ADDR=0x...
-export PRIVKEY=0x...
+```text
+sha256(prefix + ":" + solution) starts with zero_prefix
 ```
 
-Request a bind nonce:
+Submit the solution:
 
 ```sh
-curl -s http://localhost:8080/api/challenges/04-convergence/wallet/nonce \
+curl -s -c cookies.txt -b cookies.txt -X POST http://localhost:8080/solution \
   -H "Content-Type: application/json" \
   -H "X-User-Id: user-a" \
-  -d "{\"wallet_address\":\"$WALLET_ADDR\"}"
+  -d '{"challenge_token":"...","solution":"..."}'
 ```
 
-Sign the returned `message` with the wallet private key, then bind:
+Launch:
 
 ```sh
-curl -s http://localhost:8080/api/challenges/04-convergence/wallet/bind \
-  -H "Content-Type: application/json" \
-  -H "X-User-Id: user-a" \
-  -d "{\"wallet_address\":\"$WALLET_ADDR\",\"signature\":\"0x...\"}"
+curl -s -X POST http://localhost:8080/launch/04-convergence \
+  -b cookies.txt
 ```
 
-For manual testing, the Python end-to-end script is easier because it signs this message for you.
+Response:
 
-Request faucet funding:
-
-```sh
-curl -s -X POST http://localhost:8080/api/challenges/04-convergence/faucet \
-  -H "X-User-Id: user-a"
+```json
+{
+  "rpc_url": "http://localhost:8545",
+  "chain_id": 31337,
+  "wallet_address": "0x...",
+  "private_key": "0x...",
+  "setup_contract": "0x...",
+  "challenge_contract": "0x...",
+  "expires_in": 1800
+}
 ```
 
-Run the solver with the same wallet:
+Run solver with the returned values:
 
 ```sh
 export RPC_URL=http://localhost:8545
+export PRIVKEY=0x...
+export SETUP_ADDR=0x...
 python3 solver.py
 ```
 
 Check and receive the flag:
 
 ```sh
-curl -s -X POST http://localhost:8080/api/challenges/04-convergence/check \
-  -H "X-User-Id: user-a"
+curl -s -X POST http://localhost:8080/check/04-convergence \
+  -b cookies.txt
 ```
 
 ## What This Proves
 
 - One shared RPC endpoint can support many users.
-- Each user binds one wallet with a signature.
-- The checker does not trust a wallet address submitted during check.
-- The checker reads the wallet bound to the logged-in user.
-- The contract remains the public source of solved state.
-- The backend remains the private source of the flag.
+- The launcher generates disposable per-user wallets.
+- The launcher funds wallets with test ETH.
+- The launcher creates one setup contract per user with `Factory.spawnFor(wallet)`.
+- The checker reads the setup owned by the logged-in user.
+- The backend returns the flag only after `Setup.isSolved()` is true.
 
 ## What Is Still POC-Only
 
-- `X-User-Id` is fake auth.
-- State is JSON in `metadata/portal_state.json`, not a database.
-- Faucet key is a public Anvil dev key.
+- `/challenge` and `/solution` are local fake auth.
+- `X-User-Id` is accepted only when requesting/submitting the local launcher challenge.
+- State is JSON in `metadata/portal_state.json`, not Postgres.
+- The temporary private key is stored in local JSON for POC repeatability.
+- The funder key is a public Anvil dev key.
 - CORS is open for local testing.
-- No rate limiting beyond one faucet record per wallet.
-- No production secret manager.
+- TTL is recorded but expired on access only.
+- There is no production secret manager or rate limiter yet.

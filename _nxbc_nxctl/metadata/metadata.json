@@ -11,6 +11,6 @@
   "setup_abi": "artifacts/Setup.abi.json",
   "deployment_mode": "static_factory",
   "isolation_scope": "shared_chain_per_player_contract",
-  "spawn_function": "spawn()",
-  "checker": "ChallengeFactory.isSolved(address)"
+  "spawn_function": "spawnFor(address)",
+  "checker": "Setup.isSolved()"
 }
