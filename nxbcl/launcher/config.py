@@ -32,12 +32,19 @@ class NXBCLConfig:
         # Resolve config path
         self.config_path = Path(config_path).resolve()
         if not self.config_path.exists():
-            # Try walking up or check in root workspace directories
-            self.config_path = Path("nxbcl.yml").resolve()
-            if not self.config_path.exists():
-                self.config_path = Path("nxbcl/config.yml").resolve()
+            # Try package-relative path
+            pkg_relative = (Path(__file__).resolve().parent.parent / "nxbcl.yml").resolve()
+            if pkg_relative.exists():
+                self.config_path = pkg_relative
+            else:
+                # Try walking up or check in root workspace directories
+                self.config_path = Path("nxbcl.yml").resolve()
                 if not self.config_path.exists():
-                    self.config_path = Path("config.yml").resolve()
+                    self.config_path = Path("nxbcl/nxbcl.yml").resolve()
+                    if not self.config_path.exists():
+                        self.config_path = Path("nxbcl/config.yml").resolve()
+                        if not self.config_path.exists():
+                            self.config_path = Path("config.yml").resolve()
 
         if self.config_path.exists():
             with open(self.config_path, "r", encoding="utf-8") as f:

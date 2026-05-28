@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="${NXBCL_BIN_DIR:-$HOME/.local/bin}"
 COMMAND="${1:-help}"
 
 case "$COMMAND" in
   install)
-    python3 -m pip install -r "$PROJECT_DIR/nxbcl/requirements.txt"
+    python3 -m pip install -r "$PROJECT_DIR/requirements.txt"
     mkdir -p "$BIN_DIR"
     cat > "$BIN_DIR/nxbcl" <<EOF
 #!/usr/bin/env bash
-cd "$PROJECT_DIR"
+cd "$PROJECT_DIR/.."
 exec python3 -m nxbcl.cli.main "\$@"
 EOF
     chmod +x "$BIN_DIR/nxbcl"
     echo "Installed nxbcl command to $BIN_DIR/nxbcl"
     echo "Frontend source is in nxbcl/frontend."
-    echo "Build it with: cd $PROJECT_DIR/nxbcl/frontend && npm install && npm run build"
+    echo "Build it with: cd $PROJECT_DIR/frontend && npm install && npm run build"
     case ":$PATH:" in
       *":$BIN_DIR:"*) ;;
       *)
@@ -28,11 +28,11 @@ EOF
     esac
     ;;
   frontend-install)
-    cd "$PROJECT_DIR/nxbcl/frontend"
+    cd "$PROJECT_DIR/frontend"
     npm install
     ;;
   frontend-build)
-    cd "$PROJECT_DIR/nxbcl/frontend"
+    cd "$PROJECT_DIR/frontend"
     npm run build
     ;;
   uninstall)
