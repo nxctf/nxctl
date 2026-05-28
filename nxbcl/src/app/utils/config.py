@@ -1,18 +1,20 @@
 import os
 import yaml
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 try:
     from nxctl.core.config import substitute_env_vars
 except ImportError:
     # Fallback env substitution if not running in nxctl path
     import re
+
     def substitute_env_vars(value: Any) -> Any:
         if isinstance(value, str):
             def replace_env(match):
                 var_name = match.group(1)
                 return os.environ.get(var_name, "")
+
             return re.sub(r"\$\{([A-Z0-9_]+)\}", replace_env, value)
         if isinstance(value, dict):
             return {k: substitute_env_vars(v) for k, v in value.items()}
@@ -26,25 +28,23 @@ try:
     load_dotenv()
 except ImportError:
     pass
-
 class NXBCLConfig:
-    def __init__(self, config_path: str = "nxbcl.yml"):
+    def __init__(self, config_path: str = "config.yml"):
         # Resolve config path
         self.config_path = Path(config_path).resolve()
+
         if not self.config_path.exists():
-            # Try package-relative path
-            pkg_relative = (Path(__file__).resolve().parent.parent / "nxbcl.yml").resolve()
+            # Try config next to this package
+            pkg_relative = (Path(__file__).resolve().parent.parent / "config.yml").resolve()
             if pkg_relative.exists():
                 self.config_path = pkg_relative
             else:
-                # Try walking up or check in root workspace directories
-                self.config_path = Path("nxbcl.yml").resolve()
+                # Try common workspace locations
+                self.config_path = Path("config.yml").resolve()
                 if not self.config_path.exists():
-                    self.config_path = Path("nxbcl/nxbcl.yml").resolve()
+                    self.config_path = Path("nxbcl/config.yml").resolve()
                     if not self.config_path.exists():
-                        self.config_path = Path("nxbcl/config.yml").resolve()
-                        if not self.config_path.exists():
-                            self.config_path = Path("config.yml").resolve()
+                        self.config_path = Path("config.yml").resolve()
 
         if self.config_path.exists():
             with open(self.config_path, "r", encoding="utf-8") as f:
@@ -54,12 +54,15 @@ class NXBCLConfig:
 
         # Substitute environment variables
         self.raw = substitute_env_vars(raw)
+
         # If 'nxbcl' key is present, use it; otherwise the whole raw dictionary is nxbcl config
         self.nxbcl_raw = self.raw.get("nxbcl", self.raw)
+
         self.enabled = True
-        app_cfg = self.nxbcl_raw.get("app", {})
-        self.data_dir = app_cfg.get("data_dir", self.nxbcl_raw.get("data_dir", "./data_nxbcl"))
-        self.panel_base_ip = app_cfg.get("base_ip", "")
+
+        self.data_dir = self.nxbcl_raw.get("data_dir", "./data_nxbcl")
+        self.panel_base_ip = ""
+
         git = self.nxbcl_raw.get("git", {})
         self.git_repo = git.get("repo", "")
         self.git_branch = git.get("branch", "main")
@@ -76,14 +79,18 @@ class NXBCLConfig:
         challenge_cfg = self.nxbcl_raw.get("challenge", {})
         self.challenge_ttl_seconds = int(challenge_cfg.get("ttl_seconds", 600))
         self.challenge_extend_seconds = int(challenge_cfg.get("extend_seconds", 300))
-        self.challenge_extend_threshold_seconds = int(challenge_cfg.get("extend_threshold_seconds", 300))
+        self.challenge_extend_threshold_seconds = int(
+            challenge_cfg.get("extend_threshold_seconds", 300)
+        )
 
         # RPC TTL configuration
         rpc_cfg = self.nxbcl_raw.get("rpc", {})
-        self.rpc_base_ip = rpc_cfg.get("base_ip", self.panel_base_ip)
+        self.rpc_base_ip = rpc_cfg.get("base_ip", "")
         self.rpc_ttl_seconds = int(rpc_cfg.get("ttl_seconds", 1200))
         self.rpc_extend_seconds = int(rpc_cfg.get("extend_seconds", 600))
-        self.rpc_extend_threshold_seconds = int(rpc_cfg.get("extend_threshold_seconds", 600))
+        self.rpc_extend_threshold_seconds = int(
+            rpc_cfg.get("extend_threshold_seconds", 600)
+        )
 
         limits = self.nxbcl_raw.get("limits", {})
         self.max_concurrent = int(limits.get("max_concurrent", 5))
@@ -133,17 +140,20 @@ class NXBCLConfig:
     def rpc_base_url(self) -> str:
         return self._normalize_base_url(self.rpc_base_ip)
 
+
 # Global config helper
 _config_instance = None
 
-def get_nxbcl_config(config_path: str = "nxbcl.yml") -> NXBCLConfig:
+def get_nxbcl_config(config_path: str = "config.yml") -> NXBCLConfig:
     global _config_instance
     if _config_instance is None:
         _config_instance = NXBCLConfig(config_path)
     return _config_instance
 
+
 import time
 from contextlib import contextmanager
+
 
 @contextmanager
 def file_lock(lock_path: Path, timeout: float = 10.0):
@@ -156,7 +166,9 @@ def file_lock(lock_path: Path, timeout: float = 10.0):
             break
         except FileExistsError:
             if time.time() - start_time > timeout:
-                raise TimeoutError(f"Could not acquire lock on {lock_path} within {timeout} seconds")
+                raise TimeoutError(
+                    f"Could not acquire lock on {lock_path} within {timeout} seconds"
+                )
             time.sleep(0.05)
     try:
         yield

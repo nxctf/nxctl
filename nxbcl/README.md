@@ -23,7 +23,7 @@ nxbcl/
   app.py               # Main entry point (CLI router)
   setup.sh             # Install/build helper
   requirements.txt
-  nxbcl.yml            # Configuration (gitignored)
+  config.yml           # Configuration (gitignored)
 
   src/
     app/
@@ -109,7 +109,7 @@ Check config paths:
 nxbcl doctor
 ```
 
-Sync the configured challenge repo into `data_nxbcl/chall`:
+Sync the configured challenge repo into `nxbcl/data/chall`:
 
 ```bash
 nxbcl sync
@@ -136,7 +136,7 @@ nxbcl down
 nxbcl ps --kill
 ```
 
-`up` brings up the shared Docker Compose stack under `data_nxbcl/chall` and
+`up` brings up the shared Docker Compose stack under `nxbcl/data/chall` and
 initializes the RPC lease state used by the frontend countdown.
 
 `ps` prints compose status and the remaining RPC lease time when state exists.
@@ -156,7 +156,7 @@ http://localhost:8080/docs
 For Phase 1, the blockchain runtime is still run from the challenge repo itself:
 
 ```bash
-cd data_nxbcl/chall
+cd nxbcl/data/chall
 docker compose up -d
 docker compose run --rm forge scripts/deploy_one.sh 02-convergence
 ```
@@ -169,13 +169,12 @@ cloudflared tunnel --url http://localhost:8545
 
 The public HTTPS URL becomes the `RPC_URL` returned to players.
 
-If you are exposing the panel or RPC through tunnels, set these config values in `nxbcl.yml`:
+If you are exposing the panel or RPC through tunnels, set these config values in `config.yml` under `nxbcl:`:
 
 ```yaml
-app:
-  base_ip: https://panel.example.com
-rpc:
-  base_ip: https://rpc.example.com
+nxbcl:
+  rpc:
+    base_ip: https://rpc.example.com
 ```
 
 Leave them empty to keep the local `localhost` fallback.

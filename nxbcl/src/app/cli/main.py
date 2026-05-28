@@ -332,7 +332,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_parser.set_defaults(func=cmd_doctor)
 
     serve_parser = subparsers.add_parser("serve", help="Run the NXBCL FastAPI launcher")
-    serve_parser.add_argument("--host", default="127.0.0.1", help="Bind host")
+    serve_parser.add_argument("--host", default="0.0.0.0", help="Bind host")
     serve_parser.add_argument("--port", default=8080, type=int, help="Bind port")
     serve_parser.add_argument("--reload", action="store_true", help="Enable uvicorn reload")
     serve_parser.set_defaults(func=cmd_serve)

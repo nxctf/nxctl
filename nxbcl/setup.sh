@@ -5,8 +5,33 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="${NXBCL_BIN_DIR:-$HOME/.local/bin}"
 COMMAND="${1:-help}"
 
+ensure_node22() {
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+
+  if ! command -v nvm >/dev/null 2>&1; then
+    if [ -s "$NVM_DIR/nvm.sh" ]; then
+      . "$NVM_DIR/nvm.sh"
+    fi
+  fi
+
+  if ! command -v nvm >/dev/null 2>&1; then
+    echo "Installing nvm..."
+    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+    . "$NVM_DIR/nvm.sh"
+  fi
+
+  echo "Installing Node.js 22..."
+  nvm install 22
+  nvm alias default 22
+  nvm use 22
+
+  echo "Node: $(node -v)"
+  echo "npm: $(npm -v)"
+}
+
 case "$COMMAND" in
   install)
+    ensure_node22
     python3 -m pip install -r "$PROJECT_DIR/requirements.txt"
     mkdir -p "$BIN_DIR"
     cat > "$BIN_DIR/nxbcl" <<EOF

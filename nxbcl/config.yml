@@ -1,10 +1,6 @@
 app:
   data_dir: ./data_nxbcl
 
-  # Public URL or host for the launcher panel when exposed behind a tunnel or reverse proxy.
-  # Example: https://panel.nxctf.my.id
-  # base_ip: "https://nxbcl.nxctf.my.id"
-
 git:
   repo: https://github.com/ariafatah0711/a
   branch: main
