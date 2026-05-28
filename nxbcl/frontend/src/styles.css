@@ -1,40 +1,42 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg: #0b0e14;
-  --color-surface: #12161f;
-  --color-surface-2: #1a1f2b;
-  --color-surface-3: #222836;
-  --color-border: #2a3142;
-  --color-border-hover: #3a4562;
-  --color-text: #eaf0f9;
-  --color-text-muted: #8a95a9;
-  --color-accent: #52c7b8;
-  --color-accent-hover: #6ddece;
-  --color-accent-dim: #1a3d3a;
-  --color-danger: #ff6b6b;
-  --color-danger-dim: #3a1a1a;
-  --color-ok: #73d483;
-  --color-ok-dim: #1a3a22;
-  --color-warn: #f2c14e;
-  --color-warn-dim: #3a2f1a;
-  --color-terminal-bg: #080b10;
-  --color-terminal-text: #c8d6e5;
-  --color-glow-accent: rgba(82, 199, 184, 0.15);
-  --color-glow-danger: rgba(255, 107, 107, 0.15);
+  /* Refined palette — slightly lifted surfaces for better depth */
+  --color-bg: #09090b;
+  --color-surface: #18181b;
+  --color-surface-2: #27272a;
+  --color-surface-3: #3f3f46;
+  --color-border: rgba(161, 161, 170, 0.12);
+  --color-border-hover: rgba(161, 161, 170, 0.25);
+  --color-text: #fafafa;
+  --color-text-muted: #a1a1aa;
+  --color-accent: #22d3ee;
+  --color-accent-hover: #67e8f9;
+  --color-accent-dim: rgba(34, 211, 238, 0.08);
+  --color-danger: #f87171;
+  --color-danger-dim: rgba(248, 113, 113, 0.08);
+  --color-ok: #4ade80;
+  --color-ok-dim: rgba(74, 222, 128, 0.08);
+  --color-warn: #fbbf24;
+  --color-warn-dim: rgba(251, 191, 36, 0.08);
+  --color-terminal-bg: #0c0c0e;
+  --color-terminal-text: #d4d4d8;
+  --color-glow-accent: rgba(34, 211, 238, 0.12);
+  --color-glow-danger: rgba(248, 113, 113, 0.12);
 
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
-  --animate-fade-in: fade-in 0.4s ease-out;
-  --animate-slide-up: slide-up 0.35s ease-out;
-  --animate-pulse-soft: pulse-soft 2s ease-in-out infinite;
+  --animate-fade-in: fade-in 0.35s ease-out;
+  --animate-slide-up: slide-up 0.3s ease-out;
+  --animate-pulse-soft: pulse-soft 2.5s ease-in-out infinite;
 }
 
 @keyframes fade-in {
   from {
     opacity: 0;
   }
+
   to {
     opacity: 1;
   }
@@ -43,8 +45,9 @@
 @keyframes slide-up {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(10px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -52,10 +55,12 @@
 }
 
 @keyframes pulse-soft {
+
   0%,
   100% {
     opacity: 1;
   }
+
   50% {
     opacity: 0.5;
   }
@@ -70,15 +75,20 @@
     @apply bg-bg text-text font-sans antialiased;
     min-height: 100vh;
     margin: 0;
+    font-size: 14px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   ::selection {
-    background: rgba(82, 199, 184, 0.3);
+    background: rgba(34, 211, 238, 0.25);
     color: white;
   }
 
   ::-webkit-scrollbar {
     width: 6px;
+    height: 6px;
   }
 
   ::-webkit-scrollbar-track {
@@ -86,14 +96,18 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: var(--color-border);
+    background: rgba(161, 161, 170, 0.15);
     border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(161, 161, 170, 0.25);
   }
 }
 
 /* Glass panel utility */
 @utility glass {
-  background: rgba(18, 22, 31, 0.7);
+  background: rgba(24, 24, 27, 0.65);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--color-border);

@@ -52,6 +52,7 @@ class NXBCLConfig:
         self.enabled = True
         app_cfg = self.nxbcl_raw.get("app", {})
         self.data_dir = app_cfg.get("data_dir", self.nxbcl_raw.get("data_dir", "./data_nxbcl"))
+        self.panel_base_ip = app_cfg.get("base_ip", "")
         git = self.nxbcl_raw.get("git", {})
         self.git_repo = git.get("repo", "")
         self.git_branch = git.get("branch", "main")
@@ -72,6 +73,7 @@ class NXBCLConfig:
 
         # RPC TTL configuration
         rpc_cfg = self.nxbcl_raw.get("rpc", {})
+        self.rpc_base_ip = rpc_cfg.get("base_ip", self.panel_base_ip)
         self.rpc_ttl_seconds = int(rpc_cfg.get("ttl_seconds", 1200))
         self.rpc_extend_seconds = int(rpc_cfg.get("extend_seconds", 600))
         self.rpc_extend_threshold_seconds = int(rpc_cfg.get("extend_threshold_seconds", 600))
@@ -106,6 +108,23 @@ class NXBCLConfig:
     @property
     def logs_dir(self) -> Path:
         return self.data_path / "logs"
+
+    @staticmethod
+    def _normalize_base_url(value: str) -> str:
+        value = str(value or "").strip().rstrip("/")
+        if not value:
+            return ""
+        if "://" in value:
+            return value
+        return f"http://{value}"
+
+    @property
+    def panel_base_url(self) -> str:
+        return self._normalize_base_url(self.panel_base_ip)
+
+    @property
+    def rpc_base_url(self) -> str:
+        return self._normalize_base_url(self.rpc_base_ip)
 
 # Global config helper
 _config_instance = None

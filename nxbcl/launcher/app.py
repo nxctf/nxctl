@@ -30,6 +30,13 @@ app.add_middleware(
 # Load configuration
 config = get_nxbcl_config()
 
+
+def resolve_public_url(configured_url: str, fallback_url: str) -> str:
+    configured_url = (configured_url or "").strip().rstrip("/")
+    if configured_url:
+        return configured_url
+    return fallback_url
+
 # Mount static folder if it exists
 static_dir = Path(__file__).resolve().parent / "static"
 static_dir.mkdir(parents=True, exist_ok=True)
@@ -171,7 +178,13 @@ def get_running_instances_count() -> int:
 def instance_response(instance: Dict[str, Any], chall_desc: Dict[str, Any]) -> Dict[str, Any]:
     response = dict(instance)
     response.setdefault("setup_address", response.get("deploy_address"))
-    response.setdefault("rpc_url", f"http://localhost:{response.get('rpc_port', 8545)}")
+    response.setdefault(
+        "rpc_url",
+        resolve_public_url(
+            config.rpc_base_url,
+            f"http://localhost:{response.get('rpc_port', 8545)}",
+        ),
+    )
     response.setdefault("chain_id", chall_desc.get("chain_id", 31337))
     response["extend_threshold_seconds"] = config.challenge_extend_threshold_seconds
     response["extend_seconds"] = config.challenge_extend_seconds
@@ -272,7 +285,10 @@ def api_start_challenge(
         "private_key": inst["private_key"],
         "deploy_address": inst["deploy_address"],
         "setup_address": inst.get("setup_address", inst["deploy_address"]),
-        "rpc_url": inst.get("rpc_url", f"http://localhost:{inst['rpc_port']}"),
+        "rpc_url": resolve_public_url(
+            config.rpc_base_url,
+            inst.get("rpc_url", f"http://localhost:{inst['rpc_port']}"),
+        ),
         "rpc_port": inst["rpc_port"],
         "chain_id": inst.get("chain_id", chall_desc.get("chain_id", 31337)),
         "status": inst["status"],
@@ -513,10 +529,8 @@ def api_rpc_status():
 
     connected = w3.is_connected()
     if connected:
-        if not rpc_expires_at:
-            rpc_expires_at = datetime.now(timezone.utc) + timedelta(seconds=config.rpc_ttl_seconds)
         now = datetime.now(timezone.utc)
-        if now >= rpc_expires_at:
+        if rpc_expires_at and now >= rpc_expires_at:
             # Stop the RPC container as it has expired
             try:
                 import subprocess
@@ -537,7 +551,7 @@ def api_rpc_status():
         rpc_expires_at = None
     return {
         "status": "running" if connected else "stopped",
-        "rpc_url": "http://localhost:8545",
+        "rpc_url": resolve_public_url(config.rpc_base_url, "http://localhost:8545"),
         "expires_at": rpc_expires_at.isoformat() if rpc_expires_at else None,
         "extend_threshold_seconds": config.rpc_extend_threshold_seconds,
         "extend_seconds": config.rpc_extend_seconds

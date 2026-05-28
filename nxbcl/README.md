@@ -128,3 +128,14 @@ cloudflared tunnel --url http://localhost:8545
 ```
 
 The public HTTPS URL becomes the `RPC_URL` returned to players.
+
+If you are exposing the panel or RPC through tunnels, set these config values in `nxbcl.yml`:
+
+```yaml
+app:
+  base_ip: https://panel.example.com
+rpc:
+  base_ip: https://rpc.example.com
+```
+
+Leave them empty to keep the local `localhost` fallback.

@@ -107,6 +107,15 @@ onMounted(async () => {
     loading.value = false;
   }
 });
+const terminalLogs = ref<string[]>([
+  `[${new Date().toLocaleTimeString()}] INFRASTRUCTURE: Establishing handshake with secure node...`,
+  `[${new Date().toLocaleTimeString()}] CONTROLLER: Ready. Awaiting trigger signal.`
+]);
+
+const logTerminal = (msg: string) => {
+  const timestamp = new Date().toLocaleTimeString();
+  terminalLogs.value.push(`[${timestamp}] ${msg}`);
+};
 
 onUnmounted(() => {
   stopTimer();
@@ -118,32 +127,47 @@ async function launch(restart = false) {
   flag.value = "";
   extendMsg.value = "";
 
+  logTerminal(`INIT: Deploying ephemeral blockchain sandbox for challenge [id=${props.id}]${restart ? ' (REDEPLOY)' : ''}`);
+
   try {
     // Step 1: PoW
     state.value = "pow";
     powProgress.value = "Requesting PoW challenge...";
+    logTerminal("SYS: Fetching Proof-of-Work challenge salt from launcher gateway...");
     const pow = await issuePow(props.id);
+    logTerminal(`SYS: Received salt: "${pow.salt.substring(0, 12)}...". Prefix target: "${pow.zero_prefix}"`);
 
     powProgress.value = `Solving PoW (prefix: ${pow.zero_prefix})...`;
+    logTerminal("SYS: Computing proof-of-work hash proof in local browser sandbox...");
     const solution = await solvePow(pow.salt, pow.zero_prefix);
+    logTerminal(`SYS: Solution proof calculated: "${solution.substring(0, 16)}..."`);
 
     // Step 2: Submit PoW → get session
     state.value = "session";
     powProgress.value = "Verifying solution...";
+    logTerminal("SYS: Dispatching validation proof payload to backend validator...");
     await submitPow(props.id, pow.challenge_token, solution);
+    logTerminal("SYS: Validator validated payload. Spawning session token.");
 
     // Step 3: Start / Restart instance
     state.value = "launching";
     powProgress.value = restart ? "Restarting instance..." : "Launching instance...";
+    logTerminal("SYS: Orchestrator sending deploy configurations to Docker Compose backend...");
     const inst = await startChallenge(props.id, restart);
     instance.value = inst;
     state.value = "active";
     powProgress.value = "";
+
+    logTerminal(`SUCCESS: Sandbox environment initialized and verified.`);
+    logTerminal(`RPC ENDPOINT: http://localhost:${inst.rpc_port || 8545}`);
+    logTerminal(`DEPLOYED CONTRACT SETUP: ${inst.deploy_address}`);
     startTimer();
   } catch (err) {
-    errorMsg.value = err instanceof Error ? err.message : "Launch failed";
+    const errMsg = err instanceof Error ? err.message : "Launch failed";
+    errorMsg.value = errMsg;
     state.value = "error";
     powProgress.value = "";
+    logTerminal(`ERROR: Orchestration service reported failure: ${errMsg}`);
   }
 }
 
@@ -151,17 +175,23 @@ async function handleCheck() {
   if (!instance.value || checking.value) return;
   checking.value = true;
   errorMsg.value = "";
+  logTerminal("SYS: Triggering solution state verification on-chain...");
   try {
     const res = await checkChallenge(props.id);
     if (res.solved && res.flag) {
       flag.value = res.flag;
+      logTerminal(`SUCCESS: Validation verification completed. FLAG RECOVERED: ${res.flag}`);
     } else {
-      errorMsg.value = res.message || "Not solved yet.";
+      const msg = res.message || "Not solved yet.";
+      errorMsg.value = msg;
       state.value = "error";
+      logTerminal(`WARNING: Verification failed. Setup conditions not met: "${msg}"`);
     }
   } catch (err) {
-    errorMsg.value = err instanceof Error ? err.message : "Verification failed";
+    const errMsg = err instanceof Error ? err.message : "Verification failed";
+    errorMsg.value = errMsg;
     state.value = "error";
+    logTerminal(`ERROR: On-chain client execution failure: ${errMsg}`);
   } finally {
     checking.value = false;
   }
@@ -172,6 +202,7 @@ async function handleExtend() {
   extending.value = true;
   extendMsg.value = "";
   errorMsg.value = "";
+  logTerminal("SYS: Requesting lease duration extension from node daemon...");
   try {
     const res = await extendChallenge(props.id);
     if (res.status === "success") {
@@ -180,15 +211,17 @@ async function handleExtend() {
         startTimer();
       }
       extendMsg.value = `Instance extended successfully!`;
+      logTerminal(`SUCCESS: Lease timeline updated. Expiry reset.`);
     }
   } catch (err) {
-    errorMsg.value = err instanceof Error ? err.message : "Extension failed";
+    const errMsg = err instanceof Error ? err.message : "Extension failed";
+    errorMsg.value = errMsg;
     state.value = "error";
+    logTerminal(`ERROR: Extension request denied by supervisor: ${errMsg}`);
   } finally {
     extending.value = false;
   }
 }
-
 async function copyFullEnv() {
   if (!envBlock.value) return;
   try {
@@ -236,300 +269,252 @@ const stateColor = computed(() => {
 </script>
 
 <template>
-  <div class="max-w-4xl mx-auto px-4 sm:px-6 py-8 animate-fade-in">
-    <!-- Back link -->
-    <button
-      @click="router.push({ name: 'challenges' })"
-      class="inline-flex items-center gap-1.5 text-text-muted hover:text-accent text-sm font-medium transition-colors mb-6 cursor-pointer bg-transparent border-none p-0"
-    >
-      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M19 12H5M12 19l-7-7 7-7" />
-      </svg>
-      Back to Challenges
-    </button>
-
-    <!-- Loading -->
-    <div v-if="loading" class="flex items-center justify-center py-24">
-      <div class="flex items-center gap-3 text-text-muted">
-        <svg class="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+  <div class="mx-auto max-w-6xl space-y-6 px-6 py-8 lg:px-8">
+    <div>
+      <button
+        @click="router.push({ name: 'challenges' })"
+        class="inline-flex items-center gap-2 rounded-full border border-border/60 bg-surface/40 px-3 py-2 text-sm text-text-muted transition-all duration-150 hover:border-border-hover hover:bg-surface/70 hover:text-text"
+      >
+        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M19 12H5M12 19l-7-7 7-7" />
         </svg>
-        <span class="text-sm">Loading...</span>
-      </div>
+        <span>Back to challenges</span>
+      </button>
     </div>
 
-    <!-- Not found -->
+    <div v-if="loading" class="flex items-center justify-center py-24">
+      <svg class="h-4 w-4 animate-spin text-accent" viewBox="0 0 24 24" fill="none">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+      </svg>
+    </div>
+
     <div
       v-else-if="!challenge"
-      class="glass rounded-xl p-8 text-center"
+      class="rounded-2xl border border-danger/15 bg-danger-dim p-6 text-center"
     >
-      <p class="text-danger font-semibold">Challenge not found</p>
-      <p class="text-text-muted text-sm mt-2">{{ errorMsg }}</p>
+      <p class="text-sm font-medium text-danger">Challenge not found</p>
+      <p class="mt-2 font-mono text-xs text-text-muted">{{ errorMsg }}</p>
     </div>
 
-    <!-- Challenge Detail -->
     <template v-else>
-      <!-- Challenge Header -->
-      <div class="glass rounded-xl p-6 mb-4 animate-slide-up">
-        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-3 mb-2">
-              <h2 class="text-xl sm:text-2xl font-bold text-text truncate">
+      <section class="animate-slide-up rounded-2xl border border-border/60 bg-gradient-to-br from-surface/60 to-surface/25 p-6 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
+        <div class="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div class="min-w-0 flex-1 space-y-4">
+            <div class="flex flex-wrap items-center gap-3">
+              <h1 class="text-2xl font-semibold tracking-tight text-text">
                 {{ challenge.name || challenge.id }}
-              </h2>
+              </h1>
               <span
                 v-if="challenge.category"
-                class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-accent-dim text-accent border border-accent/20 flex-shrink-0"
+                class="inline-flex items-center rounded-full border border-border/50 bg-surface-2/80 px-2.5 py-1 font-mono text-[10px] font-medium uppercase tracking-wider text-text-muted"
               >
                 {{ challenge.category }}
               </span>
             </div>
-            <p class="text-xs text-text-muted font-mono mb-3">{{ challenge.id }}</p>
-            <p class="text-sm text-text-muted leading-relaxed">
-              {{ challenge.description || "Blockchain challenge" }}
+
+            <p class="max-w-3xl text-sm leading-relaxed text-text-muted">
+              {{ challenge.description || "Deploy and interact with this challenge's smart contract environment." }}
             </p>
+
+            <div class="flex flex-wrap items-center gap-2">
+              <span v-if="challenge.chain_family" class="inline-flex items-center rounded-full border border-border/40 bg-surface-2/50 px-2.5 py-1 font-mono text-[11px] text-text-muted">
+                {{ challenge.chain_family }}
+              </span>
+              <span v-if="challenge.chain_id" class="inline-flex items-center rounded-full border border-border/40 bg-surface-2/50 px-2.5 py-1 font-mono text-[11px] text-text-muted">
+                Chain {{ challenge.chain_id }}
+              </span>
+              <span v-if="challenge.protocol" class="inline-flex items-center rounded-full border border-border/40 bg-surface-2/50 px-2.5 py-1 font-mono text-[11px] text-text-muted">
+                {{ challenge.protocol }}
+              </span>
+            </div>
           </div>
 
-          <!-- Status -->
-          <div class="flex-shrink-0 flex items-center gap-2">
+          <div class="flex-shrink-0">
             <span
-              class="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border"
+              class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 font-mono text-[11px] font-medium uppercase tracking-wider"
               :class="[
                 stateColor,
                 state === 'active'
-                  ? 'border-ok/30 bg-ok-dim/30'
+                  ? 'border-ok/20 bg-ok-dim'
                   : state === 'error'
-                    ? 'border-danger/30 bg-danger-dim/30'
+                    ? 'border-danger/20 bg-danger-dim'
                     : isLaunching
-                      ? 'border-warn/30 bg-warn-dim/30'
-                      : 'border-border bg-surface-2',
+                      ? 'border-warn/20 bg-warn-dim'
+                      : 'border-border bg-surface',
               ]"
             >
-              <span
-                v-if="isLaunching"
-                class="w-1.5 h-1.5 rounded-full bg-current animate-pulse-soft"
-              ></span>
-              <span
-                v-else-if="state === 'active'"
-                class="w-1.5 h-1.5 rounded-full bg-ok"
-              ></span>
+              <span v-if="isLaunching" class="h-1.5 w-1.5 rounded-full bg-current animate-pulse"></span>
+              <span v-else-if="state === 'active'" class="h-1.5 w-1.5 rounded-full bg-ok"></span>
               {{ stateLabel }}
             </span>
           </div>
         </div>
+      </section>
 
-        <!-- Meta chips -->
-        <div class="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-border/50">
-          <span
-            v-if="challenge.chain_family"
-            class="text-[11px] font-medium text-text-muted bg-surface-2 px-2 py-1 rounded-md"
-          >
-            {{ challenge.chain_family?.toUpperCase() }}
-          </span>
-          <span
-            v-if="challenge.chain_id"
-            class="text-[11px] font-medium text-text-muted bg-surface-2 px-2 py-1 rounded-md"
-          >
-            Chain {{ challenge.chain_id }}
-          </span>
-          <span
-            v-if="challenge.protocol"
-            class="text-[11px] font-medium text-text-muted bg-surface-2 px-2 py-1 rounded-md"
-          >
-            {{ challenge.protocol?.toUpperCase() }}
-          </span>
-        </div>
-      </div>
+      <section class="grid gap-5 animate-slide-up lg:grid-cols-[340px,minmax(0,1fr)]" style="animation-delay: 50ms; animation-fill-mode: backwards">
+        <div class="flex flex-col justify-between rounded-2xl border border-border/60 bg-surface/35 p-5 shadow-sm">
+          <div class="space-y-3">
+            <div v-if="powProgress" class="flex items-start gap-2 rounded-xl border border-border/40 bg-surface/70 p-3 font-mono text-xs text-text-muted">
+              <svg class="h-3.5 w-3.5 shrink-0 animate-spin text-warn" viewBox="0 0 24 24" fill="none">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              <span class="leading-relaxed">{{ powProgress }}</span>
+            </div>
 
-      <!-- Action Panel -->
-      <div
-        class="glass rounded-xl p-6 mb-4 animate-slide-up"
-        style="animation-delay: 80ms; animation-fill-mode: backwards"
-      >
-        <h3 class="text-sm font-bold text-text uppercase tracking-wider mb-4">Actions</h3>
+            <div v-if="errorMsg && (state === 'error' || state === 'active')" class="rounded-xl border border-danger/15 bg-danger-dim p-3 font-mono text-xs text-danger">
+              {{ errorMsg }}
+            </div>
 
-        <!-- Launch progress -->
-        <div
-          v-if="powProgress"
-          class="mb-4 flex items-center gap-3 p-3 rounded-lg bg-surface-2 border border-border"
-        >
-          <svg class="animate-spin h-4 w-4 text-warn flex-shrink-0" viewBox="0 0 24 24" fill="none">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-          </svg>
-          <span class="text-sm text-text-muted">{{ powProgress }}</span>
-        </div>
+            <div v-if="flag" class="rounded-xl border border-ok/15 bg-ok-dim p-4">
+              <p class="mb-2 text-[11px] font-semibold uppercase tracking-wider text-ok">Solved</p>
+              <pre class="cursor-pointer select-all truncate rounded-lg border border-ok/15 bg-bg/60 p-2.5 font-mono text-xs text-emerald-300">{{ flag }}</pre>
+            </div>
 
-        <!-- Error message -->
-        <div
-          v-if="errorMsg && (state === 'error' || state === 'active')"
-          class="mb-4 p-3 rounded-lg bg-danger-dim/30 border border-danger/20"
-        >
-          <p class="text-sm text-danger">{{ errorMsg }}</p>
-        </div>
+            <div v-if="extendMsg" class="rounded-xl border border-accent/15 bg-accent-dim p-3 font-mono text-xs text-accent">
+              {{ extendMsg }}
+            </div>
+          </div>
 
-        <!-- Flag message -->
-        <div
-          v-if="flag"
-          class="mb-4 p-4 rounded-lg bg-emerald-500/20 border border-emerald-500/40 animate-pulse-soft"
-        >
-          <h4 class="text-sm font-bold text-ok uppercase tracking-wider mb-2">🎉 Solved! Flag Discovered:</h4>
-          <pre class="text-xs leading-relaxed p-3 rounded bg-surface border border-emerald-500/30 font-mono text-emerald-300 select-all cursor-pointer">{{ flag }}</pre>
-        </div>
-
-        <!-- Extend message -->
-        <div
-          v-if="extendMsg"
-          class="mb-4 p-3 rounded-lg bg-accent-dim/30 border border-accent/20"
-        >
-          <p class="text-sm text-accent">{{ extendMsg }}</p>
-        </div>
-
-        <!-- Action Buttons Layout -->
-        <div class="space-y-5">
-          <!-- Primary Actions -->
-          <div class="flex flex-col sm:flex-row gap-3">
+          <div class="mt-5 space-y-2">
             <button
               v-if="instance"
               @click="handleCheck"
               :disabled="checking || isLaunching"
-              class="flex-1 px-6 py-3 rounded-xl text-sm font-bold bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-bg hover:shadow-lg hover:shadow-emerald-500/10 active:translate-y-px transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 border-none"
+              class="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-ok/20 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition-all duration-150 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <svg v-if="checking" class="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+              <svg v-if="checking" class="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
               </svg>
-              <span v-else class="text-sm">✔️</span>
-              {{ checking ? "Checking Solution..." : "Check Solution" }}
+              {{ checking ? "Checking..." : "Check Solution" }}
             </button>
 
             <button
               v-if="instance"
               @click="copyFullEnv"
-              class="flex-1 px-6 py-3 rounded-xl text-sm font-bold border border-border bg-surface-2 text-text hover:bg-surface-3 hover:border-border-hover hover:shadow-md transition-all duration-200 cursor-pointer flex items-center justify-center gap-2"
+              class="inline-flex w-full items-center justify-center rounded-xl border border-border/60 bg-surface px-4 py-3 text-sm font-medium text-text-muted transition-all duration-150 hover:border-border-hover hover:bg-surface-2 hover:text-text"
             >
-              <span>📋</span>
-              Copy All Env
+              Copy Solver Env
             </button>
-          </div>
 
-          <!-- Divider for Session Management -->
-          <div v-if="instance" class="border-t border-border/40 my-1"></div>
-
-          <!-- Session Controls -->
-          <div class="flex flex-wrap items-center gap-3">
-            <span v-if="instance" class="text-xs font-bold text-text-muted mr-1 hidden md:inline">Session:</span>
-
-            <!-- Start / Re-Launch -->
             <button
               @click="launch(false)"
               :disabled="isLaunching"
-              class="px-4 py-2.5 rounded-lg text-xs font-bold transition-all duration-200 cursor-pointer border flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+              class="inline-flex w-full items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-50"
               :class="
                 state === 'active'
-                  ? 'border-border bg-surface-2 text-text hover:bg-surface-3 hover:border-border-hover'
-                  : 'border-transparent bg-gradient-to-r from-accent to-emerald-500 text-bg hover:shadow-md hover:-translate-y-px active:translate-y-0'
+                  ? 'border-border/60 bg-surface text-text-muted hover:border-border-hover hover:bg-surface-2 hover:text-text'
+                  : 'border-transparent bg-accent text-black hover:bg-accent-hover'
               "
             >
-              <span>⟳</span>
-              {{ state === 'active' ? 'Re-Launch New Session' : 'Start Instance' }}
+              {{ state === 'active' ? 'Deploy Fresh' : 'Start Challenge' }}
             </button>
 
-            <!-- Extend time (Only active when under threshold) -->
-            <button
-              v-if="instance"
-              @click="handleExtend"
-              :disabled="extending || isLaunching || secondsLeft > (instance.extend_threshold_seconds || 300)"
-              class="px-4 py-2.5 rounded-lg text-xs font-bold border transition-all duration-200 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
-              :class="
-                secondsLeft > (instance.extend_threshold_seconds || 300)
-                  ? 'border-border bg-surface-2 text-text-muted cursor-not-allowed'
-                  : 'border-accent/20 bg-accent/10 text-accent hover:bg-accent/20 hover:border-accent/40'
-              "
-              :title="secondsLeft > (instance.extend_threshold_seconds || 300) ? `You can only extend when under ${Math.round((instance.extend_threshold_seconds || 300) / 60)} minutes left!` : 'Extend session'"
-            >
-              <svg v-if="extending" class="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              <span v-else>➕</span>
-              {{ secondsLeft > (instance.extend_threshold_seconds || 300) ? 'Extend (Locked)' : (extending ? 'Extending...' : `Extend +${Math.round((instance.extend_seconds || 300) / 60)}m`) }}
-            </button>
+            <div v-if="instance" class="grid grid-cols-2 gap-2">
+              <button
+                @click="handleExtend"
+                :disabled="extending || isLaunching || secondsLeft > (instance.extend_threshold_seconds || 300)"
+                class="inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-3 text-sm font-medium transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-40"
+                :class="
+                  secondsLeft > (instance.extend_threshold_seconds || 300)
+                    ? 'border-border/60 bg-surface text-text-muted'
+                    : 'border-accent/20 bg-accent/8 text-accent hover:bg-accent/15'
+                "
+                :title="secondsLeft > (instance.extend_threshold_seconds || 300) ? `Locked until under ${Math.round((instance.extend_threshold_seconds || 300) / 60)}m` : 'Extend lease'"
+              >
+                <svg v-if="extending" class="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                <span>Extend +{{ Math.round((instance.extend_seconds || 300) / 60) }}m</span>
+              </button>
 
-            <!-- Restart / Reset -->
-            <button
-              @click="launch(true)"
-              :disabled="isLaunching"
-              class="px-4 py-2.5 rounded-lg text-xs font-bold border border-danger/20 bg-danger/10 text-danger hover:bg-danger/20 hover:border-danger/40 transition-all duration-200 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
-            >
-              <span>↻</span>
-              Reset State (Restart)
-            </button>
-          </div>
-
-          <!-- Microtext guidelines -->
-          <div v-if="instance" class="text-[11px] text-text-muted flex items-start gap-1.5 bg-surface/50 p-2.5 rounded-lg border border-border/30">
-            <span class="text-xs">💡</span>
-            <p class="leading-normal">
-              <strong>Extend +{{ Math.round((instance.extend_seconds || 300) / 60) }}m</strong> keeps your active session alive (unlocked only when remaining time is less than {{ Math.round((instance.extend_threshold_seconds || 300) / 60) }} minutes).
-              <strong>Reset State</strong> completely redeploys fresh contracts for a clean start.
-            </p>
+              <button
+                @click="launch(true)"
+                :disabled="isLaunching"
+                class="inline-flex items-center justify-center rounded-xl border border-danger/20 bg-danger/8 px-3 py-3 text-sm font-medium text-danger transition-all duration-150 hover:bg-danger/15 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Reset State
+              </button>
+            </div>
           </div>
         </div>
-      </div>
 
-      <!-- Instance Data -->
-      <div
+        <div class="flex min-h-[360px] flex-col overflow-hidden rounded-2xl border border-border/60 bg-terminal-bg shadow-sm">
+          <div class="flex items-center justify-between border-b border-border/30 bg-surface/20 px-4 py-3">
+            <span class="text-xs font-mono font-medium tracking-wide text-text-muted">Terminal</span>
+            <div class="flex items-center gap-1.5">
+              <span class="h-2 w-2 rounded-full bg-emerald-500/80"></span>
+              <span class="text-[10px] font-mono uppercase tracking-[0.18em] text-text-muted/50">live</span>
+            </div>
+          </div>
+
+          <div class="flex-1 overflow-y-auto px-4 py-4 font-mono text-[11px] text-terminal-text">
+            <div v-for="(log, idx) in terminalLogs" :key="idx" class="whitespace-pre-wrap leading-6 select-text">
+              <span class="text-accent/70">{{ log.substring(0, 10) }}</span>
+              <span class="ml-0.5 text-text-muted/80">{{ log.substring(10) }}</span>
+            </div>
+          </div>
+
+          <div class="border-t border-border/20 px-4 py-2.5 font-mono text-[11px] text-text-muted/40">
+            Extend retains contract state · Reset tears down and redeploys
+          </div>
+        </div>
+      </section>
+
+      <section
         v-if="instance"
-        class="glass rounded-xl p-6 animate-slide-up"
-        style="animation-delay: 160ms; animation-fill-mode: backwards"
+        class="animate-slide-up rounded-2xl border border-border/60 bg-surface/35 p-6 shadow-sm"
+        style="animation-delay: 100ms; animation-fill-mode: backwards"
       >
-        <div class="flex items-center justify-between mb-5">
-          <h3 class="text-sm font-bold text-text uppercase tracking-wider">Instance Data</h3>
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <h2 class="text-sm font-semibold text-text">Instance Credentials</h2>
           <span
             v-if="instance.expires_at"
-            class="text-[11px] font-mono px-2.5 py-1 rounded-md flex items-center gap-1.5 transition-all duration-300"
-            :class="secondsLeft < (instance.extend_threshold_seconds || 300) ? 'bg-danger-dim/30 text-danger border border-danger/20 animate-pulse-soft' : 'bg-surface-2 text-text-muted border border-border/40'"
+            class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[11px] transition-all duration-300"
+            :class="secondsLeft < (instance.extend_threshold_seconds || 300) ? 'bg-danger-dim text-danger border-danger/20 animate-pulse-soft' : 'bg-surface-2 text-text-muted border-border/40'"
           >
-            ⏳ {{ timeLeftStr ? `Expires in: ${timeLeftStr}` : 'Expired' }}
+            {{ timeLeftStr ? `${timeLeftStr}` : 'Expired' }}
           </span>
         </div>
 
-        <div class="space-y-1">
-          <CopyField label="RPC URL" :value="rpcUrl" />
-          <CopyField label="Private Key" :value="instance.private_key" />
-          <CopyField label="Setup Contract" :value="setupAddr" />
-          <CopyField
-            v-if="instance.wallet_address"
-            label="Wallet Address"
-            :value="instance.wallet_address"
-          />
-          <CopyField
-            v-if="instance.chain_id"
-            label="Chain ID"
-            :value="String(instance.chain_id)"
-          />
+        <div class="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div class="space-y-2 rounded-xl border border-border/50 bg-surface/30 p-4">
+            <span class="text-[11px] font-medium uppercase tracking-[0.18em] text-text-muted">RPC Endpoint</span>
+            <CopyField label="RPC URL" :value="rpcUrl" />
+          </div>
+
+          <div class="space-y-2 rounded-xl border border-border/50 bg-surface/30 p-4">
+            <span class="text-[11px] font-medium uppercase tracking-[0.18em] text-text-muted">Private Key</span>
+            <CopyField label="Private Key" :value="instance.private_key" />
+          </div>
+
+          <div class="space-y-2 rounded-xl border border-border/50 bg-surface/30 p-4">
+            <span class="text-[11px] font-medium uppercase tracking-[0.18em] text-text-muted">Setup Contract</span>
+            <CopyField label="Setup Address" :value="setupAddr" />
+          </div>
+
+          <div v-if="instance.wallet_address" class="space-y-2 rounded-xl border border-border/50 bg-surface/30 p-4">
+            <span class="text-[11px] font-medium uppercase tracking-[0.18em] text-text-muted">Wallet Address</span>
+            <CopyField label="Wallet" :value="instance.wallet_address" />
+          </div>
         </div>
 
-        <!-- Full env block -->
-        <div class="mt-5 pt-5 border-t border-border/50">
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-[11px] text-text-muted font-bold uppercase tracking-wide"
-              >Solver Script</span
-            >
+        <div class="mt-5 rounded-xl border border-border/50 bg-terminal-bg/80 p-4">
+          <div class="mb-3 flex items-center justify-between gap-3">
+            <span class="text-[11px] font-medium uppercase tracking-[0.18em] text-text-muted">Solver Environment</span>
             <button
               @click="copyFullEnv"
-              class="text-[11px] text-accent hover:text-accent-hover font-semibold transition-colors cursor-pointer bg-transparent border-none p-0"
+              class="text-[11px] font-medium text-accent transition-colors hover:text-accent-hover"
             >
               Copy
             </button>
           </div>
-          <pre
-            class="text-xs leading-relaxed p-4 rounded-lg bg-terminal-bg text-terminal-text border border-border font-mono overflow-x-auto"
-          >{{ envBlock }}</pre>
+          <pre class="overflow-x-auto select-all rounded-lg border border-border/40 bg-bg/40 p-3 font-mono text-[11px] leading-relaxed text-terminal-text">{{ envBlock }}</pre>
         </div>
-      </div>
+      </section>
     </template>
   </div>
 </template>

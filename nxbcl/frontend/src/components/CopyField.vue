@@ -23,27 +23,24 @@ async function copy(text: string) {
 </script>
 
 <template>
-  <div class="mb-2.5">
-    <div class="mb-1 text-text-muted text-[11px] font-bold uppercase tracking-wide">
-      {{ label }}
-    </div>
-    <div class="flex items-stretch border border-border rounded-lg bg-terminal-bg overflow-hidden">
+  <div>
+    <div class="group flex items-stretch overflow-hidden rounded-xl border border-border/60 bg-terminal-bg/85 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-border-hover hover:shadow-[0_0_0_1px_var(--color-glow-accent)]">
       <code
-        class="flex-1 px-3 py-2.5 text-terminal-text text-xs leading-relaxed break-all select-all"
+        class="min-w-0 flex-1 px-3 py-2.5 text-sm text-terminal-text leading-relaxed break-all select-all"
         :class="mono !== false ? 'font-mono' : 'font-sans'"
       >
         {{ value }}
       </code>
       <button
-        class="flex-shrink-0 flex items-center justify-center w-10 border-l border-border bg-white/[0.03] text-text-muted cursor-pointer transition-all duration-200 hover:bg-white/[0.08] hover:text-accent"
-        :class="copied ? '!text-ok !bg-ok-dim/30' : ''"
-        :title="copied ? 'Copied!' : 'Copy'"
+        class="flex-shrink-0 inline-flex w-11 items-center justify-center border-l border-border/60 bg-transparent text-text-muted cursor-pointer transition-all duration-150 hover:bg-surface-2 hover:text-accent"
+        :class="copied ? '!text-ok !bg-ok-dim' : ''"
+        :aria-label="copied ? `${label} copied` : `Copy ${label}`"
+        :title="copied ? 'Copied!' : `Copy ${label}`"
         @click="copy(value)"
       >
-        <!-- Copy icon -->
         <svg
           v-if="!copied"
-          class="w-3.5 h-3.5"
+          class="h-3.5 w-3.5"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -52,10 +49,9 @@ async function copy(text: string) {
           <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
           <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
         </svg>
-        <!-- Check icon -->
         <svg
           v-else
-          class="w-3.5 h-3.5"
+          class="h-3.5 w-3.5"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
