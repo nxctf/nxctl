@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Challenge, ChallengeState } from '../../types.js';
+import StatusBadge from '../ui/StatusBadge.vue';
 
 defineProps<{
   challenge: Challenge;
@@ -44,23 +45,7 @@ defineProps<{
       </div>
 
       <div class="shrink-0">
-        <span
-          class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 font-mono text-[11px] font-medium uppercase tracking-wider"
-          :class="[
-            stateColor,
-            state === 'active'
-              ? 'border-ok/20 bg-ok-dim'
-              : state === 'error'
-                ? 'border-danger/20 bg-danger-dim'
-                : isLaunching
-                  ? 'border-warn/20 bg-warn-dim'
-                  : 'border-border bg-surface',
-          ]"
-        >
-          <span v-if="isLaunching" class="h-1.5 w-1.5 rounded-full bg-current animate-pulse"></span>
-          <span v-else-if="state === 'active'" class="h-1.5 w-1.5 rounded-full bg-ok"></span>
-          {{ stateLabel }}
-        </span>
+        <StatusBadge :status="state === 'idle' ? 'ready' : state" />
       </div>
     </div>
   </section>

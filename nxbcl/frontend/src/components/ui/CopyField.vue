@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
+import { copyToClipboard } from "../../utils/clipboard";
 
 defineProps<{
   label: string;
@@ -11,7 +12,7 @@ const copied = ref(false);
 
 async function copy(text: string) {
   try {
-    await navigator.clipboard.writeText(text);
+    await copyToClipboard(text);
     copied.value = true;
     setTimeout(() => {
       copied.value = false;

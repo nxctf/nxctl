@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import CredentialCard from '../CredentialCard.vue';
-import EnvBlock from '../EnvBlock.vue';
+import CredentialCard from './CredentialCard.vue';
+import EnvBlock from '../ui/EnvBlock.vue';
 
 defineProps<{
   instance: any;

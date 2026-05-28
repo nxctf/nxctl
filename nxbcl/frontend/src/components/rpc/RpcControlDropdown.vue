@@ -13,6 +13,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits(['start-rpc','restart-rpc','extend-rpc']);
 import { ref } from 'vue';
+import StatusDot from '../ui/StatusDot.vue';
 const show = ref(false);
 
 function onStart() { emit('start-rpc'); show.value = false; }
@@ -24,7 +25,7 @@ function toggle() { show.value = !show.value; }
 <template>
   <div class="relative">
     <button @click="toggle" class="inline-flex items-center gap-2 text-[13px] font-medium px-3 py-1.5 rounded-md border border-border bg-surface hover:bg-surface-2 text-text-muted hover:text-text transition-all duration-150 cursor-pointer">
-      <span class="w-1.5 h-1.5 rounded-full" :class="props.rpcStatus === 'running' ? 'bg-emerald-400' : props.rpcStatus === 'stopped' ? 'bg-zinc-500' : 'bg-amber-400 animate-pulse'"></span>
+      <StatusDot :status="props.rpcStatus" class="!w-1.5 !h-1.5" />
       <span>RPC</span>
       <svg class="w-3 h-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
     </button>

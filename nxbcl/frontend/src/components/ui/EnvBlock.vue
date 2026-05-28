@@ -1,25 +1,13 @@
 <script setup lang="ts">
 import { ref } from 'vue';
+import { copyToClipboard } from '../../utils/clipboard';
 
 const props = defineProps<{ content: string }>();
 const copied = ref(false);
 
 async function copyEnv() {
   try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(props.content);
-    } else {
-      const ta = document.createElement('textarea');
-      ta.value = props.content;
-      ta.setAttribute('readonly', 'true');
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.focus();
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-    }
+    await copyToClipboard(props.content);
     copied.value = true;
     setTimeout(() => (copied.value = false), 1500);
   } catch {
