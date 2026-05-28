@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { issuePow, listChallenges, startChallenge, submitPow, getInstance, extendChallenge, checkChallenge } from "../api.js";
 import { solvePow } from "../pow.js";
 import type { Challenge, ChallengeState, InstanceInfo } from "../types.js";
@@ -104,7 +104,21 @@ const envBlock = computed(() => {
   ].join("\n");
 });
 
-onMounted(async () => {
+const initChallenge = async () => {
+  loading.value = true;
+  errorMsg.value = "";
+  flag.value = "";
+  extendMsg.value = "";
+  state.value = "idle";
+  instance.value = null;
+  stopTimer();
+
+  // Reset terminal logs for new challenge view
+  terminalLogs.value = [
+    `[${new Date().toLocaleTimeString()}] INFRASTRUCTURE: Establishing handshake with secure node...`,
+    `[${new Date().toLocaleTimeString()}] CONTROLLER: Ready. Awaiting trigger signal.`
+  ];
+
   try {
     const list = await listChallenges();
     challenge.value = list.find((c) => c.id === props.id) || null;
@@ -129,7 +143,11 @@ onMounted(async () => {
   } finally {
     loading.value = false;
   }
-});
+};
+
+onMounted(initChallenge);
+
+watch(() => props.id, initChallenge);
 const terminalLogs = ref<string[]>([
   `[${new Date().toLocaleTimeString()}] INFRASTRUCTURE: Establishing handshake with secure node...`,
   `[${new Date().toLocaleTimeString()}] CONTROLLER: Ready. Awaiting trigger signal.`
@@ -284,7 +302,7 @@ const stateColor = computed(() => {
 </script>
 
 <template>
-  <div class="w-full max-w-none space-y-6 px-4 py-6 lg:px-8 xl:px-10">
+   <div class="w-full max-w-none space-y-6 px-4 py-6 lg:px-8 xl:px-10">
     <div v-if="loading" class="flex items-center justify-center py-24">
       <svg class="h-4 w-4 animate-spin text-accent" viewBox="0 0 24 24" fill="none">
         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
@@ -329,10 +347,15 @@ const stateColor = computed(() => {
       />
 
       <section
-        class="grid gap-6"
-        :class="instance ? 'xl:grid-cols-[minmax(0,1.2fr)_minmax(340px,1fr)] xl:items-stretch' : 'grid-cols-1'"
+        class="grid gap-6 xl:items-stretch"
+        :class="instance ? 'xl:grid-cols-[minmax(0,1.2fr)_minmax(340px,1fr)]' : 'grid-cols-1'"
       >
-        <TerminalPanel :logs="terminalLogs" class="h-full" />
+        <!-- Wrapper container that aligns terminal height to credentials card via absolute positioning -->
+        <div class="relative w-full h-full min-h-[350px]">
+          <div class="absolute inset-0 flex flex-col">
+            <TerminalPanel :logs="terminalLogs" class="h-full" />
+          </div>
+        </div>
         <InstanceCredentialsPanel
           v-if="instance"
           :instance="instance"

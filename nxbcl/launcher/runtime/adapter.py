@@ -30,18 +30,8 @@ class NxctlAdapter:
 
         chall_dir = self.data_dir / "chall"
 
-        # 1. Start Docker Compose for anvil and rpc if not already running
-        if chall_dir.exists():
-            try:
-                subprocess.run(
-                    ["docker", "compose", "up", "-d", "anvil", "rpc"],
-                    cwd=str(chall_dir),
-                    shell=(os.name == "nt"),
-                    capture_output=True,
-                    check=True
-                )
-            except Exception as e:
-                logger.warning(f"Failed to run docker compose up: {e}")
+        # 1. Do NOT start docker compose services automatically. We want the user
+        # to explicitly click "Start RPC" in the UI. If it is stopped, it should fail fast.
 
         # 1b. If web3 is available, verify that the RPC node is actually reachable
         #     before doing any provisioning. Fail fast if it's not.

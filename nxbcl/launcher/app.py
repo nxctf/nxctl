@@ -553,7 +553,7 @@ def api_get_active_instances(
                 "status": row["status"]
             }
 
-    return {"active": False}
+rpc_expires_at: Optional[datetime] = None
 
 def is_rpc_reachable() -> bool:
     import socket

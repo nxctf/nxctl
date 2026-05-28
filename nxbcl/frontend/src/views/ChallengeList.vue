@@ -34,7 +34,7 @@ function categoryColor(cat?: string): string {
 </script>
 
 <template>
-  <div class="mx-auto max-w-6xl px-6 py-8 lg:px-8">
+  <div class="w-full max-w-none px-4 py-6 lg:px-8 xl:px-10">
 
    <!-- Loading -->
     <div v-if="loading" class="flex items-center justify-center py-24">
