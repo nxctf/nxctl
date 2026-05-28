@@ -100,8 +100,9 @@ def run_frontend_command(args: list[str]) -> int:
         print(f"frontend directory not found: {FRONTEND_DIR}", file=sys.stderr)
         return 1
 
+    import os
     try:
-        result = subprocess.run(args, cwd=str(FRONTEND_DIR), check=False)
+        result = subprocess.run(args, cwd=str(FRONTEND_DIR), check=False, shell=(os.name == "nt"))
     except FileNotFoundError:
         print("npm is not installed or not available in PATH", file=sys.stderr)
         return 1

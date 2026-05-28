@@ -1,16 +1,19 @@
 {
   "compilerOptions": {
     "target": "ES2020",
-    "useDefineForClassFields": true,
-    "module": "Node16",
+    "module": "ESNext",
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "skipLibCheck": true,
-    "moduleResolution": "node16",
-    "isolatedModules": true,
-    "noEmit": true,
+    "moduleResolution": "bundler",
+    "strict": true,
     "jsx": "preserve",
-    "strict": true
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   },
-  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue"],
-  "references": []
+  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue"]
 }

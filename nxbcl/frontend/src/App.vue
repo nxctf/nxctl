@@ -1,153 +1,220 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
-import { issuePow, listChallenges, startChallenge, submitPow } from "./api.js";
-import { solvePow } from "./pow.js";
-import type { Challenge, InstanceInfo } from "./types.js";
+import { ref, onMounted, onUnmounted } from "vue";
+import { checkHealth, getRpcStatus, startRpc, stopRpc } from "./api.js";
 
-type ChallengeState = "idle" | "pow" | "session" | "launching" | "running" | "error";
+const online = ref(false);
+const rpcStatus = ref("stopped");
+const rpcUrl = ref("http://localhost:8545");
+const isToggling = ref(false);
+const showRpcControl = ref(false);
 
-const challenges = ref<Challenge[]>([]);
-const userId = ref(localStorage.getItem("nxbcl_user_id") || "local-user");
-const loading = ref(false);
-const error = ref("");
-const stateByChallenge = ref<Record<string, ChallengeState>>({});
-const instanceByChallenge = ref<Record<string, InstanceInfo>>({});
-const errorByChallenge = ref<Record<string, string>>({});
-
-const apiStatus = computed(() => (error.value ? "offline" : "online"));
-
-function setUserId() {
-  localStorage.setItem("nxbcl_user_id", userId.value.trim() || "local-user");
-}
-
-function setState(challengeId: string, state: ChallengeState) {
-  stateByChallenge.value = { ...stateByChallenge.value, [challengeId]: state };
-}
-
-function currentState(challengeId: string): ChallengeState {
-  return stateByChallenge.value[challengeId] || "idle";
-}
-
-function instanceEnv(challengeId: string, instance: InstanceInfo): string {
-  const rpcUrl = instance.rpc_url || `http://localhost:${instance.rpc_port || 8545}`;
-  const setupAddr = instance.setup_address || instance.deploy_address || "";
-  return [
-    `export RPC_URL=${rpcUrl}`,
-    `export PRIVKEY=${instance.private_key}`,
-    `export SETUP_ADDR=${setupAddr}`,
-    `cd challenges/${challengeId}`,
-    "python3 solve.py",
-  ].join("\n");
-}
-
-async function load() {
-  loading.value = true;
-  error.value = "";
+const updateStatus = async () => {
   try {
-    challenges.value = await listChallenges();
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : "Failed to load challenges";
+    const h = await checkHealth();
+    online.value = h.status === "ok";
+  } catch {
+    online.value = false;
+  }
+
+  try {
+    const r = await getRpcStatus();
+    rpcStatus.value = r.status;
+    rpcUrl.value = r.rpc_url;
+  } catch {
+    rpcStatus.value = "stopped";
+  }
+};
+
+let intervalId: any = null;
+
+onMounted(async () => {
+  await updateStatus();
+  intervalId = setInterval(updateStatus, 5000);
+});
+
+onUnmounted(() => {
+  if (intervalId) clearInterval(intervalId);
+});
+
+const handleStartRpc = async () => {
+  if (isToggling.value) return;
+  isToggling.value = true;
+  rpcStatus.value = "starting";
+  try {
+    const res = await startRpc();
+    if (res.status === "success") {
+      rpcStatus.value = "running";
+    } else {
+      rpcStatus.value = "stopped";
+      alert("Failed to start RPC: " + (res.error || "unknown error"));
+    }
+  } catch (err: any) {
+    rpcStatus.value = "stopped";
+    alert("Error: " + err.message);
   } finally {
-    loading.value = false;
+    isToggling.value = false;
+    await updateStatus();
   }
-}
+};
 
-async function launch(challenge: Challenge, restart = false) {
-  const id = challenge.id;
-  const user = userId.value.trim();
-  if (!user) {
-    errorByChallenge.value = { ...errorByChallenge.value, [id]: "User ID is required" };
-    return;
-  }
-
-  setUserId();
-  errorByChallenge.value = { ...errorByChallenge.value, [id]: "" };
-
+const handleStopRpc = async () => {
+  if (isToggling.value) return;
+  if (!confirm("Are you sure you want to stop the shared RPC container? This will affect any running challenge instances.")) return;
+  isToggling.value = true;
+  rpcStatus.value = "stopping";
   try {
-    setState(id, "pow");
-    const pow = await issuePow(id, user);
-    const solution = await solvePow(pow.salt, pow.zero_prefix);
-
-    setState(id, "session");
-    await submitPow(id, user, pow.challenge_token, solution);
-
-    setState(id, "launching");
-    const instance = await startChallenge(id, user, restart);
-    instanceByChallenge.value = { ...instanceByChallenge.value, [id]: instance };
-    setState(id, "running");
-  } catch (err) {
-    errorByChallenge.value = {
-      ...errorByChallenge.value,
-      [id]: err instanceof Error ? err.message : "Launch failed",
-    };
-    setState(id, "error");
+    const res = await stopRpc();
+    if (res.status === "success") {
+      rpcStatus.value = "stopped";
+    } else {
+      alert("Failed to stop RPC: " + (res.error || "unknown error"));
+    }
+  } catch (err: any) {
+    alert("Error: " + err.message);
+  } finally {
+    isToggling.value = false;
+    await updateStatus();
   }
-}
-
-async function copyEnv(challengeId: string) {
-  const instance = instanceByChallenge.value[challengeId];
-  if (!instance) {
-    return;
-  }
-  await navigator.clipboard.writeText(instanceEnv(challengeId, instance));
-}
-
-onMounted(load);
+};
 </script>
 
 <template>
-  <header>
-    <div class="shell topbar">
-      <h1>NXBCL Launcher</h1>
-      <span class="badge" :class="{ ok: apiStatus === 'online' }">{{ apiStatus }}</span>
-    </div>
-  </header>
-
-  <main class="shell">
-    <section class="toolbar">
-      <div>
-        <label for="user-id">User ID</label>
-        <input id="user-id" v-model="userId" autocomplete="off" @change="setUserId">
-      </div>
-      <button @click="load">Reload</button>
-    </section>
-
-    <div v-if="loading" class="notice">Loading challenges...</div>
-    <div v-else-if="error" class="notice error">{{ error }}</div>
-    <div v-else-if="!challenges.length" class="notice">No challenges found.</div>
-
-    <section v-else class="grid">
-      <article v-for="challenge in challenges" :key="challenge.id" class="card">
-        <div class="card-head">
-          <div>
-            <h2>{{ challenge.name || challenge.id }}</h2>
-            <p class="id">{{ challenge.id }}</p>
+  <div class="min-h-screen flex flex-col">
+    <!-- Header -->
+    <header class="glass border-b border-border sticky top-0 z-50">
+      <div class="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+        <router-link to="/challenges" class="flex items-center gap-3 no-underline">
+          <div
+            class="w-8 h-8 rounded-lg bg-gradient-to-br from-accent to-emerald-600 flex items-center justify-center text-bg font-bold text-sm"
+          >
+            NX
           </div>
-          <span class="badge" :class="{ ok: currentState(challenge.id) === 'running', warn: ['pow', 'session', 'launching'].includes(currentState(challenge.id)) }">
-            {{ currentState(challenge.id) === 'idle' ? (challenge.kind || 'challenge') : currentState(challenge.id) }}
+          <h1 class="text-lg font-bold text-text tracking-tight">
+            NXBCL<span class="text-text-muted font-normal ml-1.5 hidden sm:inline"
+              >Launcher</span
+             >
+          </h1>
+        </router-link>
+
+        <div class="flex items-center gap-3">
+          <!-- API Status -->
+          <span
+            class="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border border-border bg-card/50 text-text-muted"
+            title="Launcher API status"
+          >
+            <span
+              class="w-1.5 h-1.5 rounded-full"
+              :class="online ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'"
+            ></span>
+            API: {{ online ? "Online" : "Offline" }}
           </span>
+
+          <!-- Shared RPC Status & Control -->
+          <div class="relative">
+            <button
+              @click="showRpcControl = !showRpcControl"
+              class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-card-hover text-text transition cursor-pointer"
+            >
+              <span
+                class="w-2 h-2 rounded-full"
+                :class="{
+                  'bg-emerald-500 animate-pulse': rpcStatus === 'running',
+                  'bg-amber-500 animate-pulse': rpcStatus === 'starting' || rpcStatus === 'stopping',
+                  'bg-red-500': rpcStatus === 'stopped'
+                }"
+              ></span>
+              RPC Node: <span class="capitalize font-bold" :class="{
+                'text-emerald-400': rpcStatus === 'running',
+                'text-amber-400': rpcStatus === 'starting' || rpcStatus === 'stopping',
+                'text-red-400': rpcStatus === 'stopped'
+              }">{{ rpcStatus }}</span>
+              <svg class="w-3.5 h-3.5 text-text-muted ml-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            <!-- Dropdown Menu -->
+            <div
+              v-if="showRpcControl"
+              class="absolute right-0 mt-2 w-64 bg-card border border-border rounded-xl shadow-2xl p-4 z-50 text-left"
+            >
+              <div class="flex justify-between items-start mb-1">
+                <h3 class="text-sm font-bold text-text">Shared Blockchain RPC</h3>
+                <button @click="showRpcControl = false" class="text-text-muted hover:text-text text-xs cursor-pointer">✕</button>
+              </div>
+              <p class="text-xs text-text-muted mb-3">
+                Status controls for the local Ethereum (Anvil) network instance.
+              </p>
+
+              <div class="space-y-2.5">
+                <div class="flex items-center justify-between text-xs border-b border-border/50 pb-2">
+                  <span class="text-text-muted">RPC Endpoint</span>
+                  <code class="text-accent bg-accent-dim/30 px-1 py-0.5 rounded text-[10px]">{{ rpcUrl }}</code>
+                </div>
+
+                <div class="flex gap-2">
+                  <button
+                    v-if="rpcStatus === 'stopped'"
+                    @click="handleStartRpc"
+                    :disabled="isToggling"
+                    class="flex-1 text-center py-2 px-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold rounded-lg text-xs transition cursor-pointer"
+                  >
+                    {{ isToggling ? "Starting..." : "Start RPC" }}
+                  </button>
+                  <button
+                    v-if="rpcStatus === 'running'"
+                    @click="handleStopRpc"
+                    :disabled="isToggling"
+                    class="flex-1 text-center py-2 px-3 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-bold rounded-lg text-xs transition cursor-pointer"
+                  >
+                    {{ isToggling ? "Stopping..." : "Stop RPC" }}
+                  </button>
+                  <button
+                    v-if="rpcStatus === 'starting' || rpcStatus === 'stopping'"
+                    disabled
+                    class="flex-1 text-center py-2 px-3 bg-amber-600/50 text-white font-bold rounded-lg text-xs transition"
+                  >
+                    Transitioning...
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
+      </div>
+    </header>
 
-        <p class="desc">{{ challenge.description || 'Blockchain challenge' }}</p>
+    <!-- Main content -->
+    <main class="flex-1">
+      <router-view v-slot="{ Component }">
+        <transition name="page" mode="out-in">
+          <component :is="Component" />
+        </transition>
+      </router-view>
+    </main>
 
-        <div class="actions">
-          <button class="primary" :disabled="['pow', 'session', 'launching'].includes(currentState(challenge.id))" @click="launch(challenge)">
-            Start
-          </button>
-          <button :disabled="['pow', 'session', 'launching'].includes(currentState(challenge.id))" @click="launch(challenge, true)">
-            Restart
-          </button>
-          <button :disabled="!instanceByChallenge[challenge.id]" @click="copyEnv(challenge.id)">
-            Copy Env
-          </button>
-        </div>
-
-        <div v-if="errorByChallenge[challenge.id]" class="output error">
-          {{ errorByChallenge[challenge.id] }}
-        </div>
-
-        <pre v-if="instanceByChallenge[challenge.id]" class="output active">{{ instanceEnv(challenge.id, instanceByChallenge[challenge.id]) }}</pre>
-      </article>
-    </section>
-  </main>
+    <!-- Footer -->
+    <footer class="border-t border-border py-6 mt-auto">
+      <div class="max-w-6xl mx-auto px-4 sm:px-6">
+        <p class="text-xs text-text-muted text-center">
+          NXBCL — Blockchain Challenge Launcher · NXCTF
+        </p>
+      </div>
+    </footer>
+  </div>
 </template>
+
+<style scoped>
+.page-enter-active,
+.page-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.page-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.page-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+</style>
