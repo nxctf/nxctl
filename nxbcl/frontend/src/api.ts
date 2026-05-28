@@ -116,6 +116,21 @@ export function getRpcStatus(): Promise<{
   }>("/api/rpc/status");
 }
 
+export function getServices(): Promise<{
+  anvil: { status: string; rpc_url: string; expires_at?: string | null };
+  panel: { status: string };
+  active_instances: Array<{
+    challenge_id: string;
+    instance_id: string;
+    wallet_address: string;
+    rpc_port: number;
+    expires_at: string;
+    status: string;
+  }>;
+}> {
+  return request("/api/services");
+}
+
 export function startRpc(): Promise<{
   status: string;
   error?: string;

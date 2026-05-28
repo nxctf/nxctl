@@ -287,7 +287,10 @@ def api_start_challenge(
 
     # Start new instance using adapter stub
     adapter = NxctlAdapter(config.data_path)
-    inst = adapter.start_instance(session_id, challenge_id)
+    try:
+        inst = adapter.start_instance(session_id, challenge_id)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
 
     expires_at = utc_now() + timedelta(seconds=config.challenge_ttl_seconds)
 
@@ -552,7 +555,17 @@ def api_get_active_instances(
 
     return {"active": False}
 
-rpc_expires_at: Optional[datetime] = None
+def is_rpc_reachable() -> bool:
+    import socket
+    try:
+        with socket.create_connection(("127.0.0.1", 8545), timeout=1.0):
+            return True
+    except Exception:
+        try:
+            with socket.create_connection(("localhost", 8545), timeout=1.0):
+                return True
+        except Exception:
+            return False
 
 @app.get("/api/rpc/status")
 def api_rpc_status():
@@ -565,7 +578,7 @@ def api_rpc_status():
             import subprocess
             import os
             subprocess.run(
-                ["docker", "compose", "down"],
+                ["docker", "compose", "down", "-v", "--remove-orphans"],
                 cwd=str(config.chall_dir),
                 shell=(os.name == "nt"),
                 capture_output=True,
@@ -573,12 +586,28 @@ def api_rpc_status():
             )
         except Exception:
             pass
+        # Clear the database when RPC TTL expires
+        try:
+            with get_db_conn(config.db_file) as conn:
+                conn.execute("DELETE FROM instances")
+                conn.commit()
+        except Exception:
+            pass
         rpc_expires_at = None
         save_rpc_state(None)
 
     connected = rpc_expires_at is not None and now < rpc_expires_at
+    if connected and not is_rpc_reachable():
+        connected = False
 
     if not connected:
+        try:
+            with get_db_conn(config.db_file) as conn:
+                conn.execute("DELETE FROM instances")
+                conn.commit()
+        except Exception:
+            pass
+        rpc_expires_at = None
         save_rpc_state(None)
     return {
         "status": "running" if connected else "stopped",
@@ -626,14 +655,20 @@ def api_rpc_restart():
     if not chall_dir.exists():
         raise HTTPException(status_code=400, detail="Challenge directory not initialized")
     try:
-        # Stop
+        # Stop — this wipes chain state (volumes), so all existing instances are invalid
         subprocess.run(
-            ["docker", "compose", "down"],
+            ["docker", "compose", "down", "-v", "--remove-orphans"],
             cwd=str(chall_dir),
             shell=(os.name == "nt"),
             capture_output=True,
             text=True
         )
+
+        # Purge all instance records — chain state is destroyed, old credentials are stale
+        with get_db_conn(config.db_file) as conn:
+            conn.execute("DELETE FROM instances WHERE status = 'running'")
+            logger.info("Purged all running instance records after RPC restart (chain state wiped)")
+
         # Start
         res = subprocess.run(
             ["docker", "compose", "up", "-d", "anvil", "rpc"],
@@ -667,18 +702,60 @@ def api_rpc_stop():
         raise HTTPException(status_code=400, detail="Challenge directory not initialized")
     try:
         subprocess.run(
-            ["docker", "compose", "down"],
+            ["docker", "compose", "down", "-v", "--remove-orphans"],
             cwd=str(chall_dir),
             shell=(os.name == "nt"),
             capture_output=True,
             text=True
         )
+        # Purge all instance records — chain is down, credentials are invalid
+        with get_db_conn(config.db_file) as conn:
+            conn.execute("DELETE FROM instances WHERE status = 'running'")
+            logger.info("Purged all running instance records after RPC stop")
+
         global rpc_expires_at
         rpc_expires_at = None
         save_rpc_state(None)
         return {"status": "success"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/services")
+def api_services():
+    """Return a compact view of key services: anvil (RPC), panel/API, and active instances."""
+    load_rpc_state()
+    now = datetime.now(timezone.utc)
+    anvil_running = rpc_expires_at is not None and now < rpc_expires_at
+
+    active_instances = []
+    try:
+        with get_db_conn(config.db_file) as conn:
+            sweep_expired_instances(conn)
+            rows = conn.execute(
+                "SELECT challenge_id, instance_id, wallet_address, rpc_port, expires_at, status FROM instances WHERE status = 'running' ORDER BY created_at DESC LIMIT 10"
+            ).fetchall()
+            for r in rows:
+                active_instances.append({
+                    "challenge_id": r["challenge_id"],
+                    "instance_id": r["instance_id"],
+                    "wallet_address": r["wallet_address"],
+                    "rpc_port": r["rpc_port"],
+                    "expires_at": r["expires_at"],
+                    "status": r["status"],
+                })
+    except Exception:
+        active_instances = []
+
+    return {
+        "anvil": {
+            "status": "running" if anvil_running else "stopped",
+            "rpc_url": resolve_public_url(config.rpc_base_url, "http://localhost:8545"),
+            "expires_at": rpc_expires_at.isoformat() if rpc_expires_at else None,
+        },
+        "panel": {"status": "running"},
+        "active_instances": active_instances,
+    }
 
 @app.post("/api/rpc/extend")
 def api_rpc_extend():

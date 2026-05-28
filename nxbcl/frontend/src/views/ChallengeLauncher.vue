@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { useRouter } from "vue-router";
 import { issuePow, listChallenges, startChallenge, submitPow, getInstance, extendChallenge, checkChallenge } from "../api.js";
 import { solvePow } from "../pow.js";
 import type { Challenge, ChallengeState, InstanceInfo } from "../types.js";
-import CopyField from "../components/CopyField.vue";
+import ChallengeHero from "../components/challenge/ChallengeHero.vue";
+import ChallengeActions from "../components/challenge/ChallengeActions.vue";
+import TerminalPanel from "../components/challenge/TerminalPanel.vue";
+import InstanceCredentialsPanel from "../components/challenge/InstanceCredentialsPanel.vue";
 
 const props = defineProps<{ id: string }>();
-const router = useRouter();
 
 const challenge = ref<Challenge | null>(null);
 const instance = ref<InstanceInfo | null>(null);
@@ -25,7 +26,9 @@ const secondsLeft = ref<number>(999999);
 const timeLeftStr = ref<string>("");
 let timerIntervalId: any = null;
 
-const updateCountdown = () => {
+let statusCheckCounter = 0;
+
+const updateCountdown = async () => {
   if (!instance.value || !instance.value.expires_at) {
     secondsLeft.value = 999999;
     timeLeftStr.value = "";
@@ -38,8 +41,8 @@ const updateCountdown = () => {
 
   if (diff === 0) {
     timeLeftStr.value = "Expired";
-    instance.value.status = "expired";
     state.value = "idle";
+    instance.value = null;
     stopTimer();
     return;
   }
@@ -47,6 +50,26 @@ const updateCountdown = () => {
   const m = Math.floor(diff / 60);
   const s = diff % 60;
   timeLeftStr.value = `${m}:${s < 10 ? '0' : ''}${s}`;
+
+  // Periodically verify instance existence on the backend (every 5 seconds)
+  statusCheckCounter++;
+  if (statusCheckCounter >= 5) {
+    statusCheckCounter = 0;
+    try {
+      const activeInst = await getInstance(props.id);
+      if (!activeInst || activeInst.status !== "running") {
+        logTerminal("SYS: Ephemeral sandbox environment terminated. Reason: Blockchain RPC node is offline or stopped.");
+        instance.value = null;
+        state.value = "idle";
+        stopTimer();
+      }
+    } catch {
+      logTerminal("SYS: Ephemeral sandbox environment terminated. Reason: Blockchain RPC node is offline or stopped.");
+      instance.value = null;
+      state.value = "idle";
+      stopTimer();
+    }
+  }
 };
 
 const startTimer = () => {
@@ -222,14 +245,6 @@ async function handleExtend() {
     extending.value = false;
   }
 }
-async function copyFullEnv() {
-  if (!envBlock.value) return;
-  try {
-    await navigator.clipboard.writeText(envBlock.value);
-  } catch {
-    /* noop */
-  }
-}
 
 const isLaunching = computed(() =>
   ["pow", "session", "launching"].includes(state.value),
@@ -269,19 +284,7 @@ const stateColor = computed(() => {
 </script>
 
 <template>
-  <div class="mx-auto max-w-6xl space-y-6 px-6 py-8 lg:px-8">
-    <div>
-      <button
-        @click="router.push({ name: 'challenges' })"
-        class="inline-flex items-center gap-2 rounded-full border border-border/60 bg-surface/40 px-3 py-2 text-sm text-text-muted transition-all duration-150 hover:border-border-hover hover:bg-surface/70 hover:text-text"
-      >
-        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M19 12H5M12 19l-7-7 7-7" />
-        </svg>
-        <span>Back to challenges</span>
-      </button>
-    </div>
-
+  <div class="w-full max-w-none space-y-6 px-4 py-6 lg:px-8 xl:px-10">
     <div v-if="loading" class="flex items-center justify-center py-24">
       <svg class="h-4 w-4 animate-spin text-accent" viewBox="0 0 24 24" fill="none">
         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
@@ -298,219 +301,48 @@ const stateColor = computed(() => {
     </div>
 
     <template v-else>
-      <section class="animate-slide-up rounded-2xl border border-border/60 bg-linear-to-br from-surface/60 to-surface/25 p-6 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
-        <div class="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-          <div class="min-w-0 flex-1 space-y-4">
-            <div class="flex flex-wrap items-center gap-3">
-              <h1 class="text-2xl font-semibold tracking-tight text-text">
-                {{ challenge.name || challenge.id }}
-              </h1>
-              <span
-                v-if="challenge.category"
-                class="inline-flex items-center rounded-full border border-border/50 bg-surface-2/80 px-2.5 py-1 font-mono text-[10px] font-medium uppercase tracking-wider text-text-muted"
-              >
-                {{ challenge.category }}
-              </span>
-            </div>
+      <ChallengeHero
+        :challenge="challenge"
+        :stateLabel="stateLabel"
+        :state="state"
+        :stateColor="stateColor"
+        :isLaunching="isLaunching"
+      />
 
-            <p class="max-w-3xl text-sm leading-relaxed text-text-muted">
-              {{ challenge.description || "Deploy and interact with this challenge's smart contract environment." }}
-            </p>
-
-            <div class="flex flex-wrap items-center gap-2">
-              <span v-if="challenge.chain_family" class="inline-flex items-center rounded-full border border-border/40 bg-surface-2/50 px-2.5 py-1 font-mono text-[11px] text-text-muted">
-                {{ challenge.chain_family }}
-              </span>
-              <span v-if="challenge.chain_id" class="inline-flex items-center rounded-full border border-border/40 bg-surface-2/50 px-2.5 py-1 font-mono text-[11px] text-text-muted">
-                Chain {{ challenge.chain_id }}
-              </span>
-              <span v-if="challenge.protocol" class="inline-flex items-center rounded-full border border-border/40 bg-surface-2/50 px-2.5 py-1 font-mono text-[11px] text-text-muted">
-                {{ challenge.protocol }}
-              </span>
-            </div>
-          </div>
-
-          <div class="shrink-0">
-            <span
-              class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 font-mono text-[11px] font-medium uppercase tracking-wider"
-              :class="[
-                stateColor,
-                state === 'active'
-                  ? 'border-ok/20 bg-ok-dim'
-                  : state === 'error'
-                    ? 'border-danger/20 bg-danger-dim'
-                    : isLaunching
-                      ? 'border-warn/20 bg-warn-dim'
-                      : 'border-border bg-surface',
-              ]"
-            >
-              <span v-if="isLaunching" class="h-1.5 w-1.5 rounded-full bg-current animate-pulse"></span>
-              <span v-else-if="state === 'active'" class="h-1.5 w-1.5 rounded-full bg-ok"></span>
-              {{ stateLabel }}
-            </span>
-          </div>
-        </div>
-      </section>
-
-      <section class="grid gap-5 animate-slide-up lg:grid-cols-[340px,minmax(0,1fr)]" style="animation-delay: 50ms; animation-fill-mode: backwards">
-        <div class="flex flex-col justify-between rounded-2xl border border-border/60 bg-surface/35 p-5 shadow-sm">
-          <div class="space-y-3">
-            <div v-if="powProgress" class="flex items-start gap-2 rounded-xl border border-border/40 bg-surface/70 p-3 font-mono text-xs text-text-muted">
-              <svg class="h-3.5 w-3.5 shrink-0 animate-spin text-warn" viewBox="0 0 24 24" fill="none">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              <span class="leading-relaxed">{{ powProgress }}</span>
-            </div>
-
-            <div v-if="errorMsg && (state === 'error' || state === 'active')" class="rounded-xl border border-danger/15 bg-danger-dim p-3 font-mono text-xs text-danger">
-              {{ errorMsg }}
-            </div>
-
-            <div v-if="flag" class="rounded-xl border border-ok/15 bg-ok-dim p-4">
-              <p class="mb-2 text-[11px] font-semibold uppercase tracking-wider text-ok">Solved</p>
-              <pre class="cursor-pointer select-all truncate rounded-lg border border-ok/15 bg-bg/60 p-2.5 font-mono text-xs text-emerald-300">{{ flag }}</pre>
-            </div>
-
-            <div v-if="extendMsg" class="rounded-xl border border-accent/15 bg-accent-dim p-3 font-mono text-xs text-accent">
-              {{ extendMsg }}
-            </div>
-          </div>
-
-          <div class="mt-5 space-y-2">
-            <button
-              v-if="instance"
-              @click="handleCheck"
-              :disabled="checking || isLaunching"
-              class="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-ok/20 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition-all duration-150 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <svg v-if="checking" class="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              {{ checking ? "Checking..." : "Check Solution" }}
-            </button>
-
-            <button
-              v-if="instance"
-              @click="copyFullEnv"
-              class="inline-flex w-full items-center justify-center rounded-xl border border-border/60 bg-surface px-4 py-3 text-sm font-medium text-text-muted transition-all duration-150 hover:border-border-hover hover:bg-surface-2 hover:text-text"
-            >
-              Copy Solver Env
-            </button>
-
-            <button
-              v-if="state !== 'active'"
-              @click="launch(false)"
-              :disabled="isLaunching"
-              class="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-transparent bg-accent px-4 py-3 text-sm font-semibold text-black transition-all duration-150 hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Start Challenge
-            </button>
-
-            <div v-if="instance" class="grid grid-cols-2 gap-2">
-              <button
-                @click="handleExtend"
-                :disabled="extending || isLaunching || secondsLeft > (instance.extend_threshold_seconds || 300)"
-                class="inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-3 text-sm font-medium transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-40"
-                :class="
-                  secondsLeft > (instance.extend_threshold_seconds || 300)
-                    ? 'border-border/60 bg-surface text-text-muted'
-                    : 'border-accent/20 bg-accent/8 text-accent hover:bg-accent/15'
-                "
-                :title="secondsLeft > (instance.extend_threshold_seconds || 300) ? `Locked until under ${Math.round((instance.extend_threshold_seconds || 300) / 60)}m` : 'Extend lease'"
-              >
-                <svg v-if="extending" class="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                <span>Extend +{{ Math.round((instance.extend_seconds || 300) / 60) }}m</span>
-              </button>
-
-              <button
-                v-if="state === 'active'"
-                @click="launch(true)"
-                :disabled="isLaunching"
-                class="inline-flex items-center justify-center rounded-xl border border-danger/20 bg-danger/8 px-3 py-3 text-sm font-medium text-danger transition-all duration-150 hover:bg-danger/15 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Reset State
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div class="flex min-h-90 flex-col overflow-hidden rounded-2xl border border-border/60 bg-terminal-bg shadow-sm">
-          <div class="flex items-center justify-between border-b border-border/30 bg-surface/20 px-4 py-3">
-            <span class="text-xs font-mono font-medium tracking-wide text-text-muted">Terminal</span>
-            <div class="flex items-center gap-1.5">
-              <span class="h-2 w-2 rounded-full bg-emerald-500/80"></span>
-              <span class="text-[10px] font-mono uppercase tracking-[0.18em] text-text-muted/50">live</span>
-            </div>
-          </div>
-
-          <div class="flex-1 overflow-y-auto px-4 py-4 font-mono text-[11px] text-terminal-text">
-            <div v-for="(log, idx) in terminalLogs" :key="idx" class="whitespace-pre-wrap leading-6 select-text">
-              <span class="text-accent/70">{{ log.substring(0, 10) }}</span>
-              <span class="ml-0.5 text-text-muted/80">{{ log.substring(10) }}</span>
-            </div>
-          </div>
-
-          <div class="border-t border-border/20 px-4 py-2.5 font-mono text-[11px] text-text-muted/40">
-            Extend retains contract state · Reset tears down and redeploys
-          </div>
-        </div>
-      </section>
+      <ChallengeActions
+        :powProgress="powProgress"
+        :errorMsg="errorMsg"
+        :flag="flag"
+        :extendMsg="extendMsg"
+        :instance="instance"
+        :isLaunching="isLaunching"
+        :checking="checking"
+        :extending="extending"
+        :secondsLeft="secondsLeft"
+        :state="state"
+        :extendThresholdSeconds="instance?.extend_threshold_seconds || 300"
+        :extendSeconds="instance?.extend_seconds || 300"
+        @check="handleCheck"
+        @launch="launch(false)"
+        @extend="handleExtend"
+        @reset="launch(true)"
+      />
 
       <section
-        v-if="instance"
-        class="animate-slide-up rounded-2xl border border-border/60 bg-surface/35 p-6 shadow-sm"
-        style="animation-delay: 100ms; animation-fill-mode: backwards"
+        class="grid gap-6"
+        :class="instance ? 'xl:grid-cols-[minmax(0,1.2fr)_minmax(340px,1fr)] xl:items-stretch' : 'grid-cols-1'"
       >
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <h2 class="text-sm font-semibold text-text">Instance Credentials</h2>
-          <span
-            v-if="instance.expires_at"
-            class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[11px] transition-all duration-300"
-            :class="secondsLeft < (instance.extend_threshold_seconds || 300) ? 'bg-danger-dim text-danger border-danger/20 animate-pulse-soft' : 'bg-surface-2 text-text-muted border-border/40'"
-          >
-            {{ timeLeftStr ? `${timeLeftStr}` : 'Expired' }}
-          </span>
-        </div>
-
-        <div class="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div class="space-y-2 rounded-xl border border-border/50 bg-surface/30 p-4">
-            <span class="text-[11px] font-medium uppercase tracking-[0.18em] text-text-muted">RPC Endpoint</span>
-            <CopyField label="RPC URL" :value="rpcUrl" />
-          </div>
-
-          <div class="space-y-2 rounded-xl border border-border/50 bg-surface/30 p-4">
-            <span class="text-[11px] font-medium uppercase tracking-[0.18em] text-text-muted">Private Key</span>
-            <CopyField label="Private Key" :value="instance.private_key" />
-          </div>
-
-          <div class="space-y-2 rounded-xl border border-border/50 bg-surface/30 p-4">
-            <span class="text-[11px] font-medium uppercase tracking-[0.18em] text-text-muted">Setup Contract</span>
-            <CopyField label="Setup Address" :value="setupAddr" />
-          </div>
-
-          <div v-if="instance.wallet_address" class="space-y-2 rounded-xl border border-border/50 bg-surface/30 p-4">
-            <span class="text-[11px] font-medium uppercase tracking-[0.18em] text-text-muted">Wallet Address</span>
-            <CopyField label="Wallet" :value="instance.wallet_address" />
-          </div>
-        </div>
-
-        <div class="mt-5 rounded-xl border border-border/50 bg-terminal-bg/80 p-4">
-          <div class="mb-3 flex items-center justify-between gap-3">
-            <span class="text-[11px] font-medium uppercase tracking-[0.18em] text-text-muted">Solver Environment</span>
-            <button
-              @click="copyFullEnv"
-              class="text-[11px] font-medium text-accent transition-colors hover:text-accent-hover"
-            >
-              Copy
-            </button>
-          </div>
-          <pre class="overflow-x-auto select-all rounded-lg border border-border/40 bg-bg/40 p-3 font-mono text-[11px] leading-relaxed text-terminal-text">{{ envBlock }}</pre>
-        </div>
+        <TerminalPanel :logs="terminalLogs" class="h-full" />
+        <InstanceCredentialsPanel
+          v-if="instance"
+          :instance="instance"
+          :rpcUrl="rpcUrl"
+          :setupAddr="setupAddr"
+          :envBlock="envBlock"
+          :timeLeftStr="timeLeftStr"
+          :secondsLeft="secondsLeft"
+          class="h-full"
+        />
       </section>
     </template>
   </div>

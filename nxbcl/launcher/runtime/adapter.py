@@ -43,6 +43,19 @@ class NxctlAdapter:
             except Exception as e:
                 logger.warning(f"Failed to run docker compose up: {e}")
 
+        # 1b. If web3 is available, verify that the RPC node is actually reachable
+        #     before doing any provisioning. Fail fast if it's not.
+        if has_web3:
+            from web3 import Web3 as _W3
+
+            w3_check = _W3(_W3.HTTPProvider("http://127.0.0.1:8545", request_kwargs={"timeout": 5}))
+            if not w3_check.is_connected():
+                w3_check = _W3(_W3.HTTPProvider("http://localhost:8545", request_kwargs={"timeout": 5}))
+            if not w3_check.is_connected():
+                raise RuntimeError(
+                    "RPC node is not reachable. Start the RPC server first before launching a challenge."
+                )
+
         # 2. Check if factory needs to be deployed (metadata missing OR contract code not present on active chain)
         metadata_file = chall_dir / "metadata" / "challenges" / challenge_id / "metadata.json"
 
@@ -110,78 +123,79 @@ class NxctlAdapter:
             factory_address = "0x5FbDB2315678afecb367f032d93F642f64180aa3"
 
         # 4. Interact with Blockchain via Web3 if available
-        private_key = "0x" + secrets.token_hex(32)
-        wallet_address = "0x" + secrets.token_hex(20)
-        setup_address = None
-
         if has_web3:
             local_rpc = "http://127.0.0.1:8545"
             w3 = Web3(Web3.HTTPProvider(local_rpc))
             if not w3.is_connected():
                 w3 = Web3(Web3.HTTPProvider("http://localhost:8545"))
 
+            # At this point w3 MUST be connected (we verified above)
             player = Account.create()
             private_key = player.key.hex()
             if not private_key.startswith("0x"):
                 private_key = "0x" + private_key
             wallet_address = player.address
 
-            if w3.is_connected():
-                try:
-                    # Faucet fund
-                    funder_private_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-                    funder = w3.eth.account.from_key(funder_private_key)
+            try:
+                # Faucet fund
+                funder_private_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+                funder = w3.eth.account.from_key(funder_private_key)
 
-                    # Send 0.2 ETH
-                    tx = {
-                        "to": wallet_address,
-                        "value": w3.to_wei("0.2", "ether"),
-                        "gas": 21000,
-                        "gasPrice": w3.eth.gas_price,
-                        "nonce": w3.eth.get_transaction_count(funder.address),
-                        "chainId": w3.eth.chain_id,
+                # Send 0.2 ETH
+                tx = {
+                    "to": wallet_address,
+                    "value": w3.to_wei("0.2", "ether"),
+                    "gas": 21000,
+                    "gasPrice": w3.eth.gas_price,
+                    "nonce": w3.eth.get_transaction_count(funder.address),
+                    "chainId": w3.eth.chain_id,
+                }
+                signed = funder.sign_transaction(tx)
+                w3.eth.send_raw_transaction(signed.raw_transaction)
+
+                # Spawn setup contract
+                factory_abi = [
+                    {
+                        "inputs": [{"internalType": "address", "name": "player", "type": "address"}],
+                        "name": "spawnFor",
+                        "outputs": [{"internalType": "address", "name": "", "type": "address"}],
+                        "stateMutability": "nonpayable",
+                        "type": "function",
+                    },
+                    {
+                        "inputs": [{"internalType": "address", "name": "", "type": "address"}],
+                        "name": "setupOf",
+                        "outputs": [{"internalType": "contract Setup", "name": "", "type": "address"}],
+                        "stateMutability": "view",
+                        "type": "function",
                     }
-                    signed = funder.sign_transaction(tx)
-                    w3.eth.send_raw_transaction(signed.raw_transaction)
+                ]
 
-                    # Spawn setup contract
-                    factory_abi = [
-                        {
-                            "inputs": [{"internalType": "address", "name": "player", "type": "address"}],
-                            "name": "spawnFor",
-                            "outputs": [{"internalType": "address", "name": "", "type": "address"}],
-                            "stateMutability": "nonpayable",
-                            "type": "function",
-                        },
-                        {
-                            "inputs": [{"internalType": "address", "name": "", "type": "address"}],
-                            "name": "setupOf",
-                            "outputs": [{"internalType": "contract Setup", "name": "", "type": "address"}],
-                            "stateMutability": "view",
-                            "type": "function",
-                        }
-                    ]
+                factory = w3.eth.contract(address=w3.to_checksum_address(factory_address), abi=factory_abi)
 
-                    factory = w3.eth.contract(address=w3.to_checksum_address(factory_address), abi=factory_abi)
+                # Call spawnFor(player)
+                spawn_tx = factory.functions.spawnFor(wallet_address).build_transaction({
+                    "from": funder.address,
+                    "gas": 3000000,
+                    "gasPrice": w3.eth.gas_price,
+                    "nonce": w3.eth.get_transaction_count(funder.address),
+                    "chainId": w3.eth.chain_id,
+                })
+                signed_spawn = funder.sign_transaction(spawn_tx)
+                tx_hash = w3.eth.send_raw_transaction(signed_spawn.raw_transaction)
+                w3.eth.wait_for_transaction_receipt(tx_hash)
 
-                    # Call spawnFor(player)
-                    spawn_tx = factory.functions.spawnFor(wallet_address).build_transaction({
-                        "from": funder.address,
-                        "gas": 3000000,
-                        "gasPrice": w3.eth.gas_price,
-                        "nonce": w3.eth.get_transaction_count(funder.address),
-                        "chainId": w3.eth.chain_id,
-                    })
-                    signed_spawn = funder.sign_transaction(spawn_tx)
-                    tx_hash = w3.eth.send_raw_transaction(signed_spawn.raw_transaction)
-                    w3.eth.wait_for_transaction_receipt(tx_hash)
-
-                    # Get setup address
-                    setup_address = factory.functions.setupOf(wallet_address).call()
-                except Exception as e:
-                    logger.warning(f"Web3 transaction failed: {e}")
-
-        if not setup_address:
+                # Get setup address
+                setup_address = factory.functions.setupOf(wallet_address).call()
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to provision wallet/contracts on chain: {e}"
+                )
+        else:
+            # Dev fallback: no web3 installed, generate stub data
+            logger.warning("web3 not installed — returning stub instance data (dev mode only)")
+            private_key = "0x" + secrets.token_hex(32)
+            wallet_address = "0x" + secrets.token_hex(20)
             setup_address = "0x" + secrets.token_hex(20)
 
         return {
