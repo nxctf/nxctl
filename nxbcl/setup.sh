@@ -46,6 +46,10 @@ EOF
     echo "  nxbcl init-db"
     echo "  nxbcl sync --dry-run"
     echo "  nxbcl challenges"
+    echo "  nxbcl up        # start compose stack and seed RPC lease"
+    echo "  nxbcl ps        # show compose status and lease time"
+    echo "  nxbcl down      # stop compose stack"
+    echo "  nxbcl ps --kill # stop compose and clear runtime data"
     echo "  nxbcl serve --host 0.0.0.0 --port 8080"
     echo
     echo "Frontend:"

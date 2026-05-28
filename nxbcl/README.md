@@ -104,6 +104,23 @@ Run the launcher API:
 nxbcl serve --host 0.0.0.0 --port 8080
 ```
 
+Background lifecycle commands:
+
+```bash
+nxbcl up
+nxbcl ps
+nxbcl down
+nxbcl ps --kill
+```
+
+`up` brings up the shared Docker Compose stack under `data_nxbcl/chall` and
+initializes the RPC lease state used by the frontend countdown.
+
+`ps` prints compose status and the remaining RPC lease time when state exists.
+
+`ps --kill` stops the compose stack and removes runtime state, database files,
+tmp data, and logs so the next run starts clean.
+
 Launcher UI and API docs:
 
 ```text

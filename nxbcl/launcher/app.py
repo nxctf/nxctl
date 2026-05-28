@@ -1,3 +1,5 @@
+import logging
+import json
 import os
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -16,6 +18,8 @@ from nxbcl.launcher.pow.service import PowService
 from nxbcl.launcher.challenges.registry import ChallengeRegistry
 from nxbcl.launcher.runtime.adapter import NxctlAdapter
 
+logger = logging.getLogger(__name__)
+
 app = FastAPI(title="NXBCL Blockchain Challenge Launcher")
 
 # Add CORS Middleware
@@ -29,6 +33,7 @@ app.add_middleware(
 
 # Load configuration
 config = get_nxbcl_config()
+rpc_state_file = config.state_dir / "rpc_state.json"
 
 
 def resolve_public_url(configured_url: str, fallback_url: str) -> str:
@@ -36,6 +41,38 @@ def resolve_public_url(configured_url: str, fallback_url: str) -> str:
     if configured_url:
         return configured_url
     return fallback_url
+
+
+def load_rpc_state() -> Optional[datetime]:
+    global rpc_expires_at
+    if rpc_expires_at:
+        return rpc_expires_at
+    if not rpc_state_file.exists():
+        return None
+    try:
+        payload = json.loads(rpc_state_file.read_text(encoding="utf-8"))
+        expires_at = payload.get("expires_at")
+        if expires_at:
+            rpc_expires_at = datetime.fromisoformat(expires_at)
+    except Exception:
+        rpc_expires_at = None
+    return rpc_expires_at
+
+
+def save_rpc_state(expires_at: Optional[datetime]) -> None:
+    rpc_state_file.parent.mkdir(parents=True, exist_ok=True)
+    if not expires_at:
+        if rpc_state_file.exists():
+            try:
+                rpc_state_file.unlink()
+            except Exception:
+                pass
+        return
+
+    rpc_state_file.write_text(
+        json.dumps({"expires_at": expires_at.isoformat()}),
+        encoding="utf-8",
+    )
 
 # Mount static folder if it exists
 static_dir = Path(__file__).resolve().parent / "static"
@@ -160,8 +197,7 @@ def api_verify_pow(
 def sweep_expired_instances(conn):
     conn.execute(
         """
-        UPDATE instances
-        SET status = 'expired'
+        DELETE FROM instances
         WHERE status = 'running' AND expires_at <= ?
         """,
         (utc_now().isoformat(),)
@@ -205,6 +241,9 @@ def api_start_challenge(
 
     session_id = session["session_id"]
 
+    with get_db_conn(config.db_file) as conn:
+        sweep_expired_instances(conn)
+
     # If not restart, check if we already have an active running instance for this session
     if not restart:
         with get_db_conn(config.db_file) as conn:
@@ -221,7 +260,7 @@ def api_start_challenge(
                 # Idempotent response: return existing running instance
                 return instance_response(dict(row), chall_desc)
 
-    # Stop any existing active instances for this USER (across all their sessions) to avoid leakage
+    # Remove any previous instance records owned by this user so only one challenge context remains.
     with get_db_conn(config.db_file) as conn:
         session_rows = conn.execute(
             "SELECT session_id FROM sessions WHERE user_id = ?",
@@ -239,19 +278,12 @@ def api_start_challenge(
                 """,
                 user_sessions
             )
+            conn.execute(
+                f"DELETE FROM instances WHERE session_id IN ({placeholders})",
+                user_sessions
+            )
 
     # No concurrency limits needed for shared_chain scope
-
-    # Clean up any remaining active instance for this specific session/challenge
-    with get_db_conn(config.db_file) as conn:
-        conn.execute(
-            """
-            UPDATE instances
-            SET status = 'stopped'
-            WHERE session_id = ? AND challenge_id = ? AND status = 'running'
-            """,
-            (session_id, challenge_id)
-        )
 
     # Start new instance using adapter stub
     adapter = NxctlAdapter(config.data_path)
@@ -316,6 +348,7 @@ def api_get_instance(
 
     session_id = session["session_id"]
     with get_db_conn(config.db_file) as conn:
+        sweep_expired_instances(conn)
         row = conn.execute(
             """
             SELECT instance_id, wallet_address, private_key, deploy_address, rpc_port, status, expires_at
@@ -337,6 +370,7 @@ def api_extend_challenge(
 ):
     session_id = session["session_id"]
     with get_db_conn(config.db_file) as conn:
+        sweep_expired_instances(conn)
         row = conn.execute(
             """
             SELECT instance_id, expires_at, created_at
@@ -394,6 +428,7 @@ def api_check_challenge(
 
     session_id = session["session_id"]
     with get_db_conn(config.db_file) as conn:
+        sweep_expired_instances(conn)
         row = conn.execute(
             """
             SELECT instance_id, wallet_address, private_key, deploy_address, rpc_port, expires_at
@@ -522,33 +557,29 @@ rpc_expires_at: Optional[datetime] = None
 @app.get("/api/rpc/status")
 def api_rpc_status():
     global rpc_expires_at
-    from web3 import Web3
-    w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
-    if not w3.is_connected():
-        w3 = Web3(Web3.HTTPProvider("http://localhost:8545"))
+    load_rpc_state()
+    now = datetime.now(timezone.utc)
 
-    connected = w3.is_connected()
-    if connected:
-        now = datetime.now(timezone.utc)
-        if rpc_expires_at and now >= rpc_expires_at:
-            # Stop the RPC container as it has expired
-            try:
-                import subprocess
-                import os
-                subprocess.run(
-                    ["docker", "compose", "down"],
-                    cwd=str(config.chall_dir),
-                    shell=(os.name == "nt"),
-                    capture_output=True,
-                    text=True
-                )
-                connected = False
-                rpc_expires_at = None
-            except Exception:
-                pass
+    if rpc_expires_at and now >= rpc_expires_at:
+        try:
+            import subprocess
+            import os
+            subprocess.run(
+                ["docker", "compose", "down"],
+                cwd=str(config.chall_dir),
+                shell=(os.name == "nt"),
+                capture_output=True,
+                text=True,
+            )
+        except Exception:
+            pass
+        rpc_expires_at = None
+        save_rpc_state(None)
+
+    connected = rpc_expires_at is not None and now < rpc_expires_at
 
     if not connected:
-        rpc_expires_at = None
+        save_rpc_state(None)
     return {
         "status": "running" if connected else "stopped",
         "rpc_url": resolve_public_url(config.rpc_base_url, "http://localhost:8545"),
@@ -576,7 +607,14 @@ def api_rpc_start():
 
         global rpc_expires_at
         rpc_expires_at = datetime.now(timezone.utc) + timedelta(seconds=config.rpc_ttl_seconds)
-        return {"status": "success"}
+        save_rpc_state(rpc_expires_at)
+        return {
+            "status": "success",
+            "expires_at": rpc_expires_at.isoformat(),
+            "extend_threshold_seconds": config.rpc_extend_threshold_seconds,
+            "extend_seconds": config.rpc_extend_seconds,
+            "rpc_url": resolve_public_url(config.rpc_base_url, "http://localhost:8545"),
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -609,6 +647,35 @@ def api_rpc_restart():
 
         global rpc_expires_at
         rpc_expires_at = datetime.now(timezone.utc) + timedelta(seconds=config.rpc_ttl_seconds)
+        save_rpc_state(rpc_expires_at)
+        return {
+            "status": "success",
+            "expires_at": rpc_expires_at.isoformat(),
+            "extend_threshold_seconds": config.rpc_extend_threshold_seconds,
+            "extend_seconds": config.rpc_extend_seconds,
+            "rpc_url": resolve_public_url(config.rpc_base_url, "http://localhost:8545"),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/rpc/stop")
+def api_rpc_stop():
+    import subprocess
+    import os
+    chall_dir = config.chall_dir
+    if not chall_dir.exists():
+        raise HTTPException(status_code=400, detail="Challenge directory not initialized")
+    try:
+        subprocess.run(
+            ["docker", "compose", "down"],
+            cwd=str(chall_dir),
+            shell=(os.name == "nt"),
+            capture_output=True,
+            text=True
+        )
+        global rpc_expires_at
+        rpc_expires_at = None
+        save_rpc_state(None)
         return {"status": "success"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -616,6 +683,7 @@ def api_rpc_restart():
 @app.post("/api/rpc/extend")
 def api_rpc_extend():
     global rpc_expires_at
+    load_rpc_state()
     if not rpc_expires_at:
         raise HTTPException(status_code=400, detail="RPC Node is not running")
 
@@ -629,6 +697,7 @@ def api_rpc_extend():
         )
 
     rpc_expires_at += timedelta(seconds=config.rpc_extend_seconds)
+    save_rpc_state(rpc_expires_at)
     return {
         "status": "success",
         "expires_at": rpc_expires_at.isoformat()

@@ -100,12 +100,38 @@ export function checkHealth(): Promise<{ status: string }> {
   return request<{ status: string }>("/api/health");
 }
 
-export function getRpcStatus(): Promise<{ status: string; rpc_url: string }> {
-  return request<{ status: string; rpc_url: string }>("/api/rpc/status");
+export function getRpcStatus(): Promise<{
+  status: string;
+  rpc_url: string;
+  expires_at?: string | null;
+  extend_threshold_seconds?: number;
+  extend_seconds?: number;
+}> {
+  return request<{
+    status: string;
+    rpc_url: string;
+    expires_at?: string | null;
+    extend_threshold_seconds?: number;
+    extend_seconds?: number;
+  }>("/api/rpc/status");
 }
 
-export function startRpc(): Promise<{ status: string; error?: string }> {
-  return request<{ status: string; error?: string }>("/api/rpc/start", { method: "POST" });
+export function startRpc(): Promise<{
+  status: string;
+  error?: string;
+  expires_at?: string;
+  extend_threshold_seconds?: number;
+  extend_seconds?: number;
+  rpc_url?: string;
+}> {
+  return request<{
+    status: string;
+    error?: string;
+    expires_at?: string;
+    extend_threshold_seconds?: number;
+    extend_seconds?: number;
+    rpc_url?: string;
+  }>("/api/rpc/start", { method: "POST" });
 }
 
 export function stopRpc(): Promise<{ status: string; error?: string }> {

@@ -1,6 +1,10 @@
 import argparse
+import json
+import os
+import shutil
 import subprocess
 import sys
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Iterable
 
@@ -15,6 +19,7 @@ from nxbcl.launcher.db.connection import init_db
 
 
 FRONTEND_DIR = PROJECT_ROOT / "nxbcl" / "frontend"
+COMPOSE_SERVICES = ("anvil", "rpc")
 
 
 def ensure_runtime_dirs() -> None:
@@ -29,6 +34,109 @@ def ensure_runtime_dirs() -> None:
     ):
         path.mkdir(parents=True, exist_ok=True)
     init_db(config.db_file)
+
+
+def remove_path(path: Path) -> None:
+    if path.is_dir():
+        shutil.rmtree(path, ignore_errors=True)
+        return
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def remove_sqlite_artifacts(db_file: Path) -> None:
+    for suffix in ("", "-wal", "-shm", "-journal"):
+        remove_path(db_file.with_name(db_file.name + suffix))
+
+
+def cleanup_runtime_artifacts() -> list[Path]:
+    config = get_nxbcl_config()
+    removed: list[Path] = []
+
+    for path in (config.state_dir.parent, config.tmp_dir, config.logs_dir):
+        if path.exists():
+            remove_path(path)
+            removed.append(path)
+
+    if config.db_file.exists() or any(
+        config.db_file.with_name(config.db_file.name + suffix).exists()
+        for suffix in ("-wal", "-shm", "-journal")
+    ):
+        remove_sqlite_artifacts(config.db_file)
+        removed.append(config.db_file)
+
+    return removed
+
+
+def rpc_state_file() -> Path:
+    return get_nxbcl_config().state_dir / "rpc_state.json"
+
+
+def load_rpc_expires_at() -> datetime | None:
+    state_file = rpc_state_file()
+    if not state_file.exists():
+        return None
+    try:
+        payload = json.loads(state_file.read_text(encoding="utf-8"))
+        expires_at = payload.get("expires_at")
+        if not expires_at:
+            return None
+        return datetime.fromisoformat(expires_at)
+    except Exception:
+        return None
+
+
+def save_rpc_state(expires_at: datetime | None) -> None:
+    state_file = rpc_state_file()
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    if not expires_at:
+        try:
+            state_file.unlink()
+        except FileNotFoundError:
+            pass
+        return
+
+    state_file.write_text(
+        json.dumps({"expires_at": expires_at.isoformat()}),
+        encoding="utf-8",
+    )
+
+
+def seed_rpc_state() -> datetime:
+    config = get_nxbcl_config()
+    current_expires_at = load_rpc_expires_at()
+    if current_expires_at and current_expires_at > datetime.now(timezone.utc):
+        return current_expires_at
+
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=config.rpc_ttl_seconds)
+    save_rpc_state(expires_at)
+    return expires_at
+
+
+def compose_challenge_dir() -> Path:
+    return get_nxbcl_config().chall_dir
+
+
+def run_compose_command(arguments: list[str]) -> subprocess.CompletedProcess[str] | None:
+    compose_dir = compose_challenge_dir()
+    if not compose_dir.exists():
+        print(f"compose directory not found: {compose_dir}", file=sys.stderr)
+        print("Run `nxbcl sync` first.", file=sys.stderr)
+        return None
+
+    try:
+        return subprocess.run(
+            ["docker", "compose", *arguments],
+            cwd=str(compose_dir),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        print("docker is not installed or not available in PATH", file=sys.stderr)
+        return None
 
 
 def cmd_init_db(_args: argparse.Namespace) -> int:
@@ -95,6 +203,89 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_up(_args: argparse.Namespace) -> int:
+    ensure_runtime_dirs()
+    result = run_compose_command(["up", "-d", *COMPOSE_SERVICES])
+    if result is None:
+        return 1
+    if result.returncode != 0:
+        if result.stdout:
+            print(result.stdout, end="")
+        if result.stderr:
+            print(result.stderr, end="", file=sys.stderr)
+        return result.returncode
+
+    print("NXBCL compose stack started")
+    expires_at = seed_rpc_state()
+    remaining_minutes = max(1, int((expires_at - datetime.now(timezone.utc)).total_seconds() / 60))
+    print(f"RPC lease expires at {expires_at.isoformat()} ({remaining_minutes} minute(s) left)")
+    if result.stdout:
+        print(result.stdout, end="")
+    return 0
+
+
+def cmd_down(_args: argparse.Namespace) -> int:
+    result = run_compose_command(["down", "--remove-orphans"])
+    if result is None:
+        return 1
+    if result.returncode != 0:
+        if result.stdout:
+            print(result.stdout, end="")
+        if result.stderr:
+            print(result.stderr, end="", file=sys.stderr)
+        return result.returncode
+
+    print("NXBCL compose stack stopped")
+    save_rpc_state(None)
+    if result.stdout:
+        print(result.stdout, end="")
+    return 0
+
+
+def cmd_ps(args: argparse.Namespace) -> int:
+    result = run_compose_command(["ps"])
+    if result is None:
+        return 1
+
+    exit_code = result.returncode
+    if result.stdout:
+        print(result.stdout, end="")
+    if result.stderr:
+        print(result.stderr, end="", file=sys.stderr)
+
+    expires_at = load_rpc_expires_at()
+    if expires_at:
+        remaining_seconds = max(0, int((expires_at - datetime.now(timezone.utc)).total_seconds()))
+        minutes = remaining_seconds // 60
+        seconds = remaining_seconds % 60
+        print(f"RPC lease: {minutes}:{seconds:02d} remaining")
+    else:
+        print("RPC lease: unavailable")
+
+    if args.kill:
+        kill_result = run_compose_command(["down", "-v", "--remove-orphans"])
+        if kill_result is None:
+            return 1
+        if kill_result.returncode != 0:
+            if kill_result.stdout:
+                print(kill_result.stdout, end="")
+            if kill_result.stderr:
+                print(kill_result.stderr, end="", file=sys.stderr)
+            return kill_result.returncode
+
+        removed = cleanup_runtime_artifacts()
+        save_rpc_state(None)
+        if removed:
+            print("Removed runtime data:")
+            for path in removed:
+                print(f"- {path}")
+        else:
+            print("No runtime data to remove")
+        exit_code = kill_result.returncode
+
+    return exit_code
+
+
 def run_frontend_command(args: list[str]) -> int:
     if not FRONTEND_DIR.exists():
         print(f"frontend directory not found: {FRONTEND_DIR}", file=sys.stderr)
@@ -144,6 +335,19 @@ def build_parser() -> argparse.ArgumentParser:
     serve_parser.add_argument("--port", default=8080, type=int, help="Bind port")
     serve_parser.add_argument("--reload", action="store_true", help="Enable uvicorn reload")
     serve_parser.set_defaults(func=cmd_serve)
+
+    up_parser = subparsers.add_parser("up", help="Start the compose stack in data_nxbcl/chall")
+    up_parser.set_defaults(func=cmd_up)
+
+    down_parser = subparsers.add_parser("down", help="Stop the compose stack in data_nxbcl/chall")
+    down_parser.set_defaults(func=cmd_down)
+
+    ps_parser = subparsers.add_parser("ps", help="Show compose stack status")
+    ps_parser.add_argument("--kill", action="store_true", help="Stop compose and purge runtime state")
+    ps_parser.set_defaults(func=cmd_ps)
+
+    ps_kill_parser = subparsers.add_parser("ps-kill", help="Show compose status and purge runtime state")
+    ps_kill_parser.set_defaults(func=lambda _args: cmd_ps(argparse.Namespace(kill=True)))
 
     frontend_install_parser = subparsers.add_parser("frontend-install", help="Install Vue/Vite frontend dependencies")
     frontend_install_parser.set_defaults(func=cmd_frontend_install)

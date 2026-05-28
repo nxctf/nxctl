@@ -298,7 +298,7 @@ const stateColor = computed(() => {
     </div>
 
     <template v-else>
-      <section class="animate-slide-up rounded-2xl border border-border/60 bg-gradient-to-br from-surface/60 to-surface/25 p-6 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
+      <section class="animate-slide-up rounded-2xl border border-border/60 bg-linear-to-br from-surface/60 to-surface/25 p-6 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
         <div class="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
           <div class="min-w-0 flex-1 space-y-4">
             <div class="flex flex-wrap items-center gap-3">
@@ -330,7 +330,7 @@ const stateColor = computed(() => {
             </div>
           </div>
 
-          <div class="flex-shrink-0">
+          <div class="shrink-0">
             <span
               class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 font-mono text-[11px] font-medium uppercase tracking-wider"
               :class="[
@@ -400,16 +400,12 @@ const stateColor = computed(() => {
             </button>
 
             <button
+              v-if="state !== 'active'"
               @click="launch(false)"
               :disabled="isLaunching"
-              class="inline-flex w-full items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-50"
-              :class="
-                state === 'active'
-                  ? 'border-border/60 bg-surface text-text-muted hover:border-border-hover hover:bg-surface-2 hover:text-text'
-                  : 'border-transparent bg-accent text-black hover:bg-accent-hover'
-              "
+              class="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-transparent bg-accent px-4 py-3 text-sm font-semibold text-black transition-all duration-150 hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {{ state === 'active' ? 'Deploy Fresh' : 'Start Challenge' }}
+              Start Challenge
             </button>
 
             <div v-if="instance" class="grid grid-cols-2 gap-2">
@@ -432,6 +428,7 @@ const stateColor = computed(() => {
               </button>
 
               <button
+                v-if="state === 'active'"
                 @click="launch(true)"
                 :disabled="isLaunching"
                 class="inline-flex items-center justify-center rounded-xl border border-danger/20 bg-danger/8 px-3 py-3 text-sm font-medium text-danger transition-all duration-150 hover:bg-danger/15 disabled:cursor-not-allowed disabled:opacity-40"
@@ -442,7 +439,7 @@ const stateColor = computed(() => {
           </div>
         </div>
 
-        <div class="flex min-h-[360px] flex-col overflow-hidden rounded-2xl border border-border/60 bg-terminal-bg shadow-sm">
+        <div class="flex min-h-90 flex-col overflow-hidden rounded-2xl border border-border/60 bg-terminal-bg shadow-sm">
           <div class="flex items-center justify-between border-b border-border/30 bg-surface/20 px-4 py-3">
             <span class="text-xs font-mono font-medium tracking-wide text-text-muted">Terminal</span>
             <div class="flex items-center gap-1.5">

@@ -82,6 +82,13 @@ const handleStartRpc = async () => {
     const res = await startRpc();
     if (res.status === "success") {
       rpcStatus.value = "running";
+      rpcExpiresAt.value = res.expires_at || null;
+      rpcExtendThresholdSeconds.value = res.extend_threshold_seconds || rpcExtendThresholdSeconds.value;
+      rpcExtendSeconds.value = res.extend_seconds || rpcExtendSeconds.value;
+      if (res.rpc_url) {
+        rpcUrl.value = res.rpc_url;
+      }
+      updateRpcCountdown();
     } else {
       rpcStatus.value = "stopped";
       alert("Failed to start RPC: " + (res.error || "unknown error"));
@@ -106,6 +113,13 @@ const handleRestartRpc = async () => {
     const res = await startRpc();
     if (res.status === "success") {
       rpcStatus.value = "running";
+      rpcExpiresAt.value = res.expires_at || null;
+      rpcExtendThresholdSeconds.value = res.extend_threshold_seconds || rpcExtendThresholdSeconds.value;
+      rpcExtendSeconds.value = res.extend_seconds || rpcExtendSeconds.value;
+      if (res.rpc_url) {
+        rpcUrl.value = res.rpc_url;
+      }
+      updateRpcCountdown();
     } else {
       rpcStatus.value = "stopped";
       alert("Failed to start RPC: " + (res.error || "unknown error"));

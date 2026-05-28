@@ -3,7 +3,7 @@ app:
 
   # Public URL or host for the launcher panel when exposed behind a tunnel or reverse proxy.
   # Example: https://panel.nxctf.my.id
-  base_ip: "https://nxbcl.nxctf.my.id"
+  # base_ip: "https://nxbcl.nxctf.my.id"
 
 git:
   repo: https://github.com/ariafatah0711/a
@@ -26,7 +26,8 @@ challenge:
 rpc:
   # Public URL or host for the RPC endpoint returned to players.
   # Example: https://rpc.nxctf.my.id
-  base_ip: "https://nxbcl-rpc.nxctf.my.id"
+  # base_ip: "https://nxbcl-rpc.nxctf.my.id"
+  base_ip: "http://192.168.56.101:8545"
   ttl_seconds: 1200
   extend_seconds: 600
   extend_threshold_seconds: 600
