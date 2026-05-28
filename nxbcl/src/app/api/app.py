@@ -11,12 +11,12 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from nxbcl.launcher.config import get_nxbcl_config
-from nxbcl.launcher.db.connection import get_db_conn
-from nxbcl.launcher.auth.session import SessionService, utc_now
-from nxbcl.launcher.pow.service import PowService
-from nxbcl.launcher.challenges.registry import ChallengeRegistry
-from nxbcl.launcher.runtime.adapter import NxctlAdapter
+from src.app.utils.config import get_nxbcl_config
+from src.app.utils.db import get_db_conn
+from src.app.services.session import SessionService, utc_now
+from src.app.services.pow import PowService
+from src.app.services.registry import ChallengeRegistry
+from src.app.services.adapter import NxctlAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,8 @@ app.add_middleware(
     allow_headers=["*"],
     allow_credentials=True,
 )
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 # Load configuration
 config = get_nxbcl_config()
@@ -85,7 +87,7 @@ def index():
     if not index_path.exists():
         raise HTTPException(
             status_code=503,
-            detail="frontend not built; run `cd nxbcl/frontend && npm install && npm run build`",
+            detail="frontend not built; run `cd nxbcl/src/frontend && npm install && npm run build`",
         )
     return FileResponse(index_path)
 
@@ -134,7 +136,7 @@ def api_health():
 
 @app.get("/api/challenges")
 def api_list_challenges():
-    fallback_dir = Path(__file__).resolve().parent.parent / "challenges"
+    fallback_dir = PROJECT_ROOT / "challenges"
     registry = ChallengeRegistry(config.chall_dir, fallback_dir)
     return registry.list_challenges()
 
@@ -233,7 +235,7 @@ def api_start_challenge(
     session: Dict[str, Any] = Depends(get_session)
 ):
     # Verify if challenge actually exists
-    fallback_dir = Path(__file__).resolve().parent.parent / "challenges"
+    fallback_dir = PROJECT_ROOT / "challenges"
     registry = ChallengeRegistry(config.chall_dir, fallback_dir)
     chall_desc = registry.get_challenge(challenge_id)
     if not chall_desc:
@@ -343,7 +345,7 @@ def api_get_instance(
     challenge_id: str,
     session: Dict[str, Any] = Depends(get_session)
 ):
-    fallback_dir = Path(__file__).resolve().parent.parent / "challenges"
+    fallback_dir = PROJECT_ROOT / "challenges"
     registry = ChallengeRegistry(config.chall_dir, fallback_dir)
     chall_desc = registry.get_challenge(challenge_id)
     if not chall_desc:
@@ -423,7 +425,7 @@ def api_check_challenge(
     challenge_id: str,
     session: Dict[str, Any] = Depends(get_session)
 ):
-    fallback_dir = Path(__file__).resolve().parent.parent / "challenges"
+    fallback_dir = PROJECT_ROOT / "challenges"
     registry = ChallengeRegistry(config.chall_dir, fallback_dir)
     chall_desc = registry.get_challenge(challenge_id)
     if not chall_desc:
@@ -492,7 +494,7 @@ def api_check_challenge(
         flag = os.getenv(env_var_name)
 
         # Load registry and config
-        fallback_dir = Path(__file__).resolve().parent.parent / "challenges"
+        fallback_dir = PROJECT_ROOT / "challenges"
         registry = ChallengeRegistry(config.chall_dir, fallback_dir)
         chall_config = registry.get_challenge(challenge_id)
 

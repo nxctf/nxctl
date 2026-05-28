@@ -16,12 +16,35 @@ Phase 3
   Optional formal NXCTL blockchain_rpc service type
 ```
 
+## Project Structure
+
+```text
+nxbcl/
+  app.py               # Main entry point (CLI router)
+  setup.sh             # Install/build helper
+  requirements.txt
+  nxbcl.yml            # Configuration (gitignored)
+
+  src/
+    app/
+      cli/             # CLI command handlers
+      api/             # FastAPI routes & static server
+        static/        # Frontend build output (gitignored)
+      services/        # PoW, Session, Registry, Adapter
+      utils/           # Config, DB, file_lock
+
+    frontend/          # Vue 3 + Vite UI codebase
+
+  challenges/          # Bundled example challenges (fallback)
+  scripts/             # Developer/setup scripts
+```
+
 ## Install Command
 
 From the repository root:
 
 ```bash
-bash setup.sh nxbcl install
+bash nxbcl/setup.sh install
 ```
 
 If `nxbcl` is not found after install:
@@ -33,7 +56,7 @@ export PATH="$HOME/.local/bin:$PATH"
 Uninstall:
 
 ```bash
-bash setup.sh nxbcl uninstall
+bash nxbcl/setup.sh uninstall
 ```
 
 ## Frontend
@@ -48,13 +71,13 @@ nxbcl frontend-build
 ```
 
 The frontend package is pinned to a Vite/Vue toolchain that can run on older
-Vagrant Node.js installs, and `nxbcl/frontend/.npmrc` disables npm bin symlinks
+Vagrant Node.js installs, and `nxbcl/src/frontend/.npmrc` disables npm bin symlinks
 because shared folders often reject symlink creation.
 
 Equivalent direct commands:
 
 ```bash
-cd nxbcl/frontend
+cd nxbcl/src/frontend
 npm install
 npm run build
 ```
@@ -62,7 +85,7 @@ npm run build
 The build output is written to:
 
 ```text
-nxbcl/launcher/static/
+nxbcl/src/app/api/static/
 ```
 
 During development, run the API and Vite separately:

@@ -8,17 +8,18 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Iterable
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+    sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from nxbcl.cli.sync import sync
-from nxbcl.launcher.challenges.registry import ChallengeRegistry
-from nxbcl.launcher.config import get_nxbcl_config
-from nxbcl.launcher.db.connection import init_db
+from src.app.cli.sync import sync
+from src.app.services.registry import ChallengeRegistry
+from src.app.utils.config import get_nxbcl_config
+from src.app.utils.db import init_db
 
 
-FRONTEND_DIR = PROJECT_ROOT / "nxbcl" / "frontend"
+FRONTEND_DIR = PROJECT_ROOT / "src" / "frontend"
 COMPOSE_SERVICES = ("anvil", "rpc")
 
 
@@ -157,7 +158,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
 
 def cmd_challenges(_args: argparse.Namespace) -> int:
     config = get_nxbcl_config()
-    fallback_dir = PROJECT_ROOT / "nxbcl" / "challenges"
+    fallback_dir = PROJECT_ROOT / "challenges"
     registry = ChallengeRegistry(config.chall_dir, fallback_dir)
 
     challenges = registry.list_challenges()
@@ -195,7 +196,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         return 1
 
     uvicorn.run(
-        "nxbcl.launcher.app:app",
+        "src.app.api.app:app",
         host=args.host,
         port=args.port,
         reload=args.reload,
@@ -352,7 +353,7 @@ def build_parser() -> argparse.ArgumentParser:
     frontend_install_parser = subparsers.add_parser("frontend-install", help="Install Vue/Vite frontend dependencies")
     frontend_install_parser.set_defaults(func=cmd_frontend_install)
 
-    frontend_build_parser = subparsers.add_parser("frontend-build", help="Build frontend into nxbcl/launcher/static")
+    frontend_build_parser = subparsers.add_parser("frontend-build", help="Build frontend into src/app/api/static")
     frontend_build_parser.set_defaults(func=cmd_frontend_build)
 
     frontend_dev_parser = subparsers.add_parser("frontend-dev", help="Run Vite dev server for the frontend")

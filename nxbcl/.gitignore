@@ -12,10 +12,13 @@ __pycache__/
 .Python
 
 # Frontend dependency & build artifacts
-frontend/node_modules/
-frontend/dist/
-launcher/static/assets/
-launcher/static/index.html
+src/frontend/node_modules/
+src/frontend/dist/
+src/app/api/static/assets/
+src/app/api/static/index.html
+
+# Legacy launcher artifacts (can be removed after migration)
+launcher/
 
 # IDE configuration
 .vscode/

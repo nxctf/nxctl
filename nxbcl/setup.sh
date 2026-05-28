@@ -11,13 +11,13 @@ case "$COMMAND" in
     mkdir -p "$BIN_DIR"
     cat > "$BIN_DIR/nxbcl" <<EOF
 #!/usr/bin/env bash
-cd "$PROJECT_DIR/.."
-exec python3 -m nxbcl.cli.main "\$@"
+cd "$PROJECT_DIR"
+exec python3 app.py "\$@"
 EOF
     chmod +x "$BIN_DIR/nxbcl"
     echo "Installed nxbcl command to $BIN_DIR/nxbcl"
-    echo "Frontend source is in nxbcl/frontend."
-    echo "Build it with: cd $PROJECT_DIR/frontend && npm install && npm run build"
+    echo "Frontend source is in nxbcl/src/frontend."
+    echo "Build it with: cd $PROJECT_DIR/src/frontend && npm install && npm run build"
     case ":$PATH:" in
       *":$BIN_DIR:"*) ;;
       *)
@@ -28,11 +28,11 @@ EOF
     esac
     ;;
   frontend-install)
-    cd "$PROJECT_DIR/frontend"
+    cd "$PROJECT_DIR/src/frontend"
     npm install
     ;;
   frontend-build)
-    cd "$PROJECT_DIR/frontend"
+    cd "$PROJECT_DIR/src/frontend"
     npm run build
     ;;
   uninstall)
@@ -55,6 +55,8 @@ EOF
     echo "Frontend:"
     echo "  bash nxbcl/setup.sh frontend-install"
     echo "  bash nxbcl/setup.sh frontend-build"
+    echo
+    echo "Frontend source: nxbcl/src/frontend/"
     ;;
   *)
     echo "Unknown command: $COMMAND" >&2

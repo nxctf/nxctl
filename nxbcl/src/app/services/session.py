@@ -2,7 +2,7 @@ import secrets
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, Optional
-from nxbcl.launcher.db.connection import get_db_conn
+from src.app.utils.db import get_db_conn
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -17,10 +17,10 @@ class SessionService:
         session_id = secrets.token_hex(32)
         now = utc_now()
         expires_at = now + timedelta(seconds=self.ttl_seconds)
-        
+
         created_str = now.isoformat()
         expires_str = expires_at.isoformat()
-        
+
         with get_db_conn(self.db_path) as conn:
             conn.execute(
                 """
@@ -43,7 +43,7 @@ class SessionService:
                 """,
                 (session_id, challenge_id, now_str)
             ).fetchone()
-            
+
             if row:
                 return dict(row)
         return None

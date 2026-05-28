@@ -12,7 +12,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: "../launcher/static",
+    outDir: "../app/api/static",
     emptyOutDir: true,
   },
   server: {

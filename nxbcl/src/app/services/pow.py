@@ -3,7 +3,7 @@ import secrets
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, Any, Optional
-from nxbcl.launcher.db.connection import get_db_conn
+from src.app.utils.db import get_db_conn
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -20,7 +20,7 @@ class PowService:
         salt = secrets.token_hex(8)
         now = utc_now()
         expires_at = now + timedelta(seconds=self.ttl_seconds)
-        
+
         with get_db_conn(self.db_path) as conn:
             conn.execute(
                 """
@@ -39,7 +39,7 @@ class PowService:
         """Verify the PoW solution. Tokens are single-use."""
         now = utc_now()
         now_str = now.isoformat()
-        
+
         with get_db_conn(self.db_path) as conn:
             # Fetch active challenge
             row = conn.execute(
@@ -50,27 +50,27 @@ class PowService:
                 """,
                 (token, user_id, challenge_id, now_str)
             ).fetchone()
-            
+
             if not row:
                 return False
-                
+
             salt = row["salt"]
             zero_prefix = row["zero_prefix"]
-            
+
             # Compute SHA256 of salt + solution
             hasher = hashlib.sha256()
             hasher.update((salt + solution).encode("utf-8"))
             digest = hasher.hexdigest()
-            
+
             if not digest.startswith(zero_prefix):
                 return False
-                
+
             # Mark the challenge token as solved
             conn.execute(
                 "UPDATE pow_challenges SET solved_at = ? WHERE token = ?",
                 (now_str, token)
             )
-            
+
             # Upsert into solves table
             conn.execute(
                 """
