@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { issuePow, listChallenges, startChallenge, submitPow, getInstance, extendChallenge, checkChallenge } from "../api.js";
 import { solvePow } from "../pow.js";
@@ -20,6 +20,47 @@ const flag = ref("");
 const checking = ref(false);
 const extending = ref(false);
 const extendMsg = ref("");
+
+const secondsLeft = ref<number>(999999);
+const timeLeftStr = ref<string>("");
+let timerIntervalId: any = null;
+
+const updateCountdown = () => {
+  if (!instance.value || !instance.value.expires_at) {
+    secondsLeft.value = 999999;
+    timeLeftStr.value = "";
+    return;
+  }
+  const expiry = new Date(instance.value.expires_at).getTime();
+  const now = new Date().getTime();
+  const diff = Math.max(0, Math.floor((expiry - now) / 1000));
+  secondsLeft.value = diff;
+
+  if (diff === 0) {
+    timeLeftStr.value = "Expired";
+    instance.value.status = "expired";
+    state.value = "idle";
+    stopTimer();
+    return;
+  }
+
+  const m = Math.floor(diff / 60);
+  const s = diff % 60;
+  timeLeftStr.value = `${m}:${s < 10 ? '0' : ''}${s}`;
+};
+
+const startTimer = () => {
+  if (timerIntervalId) clearInterval(timerIntervalId);
+  updateCountdown();
+  timerIntervalId = setInterval(updateCountdown, 1000);
+};
+
+const stopTimer = () => {
+  if (timerIntervalId) {
+    clearInterval(timerIntervalId);
+    timerIntervalId = null;
+  }
+};
 
 const rpcUrl = computed(() => {
   if (!instance.value) return "";
@@ -55,6 +96,7 @@ onMounted(async () => {
       if (activeInst && activeInst.status === "running") {
         instance.value = activeInst;
         state.value = "active";
+        startTimer();
       }
     } catch {
       // If no active instance found or unauthorized, keep state as idle
@@ -64,6 +106,10 @@ onMounted(async () => {
   } finally {
     loading.value = false;
   }
+});
+
+onUnmounted(() => {
+  stopTimer();
 });
 
 async function launch(restart = false) {
@@ -93,6 +139,7 @@ async function launch(restart = false) {
     instance.value = inst;
     state.value = "active";
     powProgress.value = "";
+    startTimer();
   } catch (err) {
     errorMsg.value = err instanceof Error ? err.message : "Launch failed";
     state.value = "error";
@@ -130,6 +177,7 @@ async function handleExtend() {
     if (res.status === "success") {
       if (instance.value) {
         instance.value.expires_at = res.expires_at;
+        startTimer();
       }
       extendMsg.value = `Instance extended successfully!`;
     }
@@ -338,56 +386,96 @@ const stateColor = computed(() => {
           <p class="text-sm text-accent">{{ extendMsg }}</p>
         </div>
 
-        <!-- Buttons -->
-        <div class="flex flex-wrap gap-3">
-          <button
-            @click="launch(false)"
-            :disabled="isLaunching"
-            class="px-5 py-2.5 rounded-lg text-sm font-bold transition-all duration-200 cursor-pointer border-none disabled:opacity-40 disabled:cursor-not-allowed"
-            :class="
-              isLaunching
-                ? 'bg-surface-3 text-text-muted'
-                : 'bg-gradient-to-r from-accent to-emerald-500 text-bg hover:shadow-lg hover:shadow-accent/20 hover:-translate-y-px active:translate-y-0'
-            "
-          >
-            {{ state === 'active' ? '⟳ Re-Launch' : '▶ Start' }}
-          </button>
+        <!-- Action Buttons Layout -->
+        <div class="space-y-5">
+          <!-- Primary Actions -->
+          <div class="flex flex-col sm:flex-row gap-3">
+            <button
+              v-if="instance"
+              @click="handleCheck"
+              :disabled="checking || isLaunching"
+              class="flex-1 px-6 py-3 rounded-xl text-sm font-bold bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-bg hover:shadow-lg hover:shadow-emerald-500/10 active:translate-y-px transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 border-none"
+            >
+              <svg v-if="checking" class="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              <span v-else class="text-sm">✔️</span>
+              {{ checking ? "Checking Solution..." : "Check Solution" }}
+            </button>
 
-          <button
-            @click="launch(true)"
-            :disabled="isLaunching"
-            class="px-5 py-2.5 rounded-lg text-sm font-bold border border-border bg-surface-2 text-text hover:bg-surface-3 hover:border-border-hover transition-all duration-200 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            ↻ Restart
-          </button>
+            <button
+              v-if="instance"
+              @click="copyFullEnv"
+              class="flex-1 px-6 py-3 rounded-xl text-sm font-bold border border-border bg-surface-2 text-text hover:bg-surface-3 hover:border-border-hover hover:shadow-md transition-all duration-200 cursor-pointer flex items-center justify-center gap-2"
+            >
+              <span>📋</span>
+              Copy All Env
+            </button>
+          </div>
 
-          <button
-            v-if="instance"
-            @click="handleCheck"
-            :disabled="checking || isLaunching"
-            class="px-5 py-2.5 rounded-lg text-sm font-bold border border-border bg-emerald-600/30 text-emerald-400 hover:bg-emerald-600/40 hover:border-emerald-500 transition-all duration-200 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <span v-if="checking" class="inline-block animate-spin mr-1">⚡</span>
-            {{ checking ? 'Checking...' : '✔️ Check Solution' }}
-          </button>
+          <!-- Divider for Session Management -->
+          <div v-if="instance" class="border-t border-border/40 my-1"></div>
 
-          <button
-            v-if="instance"
-            @click="handleExtend"
-            :disabled="extending || isLaunching"
-            class="px-5 py-2.5 rounded-lg text-sm font-bold border border-border bg-accent/20 text-accent hover:bg-accent/30 hover:border-accent transition-all duration-200 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <span v-if="extending" class="inline-block animate-spin mr-1">⌛</span>
-            {{ extending ? 'Extending...' : '➕ Extend 10m' }}
-          </button>
+          <!-- Session Controls -->
+          <div class="flex flex-wrap items-center gap-3">
+            <span v-if="instance" class="text-xs font-bold text-text-muted mr-1 hidden md:inline">Session:</span>
 
-          <button
-            v-if="instance"
-            @click="copyFullEnv"
-            class="px-5 py-2.5 rounded-lg text-sm font-bold border border-border bg-surface-2 text-text hover:bg-surface-3 hover:border-border-hover transition-all duration-200 cursor-pointer"
-          >
-            📋 Copy All Env
-          </button>
+            <!-- Start / Re-Launch -->
+            <button
+              @click="launch(false)"
+              :disabled="isLaunching"
+              class="px-4 py-2.5 rounded-lg text-xs font-bold transition-all duration-200 cursor-pointer border flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+              :class="
+                state === 'active'
+                  ? 'border-border bg-surface-2 text-text hover:bg-surface-3 hover:border-border-hover'
+                  : 'border-transparent bg-gradient-to-r from-accent to-emerald-500 text-bg hover:shadow-md hover:-translate-y-px active:translate-y-0'
+              "
+            >
+              <span>⟳</span>
+              {{ state === 'active' ? 'Re-Launch New Session' : 'Start Instance' }}
+            </button>
+
+            <!-- Extend time (Only active when under threshold) -->
+            <button
+              v-if="instance"
+              @click="handleExtend"
+              :disabled="extending || isLaunching || secondsLeft > (instance.extend_threshold_seconds || 300)"
+              class="px-4 py-2.5 rounded-lg text-xs font-bold border transition-all duration-200 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+              :class="
+                secondsLeft > (instance.extend_threshold_seconds || 300)
+                  ? 'border-border bg-surface-2 text-text-muted cursor-not-allowed'
+                  : 'border-accent/20 bg-accent/10 text-accent hover:bg-accent/20 hover:border-accent/40'
+              "
+              :title="secondsLeft > (instance.extend_threshold_seconds || 300) ? `You can only extend when under ${Math.round((instance.extend_threshold_seconds || 300) / 60)} minutes left!` : 'Extend session'"
+            >
+              <svg v-if="extending" class="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              <span v-else>➕</span>
+              {{ secondsLeft > (instance.extend_threshold_seconds || 300) ? 'Extend (Locked)' : (extending ? 'Extending...' : `Extend +${Math.round((instance.extend_seconds || 300) / 60)}m`) }}
+            </button>
+
+            <!-- Restart / Reset -->
+            <button
+              @click="launch(true)"
+              :disabled="isLaunching"
+              class="px-4 py-2.5 rounded-lg text-xs font-bold border border-danger/20 bg-danger/10 text-danger hover:bg-danger/20 hover:border-danger/40 transition-all duration-200 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+            >
+              <span>↻</span>
+              Reset State (Restart)
+            </button>
+          </div>
+
+          <!-- Microtext guidelines -->
+          <div v-if="instance" class="text-[11px] text-text-muted flex items-start gap-1.5 bg-surface/50 p-2.5 rounded-lg border border-border/30">
+            <span class="text-xs">💡</span>
+            <p class="leading-normal">
+              <strong>Extend +{{ Math.round((instance.extend_seconds || 300) / 60) }}m</strong> keeps your active session alive (unlocked only when remaining time is less than {{ Math.round((instance.extend_threshold_seconds || 300) / 60) }} minutes).
+              <strong>Reset State</strong> completely redeploys fresh contracts for a clean start.
+            </p>
+          </div>
         </div>
       </div>
 
@@ -401,9 +489,10 @@ const stateColor = computed(() => {
           <h3 class="text-sm font-bold text-text uppercase tracking-wider">Instance Data</h3>
           <span
             v-if="instance.expires_at"
-            class="text-[11px] text-text-muted bg-surface-2 px-2 py-1 rounded-md"
+            class="text-[11px] font-mono px-2.5 py-1 rounded-md flex items-center gap-1.5 transition-all duration-300"
+            :class="secondsLeft < (instance.extend_threshold_seconds || 300) ? 'bg-danger-dim/30 text-danger border border-danger/20 animate-pulse-soft' : 'bg-surface-2 text-text-muted border border-border/40'"
           >
-            Expires: {{ new Date(instance.expires_at).toLocaleTimeString() }}
+            ⏳ {{ timeLeftStr ? `Expires in: ${timeLeftStr}` : 'Expired' }}
           </span>
         </div>
 

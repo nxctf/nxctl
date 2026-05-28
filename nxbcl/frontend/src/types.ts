@@ -23,7 +23,6 @@ export interface PowChallenge {
   salt: string;
   zero_prefix: string;
 }
-
 export interface InstanceInfo {
   instance_id: string;
   wallet_address: string;
@@ -35,8 +34,9 @@ export interface InstanceInfo {
   chain_id?: number;
   status: string;
   expires_at?: string;
+  extend_threshold_seconds?: number;
+  extend_seconds?: number;
 }
-
 export type ChallengeState =
   | "idle"
   | "starting"

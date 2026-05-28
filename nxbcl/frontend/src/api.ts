@@ -111,3 +111,7 @@ export function startRpc(): Promise<{ status: string; error?: string }> {
 export function stopRpc(): Promise<{ status: string; error?: string }> {
   return request<{ status: string; error?: string }>("/api/rpc/stop", { method: "POST" });
 }
+
+export function extendRpc(): Promise<{ status: string; expires_at: string }> {
+  return request<{ status: string; expires_at: string }>("/api/rpc/extend", { method: "POST" });
+}

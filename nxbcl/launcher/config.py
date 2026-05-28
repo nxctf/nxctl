@@ -28,70 +28,81 @@ except ImportError:
     pass
 
 class NXBCLConfig:
-    def __init__(self, config_path: str = "config.yml"):
+    def __init__(self, config_path: str = "nxbcl.yml"):
         # Resolve config path
         self.config_path = Path(config_path).resolve()
         if not self.config_path.exists():
-            # Try walking up or check in current working directory
-            self.config_path = Path("config.yml").resolve()
+            # Try walking up or check in root workspace directories
+            self.config_path = Path("nxbcl.yml").resolve()
+            if not self.config_path.exists():
+                self.config_path = Path("nxbcl/config.yml").resolve()
+                if not self.config_path.exists():
+                    self.config_path = Path("config.yml").resolve()
 
         if self.config_path.exists():
             with open(self.config_path, "r", encoding="utf-8") as f:
                 raw = yaml.safe_load(f) or {}
         else:
             raw = {}
-        
+
         # Substitute environment variables
         self.raw = substitute_env_vars(raw)
-        self.nxbcl_raw = self.raw.get("nxbcl", {})
-        
-        self.enabled = bool(self.nxbcl_raw.get("enabled", True))
-        self.data_dir = self.nxbcl_raw.get("data_dir", "./data_nxbcl")
-        
+        # If 'nxbcl' key is present, use it; otherwise the whole raw dictionary is nxbcl config
+        self.nxbcl_raw = self.raw.get("nxbcl", self.raw)
+        self.enabled = True
+        app_cfg = self.nxbcl_raw.get("app", {})
+        self.data_dir = app_cfg.get("data_dir", self.nxbcl_raw.get("data_dir", "./data_nxbcl"))
         git = self.nxbcl_raw.get("git", {})
         self.git_repo = git.get("repo", "")
         self.git_branch = git.get("branch", "main")
         self.git_access_token = git.get("access_token", os.environ.get("GITHUB_TOKEN", ""))
-        
+
         pow_cfg = self.nxbcl_raw.get("pow", {})
         self.pow_zero_prefix = pow_cfg.get("zero_prefix", "000")
-        
+
         session = self.nxbcl_raw.get("session", {})
         self.session_ttl_seconds = int(session.get("ttl_seconds", 86400))
-        self.instance_ttl_seconds = int(session.get("instance_ttl_seconds", 1800))
-        
+        self.instance_ttl_seconds = int(session.get("instance_ttl_seconds", 600))
+
+        # Challenge TTL configuration
+        challenge_cfg = self.nxbcl_raw.get("challenge", {})
+        self.challenge_ttl_seconds = int(challenge_cfg.get("ttl_seconds", 600))
+        self.challenge_extend_seconds = int(challenge_cfg.get("extend_seconds", 300))
+        self.challenge_extend_threshold_seconds = int(challenge_cfg.get("extend_threshold_seconds", 300))
+
+        # RPC TTL configuration
+        rpc_cfg = self.nxbcl_raw.get("rpc", {})
+        self.rpc_ttl_seconds = int(rpc_cfg.get("ttl_seconds", 1200))
+        self.rpc_extend_seconds = int(rpc_cfg.get("extend_seconds", 600))
+        self.rpc_extend_threshold_seconds = int(rpc_cfg.get("extend_threshold_seconds", 600))
+
         limits = self.nxbcl_raw.get("limits", {})
         self.max_concurrent = int(limits.get("max_concurrent", 5))
-        
-        nxctl_cfg = self.nxbcl_raw.get("nxctl", {})
-        sync_cfg = nxctl_cfg.get("sync", {})
-        self.sync_enabled = bool(sync_cfg.get("enabled", True))
-        self.sync_mode = sync_cfg.get("mode", "git")
-        
+
     @property
     def data_path(self) -> Path:
         return Path(self.data_dir).resolve()
-        
+
     @property
     def db_file(self) -> Path:
         return self.data_path / "nxbcl.db"
-        
+
     @property
     def chall_dir(self) -> Path:
         return self.data_path / "chall"
-        
+
     @property
     def locks_dir(self) -> Path:
         return self.data_path / "runtime" / "locks"
-        
+
     @property
     def state_dir(self) -> Path:
         return self.data_path / "runtime" / "state"
-        
+
     @property
     def tmp_dir(self) -> Path:
         return self.data_path / "tmp"
-        
+
     @property
     def logs_dir(self) -> Path:
         return self.data_path / "logs"
@@ -99,7 +110,7 @@ class NXBCLConfig:
 # Global config helper
 _config_instance = None
 
-def get_nxbcl_config(config_path: str = "config.yml") -> NXBCLConfig:
+def get_nxbcl_config(config_path: str = "nxbcl.yml") -> NXBCLConfig:
     global _config_instance
     if _config_instance is None:
         _config_instance = NXBCLConfig(config_path)
@@ -128,4 +139,3 @@ def file_lock(lock_path: Path, timeout: float = 10.0):
             lock_path.rmdir()
         except Exception:
             pass
-

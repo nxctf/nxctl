@@ -168,12 +168,13 @@ def get_running_instances_count() -> int:
         ).fetchone()
         return row["count"] if row else 0
 
-
 def instance_response(instance: Dict[str, Any], chall_desc: Dict[str, Any]) -> Dict[str, Any]:
     response = dict(instance)
     response.setdefault("setup_address", response.get("deploy_address"))
     response.setdefault("rpc_url", f"http://localhost:{response.get('rpc_port', 8545)}")
     response.setdefault("chain_id", chall_desc.get("chain_id", 31337))
+    response["extend_threshold_seconds"] = config.challenge_extend_threshold_seconds
+    response["extend_seconds"] = config.challenge_extend_seconds
     return response
 
 @app.post("/api/challenges/{challenge_id}/start")
@@ -226,22 +227,7 @@ def api_start_challenge(
                 user_sessions
             )
 
-    # Check concurrency limits and evict oldest if needed
-    active_count = get_running_instances_count()
-    if active_count >= config.max_concurrent:
-        with get_db_conn(config.db_file) as conn:
-            oldest = conn.execute(
-                """
-                SELECT instance_id FROM instances
-                WHERE status = 'running'
-                ORDER BY created_at ASC LIMIT 1
-                """
-            ).fetchone()
-            if oldest:
-                conn.execute(
-                    "UPDATE instances SET status = 'stopped' WHERE instance_id = ?",
-                    (oldest["instance_id"],)
-                )
+    # No concurrency limits needed for shared_chain scope
 
     # Clean up any remaining active instance for this specific session/challenge
     with get_db_conn(config.db_file) as conn:
@@ -258,7 +244,7 @@ def api_start_challenge(
     adapter = NxctlAdapter(config.data_path)
     inst = adapter.start_instance(session_id, challenge_id)
 
-    expires_at = utc_now() + timedelta(seconds=config.instance_ttl_seconds)
+    expires_at = utc_now() + timedelta(seconds=config.challenge_ttl_seconds)
 
     with get_db_conn(config.db_file) as conn:
         conn.execute(
@@ -354,15 +340,15 @@ def api_extend_challenge(
         remaining_seconds = (expires_at - now).total_seconds()
         elapsed_seconds = (now - created_at).total_seconds()
 
-        # Enforce cooldown / wait 10 minutes limit (user can only extend when <= 10 mins remaining of a 20 mins lease)
-        if remaining_seconds > 600:
-            minutes_to_wait = int((remaining_seconds - 600) / 60) + 1
+        # Enforce cooldown / wait limit configured in config.yml
+        if remaining_seconds > config.challenge_extend_threshold_seconds:
+            minutes_to_wait = int((remaining_seconds - config.challenge_extend_threshold_seconds) / 60) + 1
             raise HTTPException(
                 status_code=400,
-                detail=f"You can only extend the instance when there are less than 10 minutes remaining (please wait {minutes_to_wait} more minute(s))"
+                detail=f"You can only extend the instance when there are less than {int(config.challenge_extend_threshold_seconds / 60)} minutes remaining (please wait {minutes_to_wait} more minute(s))"
             )
 
-        new_expires_at = expires_at + timedelta(minutes=10)
+        new_expires_at = expires_at + timedelta(seconds=config.challenge_extend_seconds)
 
         conn.execute(
             """
@@ -446,7 +432,43 @@ def api_check_challenge(
                 (session["user_id"], challenge_id, utc_now().isoformat(), utc_now().isoformat())
             )
 
-        flag = os.getenv("FLAG", "TCP1P{convergence_seed_solved_abc123}")
+        # Dynamic flag resolution:
+        # 1. Check environment variable specifically for this challenge: e.g. FLAG_01_CONVERGENCE_SEED or FLAG_02_CONVERGENCE
+        env_var_name = f"FLAG_{challenge_id.replace('-', '_').upper()}"
+        flag = os.getenv(env_var_name)
+
+        # Load registry and config
+        fallback_dir = Path(__file__).resolve().parent.parent / "challenges"
+        registry = ChallengeRegistry(config.chall_dir, fallback_dir)
+        chall_config = registry.get_challenge(challenge_id)
+
+        # 2. Check if a flag.txt file exists in the challenge folder
+        if not flag and chall_config:
+            for base in [config.chall_dir, fallback_dir]:
+                # Try direct subfolder
+                flag_file = base / challenge_id / "flag.txt"
+                if flag_file.exists():
+                    try:
+                        flag = flag_file.read_text(encoding="utf-8").strip()
+                        break
+                    except Exception:
+                        pass
+                # Try under challenges subfolder
+                flag_file_nested = base / "challenges" / challenge_id / "flag.txt"
+                if flag_file_nested.exists():
+                    try:
+                        flag = flag_file_nested.read_text(encoding="utf-8").strip()
+                        break
+                    except Exception:
+                        pass
+
+        # 3. Check if there is a 'flag' field in challenge.yml
+        if not flag and chall_config:
+            flag = chall_config.get("flag")
+
+        # 4. Fallback to standard global FLAG env variable or fallback placeholder
+        if not flag:
+            flag = os.getenv("FLAG", f"TCP1P{{{challenge_id.replace('-', '_')}_solved_abc123}}")
 
         return {
             "solved": solved,
@@ -479,19 +501,47 @@ def api_get_active_instances(
 
     return {"active": False}
 
+rpc_expires_at: Optional[datetime] = None
+
 @app.get("/api/rpc/status")
 def api_rpc_status():
+    global rpc_expires_at
     from web3 import Web3
     w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
     if not w3.is_connected():
         w3 = Web3(Web3.HTTPProvider("http://localhost:8545"))
 
     connected = w3.is_connected()
+    if connected:
+        if not rpc_expires_at:
+            rpc_expires_at = datetime.now(timezone.utc) + timedelta(seconds=config.rpc_ttl_seconds)
+        now = datetime.now(timezone.utc)
+        if now >= rpc_expires_at:
+            # Stop the RPC container as it has expired
+            try:
+                import subprocess
+                import os
+                subprocess.run(
+                    ["docker", "compose", "down"],
+                    cwd=str(config.chall_dir),
+                    shell=(os.name == "nt"),
+                    capture_output=True,
+                    text=True
+                )
+                connected = False
+                rpc_expires_at = None
+            except Exception:
+                pass
+
+    if not connected:
+        rpc_expires_at = None
     return {
         "status": "running" if connected else "stopped",
-        "rpc_url": "http://localhost:8545"
+        "rpc_url": "http://localhost:8545",
+        "expires_at": rpc_expires_at.isoformat() if rpc_expires_at else None,
+        "extend_threshold_seconds": config.rpc_extend_threshold_seconds,
+        "extend_seconds": config.rpc_extend_seconds
     }
-
 @app.post("/api/rpc/start")
 def api_rpc_start():
     import subprocess
@@ -509,20 +559,32 @@ def api_rpc_start():
         )
         if res.returncode != 0:
             return {"status": "failed", "error": res.stderr}
+
+        global rpc_expires_at
+        rpc_expires_at = datetime.now(timezone.utc) + timedelta(seconds=config.rpc_ttl_seconds)
         return {"status": "success"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/rpc/stop")
-def api_rpc_stop():
+@app.post("/api/rpc/restart")
+def api_rpc_restart():
     import subprocess
     import os
     chall_dir = config.chall_dir
     if not chall_dir.exists():
         raise HTTPException(status_code=400, detail="Challenge directory not initialized")
     try:
-        res = subprocess.run(
+        # Stop
+        subprocess.run(
             ["docker", "compose", "down"],
+            cwd=str(chall_dir),
+            shell=(os.name == "nt"),
+            capture_output=True,
+            text=True
+        )
+        # Start
+        res = subprocess.run(
+            ["docker", "compose", "up", "-d", "anvil", "rpc"],
             cwd=str(chall_dir),
             shell=(os.name == "nt"),
             capture_output=True,
@@ -530,6 +592,30 @@ def api_rpc_stop():
         )
         if res.returncode != 0:
             return {"status": "failed", "error": res.stderr}
+
+        global rpc_expires_at
+        rpc_expires_at = datetime.now(timezone.utc) + timedelta(seconds=config.rpc_ttl_seconds)
         return {"status": "success"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/rpc/extend")
+def api_rpc_extend():
+    global rpc_expires_at
+    if not rpc_expires_at:
+        raise HTTPException(status_code=400, detail="RPC Node is not running")
+
+    now = datetime.now(timezone.utc)
+    remaining_seconds = (rpc_expires_at - now).total_seconds()
+    if remaining_seconds > config.rpc_extend_threshold_seconds:
+        minutes_to_wait = int((remaining_seconds - config.rpc_extend_threshold_seconds) / 60) + 1
+        raise HTTPException(
+            status_code=400,
+            detail=f"You can only extend RPC when under {int(config.rpc_extend_threshold_seconds / 60)} minutes remaining (please wait {minutes_to_wait} more minute(s))"
+        )
+
+    rpc_expires_at += timedelta(seconds=config.rpc_extend_seconds)
+    return {
+        "status": "success",
+        "expires_at": rpc_expires_at.isoformat()
+    }
