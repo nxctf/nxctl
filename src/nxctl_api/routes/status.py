@@ -10,6 +10,7 @@ from nxctl_api.auth import (
 )
 from nxctl_api.serializers import (
     build_extend_availability,
+    build_restart_availability,
     compute_remaining_seconds,
     get_extend_cooldown,
     safe_exports,
@@ -40,13 +41,20 @@ def _status_payload(config, runtime_service, export_manager, challenge):
         challenge.name,
         runtime,
     )
+    restart_availability = build_restart_availability(
+        runtime_service,
+        challenge.name,
+        challenge,
+    )
 
     return {
         "name": challenge.name,
         "status": runtime.status,
         "container_id": runtime.container_id,
         "remaining_seconds": compute_remaining_seconds(runtime.expires_at),
-        "restart_cooldown": runtime_service.check_restart_cooldown(challenge.name) or 0,
+        "can_restart": restart_availability["enabled"],
+        "restart_cooldown": restart_availability["cooldown_remaining_seconds"],
+        "restart": restart_availability,
         "extend_cooldown": get_extend_cooldown(runtime_service, challenge.name),
         "extend": extend_availability,
         "exports": safe_exports(export_manager, challenge.name, health=False),
@@ -128,6 +136,7 @@ def inspect_challenge(
             name,
             runtime,
         )
+        restart_availability = build_restart_availability(runtime_service, name, challenge)
 
         return {
             "challenge": {
@@ -136,13 +145,17 @@ def inspect_challenge(
                 "port": challenge.service_port,
                 "type": challenge.service_type,
                 "enabled": challenge.enabled,
+                "requires_key": bool(getattr(challenge, "access_key_hash", "")),
+                "can_restart": restart_availability["enabled"],
                 "created_at": serialize_datetime(challenge.created_at),
             },
             "runtime": {
                 "status": runtime.status,
                 "container_id": runtime.container_id,
                 "remaining_seconds": compute_remaining_seconds(runtime.expires_at),
-                "restart_cooldown": runtime_service.check_restart_cooldown(name) or 0,
+                "can_restart": restart_availability["enabled"],
+                "restart_cooldown": restart_availability["cooldown_remaining_seconds"],
+                "restart": restart_availability,
                 "extend_cooldown": get_extend_cooldown(runtime_service, name),
                 "extend": extend_availability,
             },

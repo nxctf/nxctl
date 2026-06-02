@@ -39,6 +39,70 @@ class RuntimeService:
     def _legacy_runtime_compose_file(self, challenge_dir: Path) -> Path:
         return challenge_dir / "docker-compose.run.yml"
 
+    def effective_ttl(self, challenge_name: str) -> dict[str, int]:
+        """Return the challenge-specific TTL config with global fallbacks."""
+        challenge = self._get_challenge_from_db(challenge_name)
+        if not challenge:
+            raise RuntimeError(f"Challenge not found: {challenge_name}")
+        return self._effective_ttl_for_challenge(challenge)
+
+    def _effective_ttl_for_challenge(self, challenge: Challenge) -> dict[str, int]:
+        return {
+            "default_minutes": self._ttl_value(challenge, "ttl_default_minutes", "default_ttl_minutes", 15),
+            "extend_minutes": self._ttl_value(challenge, "ttl_extend_minutes", "extend_time_minutes", 10),
+            "extend_threshold_minutes": self._ttl_value(
+                challenge,
+                "ttl_extend_threshold_minutes",
+                "extend_threshold_minutes",
+                5,
+            ),
+            "extend_cooldown_seconds": self._ttl_value(
+                challenge,
+                "ttl_extend_cooldown_seconds",
+                "extend_cooldown_seconds",
+                30,
+            ),
+        }
+
+    def _ttl_value(self, challenge: Challenge, challenge_attr: str, config_attr: str, default: int) -> int:
+        challenge_value = getattr(challenge, challenge_attr, None)
+        if challenge_value is not None:
+            return int(challenge_value)
+        config_value = getattr(self.config, config_attr, default)
+        if config_value is None:
+            return default
+        return int(config_value)
+
+    def effective_lifecycle(self, challenge_name: str) -> dict[str, int | bool]:
+        """Return challenge lifecycle policy with global fallbacks."""
+        challenge = self._get_challenge_from_db(challenge_name)
+        if not challenge:
+            raise RuntimeError(f"Challenge not found: {challenge_name}")
+        return self._effective_lifecycle_for_challenge(challenge)
+
+    def _effective_lifecycle_for_challenge(self, challenge: Challenge) -> dict[str, int | bool]:
+        can_restart = challenge.can_restart
+        if can_restart is None:
+            can_restart = bool(getattr(self.config, "can_restart", True))
+
+        cooldown = challenge.restart_cooldown_seconds
+        if cooldown is None:
+            cooldown = int(getattr(self.config, "restart_cooldown_seconds", 300) or 0)
+
+        return {
+            "can_restart": bool(can_restart),
+            "restart_cooldown_seconds": int(cooldown),
+        }
+
+    def ensure_restart_allowed(self, challenge_name: str) -> None:
+        """Raise when challenge metadata disables restarts."""
+        challenge = self._get_challenge_from_db(challenge_name)
+        if not challenge:
+            raise RuntimeError(f"Challenge not found: {challenge_name}")
+        lifecycle = self._effective_lifecycle_for_challenge(challenge)
+        if not lifecycle["can_restart"]:
+            raise RuntimeError("Restart disabled by challenge config")
+
     def _absolute_compose_path(self, challenge_dir: Path, value):
         if not isinstance(value, str) or not value.strip():
             return value
@@ -113,7 +177,10 @@ class RuntimeService:
         try:
             cursor.execute("""
                 SELECT id, name, path, service_port, service_type, enabled,
-                       access_key_hash, access_key_source, created_at
+                       access_key_hash, access_key_source, config_source,
+                       ttl_default_minutes, ttl_extend_minutes,
+                       ttl_extend_threshold_minutes, ttl_extend_cooldown_seconds,
+                       can_restart, restart_cooldown_seconds, created_at
                 FROM challenges
                 WHERE name = ?
             """, (name,))
@@ -122,20 +189,30 @@ class RuntimeService:
             if not row:
                 return None
 
-            return Challenge(
-                id=row["id"],
-                name=row["name"],
-                path=row["path"],
-                service_port=row["service_port"],
-                service_type=row["service_type"],
-                enabled=bool(row["enabled"]),
-                access_key_hash=row["access_key_hash"] or "",
-                access_key_source=row["access_key_source"] or "",
-                created_at=row["created_at"],
-            )
+            return self._challenge_from_row(row)
 
         finally:
             close_db_connection(conn)
+
+    def _challenge_from_row(self, row) -> Challenge:
+        return Challenge(
+            id=row["id"],
+            name=row["name"],
+            path=row["path"],
+            service_port=row["service_port"],
+            service_type=row["service_type"],
+            enabled=bool(row["enabled"]),
+            access_key_hash=row["access_key_hash"] or "",
+            access_key_source=row["access_key_source"] or "",
+            config_source=row["config_source"] or "",
+            ttl_default_minutes=row["ttl_default_minutes"],
+            ttl_extend_minutes=row["ttl_extend_minutes"],
+            ttl_extend_threshold_minutes=row["ttl_extend_threshold_minutes"],
+            ttl_extend_cooldown_seconds=row["ttl_extend_cooldown_seconds"],
+            can_restart=None if row["can_restart"] is None else bool(row["can_restart"]),
+            restart_cooldown_seconds=row["restart_cooldown_seconds"],
+            created_at=row["created_at"],
+        )
 
     def _get_runtime_from_db(self, challenge_id: int) -> Optional[RuntimeInstance]:
         """Get runtime instance from database."""
@@ -368,6 +445,7 @@ class RuntimeService:
         challenge = self._get_challenge_from_db(challenge_name)
         if not challenge:
             raise RuntimeError(f"Challenge not found: {challenge_name}")
+        ttl = self._effective_ttl_for_challenge(challenge)
 
         runtime = self._get_runtime_from_db(challenge.id)
         if not runtime or runtime.status != "running":
@@ -387,10 +465,10 @@ class RuntimeService:
         remaining = expires_at - datetime.now()
         remaining_mins = remaining.total_seconds() / 60
 
-        if remaining_mins > self.config.extend_threshold_minutes:
-            raise RuntimeError(f"Can only extend when remaining time is less than {self.config.extend_threshold_minutes} minutes")
+        if remaining_mins > ttl["extend_threshold_minutes"]:
+            raise RuntimeError(f"Can only extend when remaining time is less than {ttl['extend_threshold_minutes']} minutes")
 
-        new_expires_at = expires_at + timedelta(minutes=self.config.extend_time_minutes)
+        new_expires_at = expires_at + timedelta(minutes=ttl["extend_minutes"])
 
         self._update_runtime_expiry(challenge.id, new_expires_at)
         self.update_extend_time(challenge_name)
@@ -403,24 +481,28 @@ class RuntimeService:
         challenge = self._get_challenge_from_db(challenge_name)
         if not challenge:
             return None
+        lifecycle = self._effective_lifecycle_for_challenge(challenge)
+        cooldown_seconds = int(lifecycle["restart_cooldown_seconds"] or 0)
+        if cooldown_seconds <= 0:
+            return None
 
         runtime = self._get_runtime_from_db(challenge.id)
         if not runtime or not runtime.last_restart:
             return None
 
         elapsed = (datetime.now() - runtime.last_restart).total_seconds()
-        if elapsed < self.config.restart_cooldown_seconds:
-            return int(self.config.restart_cooldown_seconds - elapsed)
+        if elapsed < cooldown_seconds:
+            return int(cooldown_seconds - elapsed)
         return None
 
     def check_extend_cooldown(self, challenge_name: str) -> Optional[int]:
         """Check extend cooldown. Returns remaining seconds or None."""
-        cooldown_seconds = int(getattr(self.config, "extend_cooldown_seconds", 30) or 0)
-        if cooldown_seconds <= 0:
-            return None
-
         challenge = self._get_challenge_from_db(challenge_name)
         if not challenge:
+            return None
+        ttl = self._effective_ttl_for_challenge(challenge)
+        cooldown_seconds = int(ttl["extend_cooldown_seconds"] or 0)
+        if cooldown_seconds <= 0:
             return None
 
         runtime = self._get_runtime_from_db(challenge.id)
@@ -550,7 +632,8 @@ class RuntimeService:
             logger.info(f"Challenge already running: {challenge_name}")
             # Backfill expiry if missing
             if not runtime.expires_at:
-                expires_at = datetime.now() + timedelta(minutes=self.config.default_ttl_minutes)
+                ttl = self._effective_ttl_for_challenge(challenge)
+                expires_at = datetime.now() + timedelta(minutes=ttl["default_minutes"])
                 self._update_runtime_expiry(challenge.id, expires_at)
                 runtime.expires_at = expires_at
             return runtime
@@ -661,7 +744,8 @@ class RuntimeService:
                 raise DockerError(str(last_start_error or "Start failed"))
 
             # Set expiry
-            expires_at = datetime.now() + timedelta(minutes=self.config.default_ttl_minutes)
+            ttl = self._effective_ttl_for_challenge(challenge)
+            expires_at = datetime.now() + timedelta(minutes=ttl["default_minutes"])
 
             # Save to database
             if challenge.id is None:
@@ -768,7 +852,8 @@ class RuntimeService:
 
         # Auto-backfill expiry for legacy records that are still running
         if runtime.status == 'running' and not runtime.expires_at:
-            expires_at = datetime.now() + timedelta(minutes=self.config.default_ttl_minutes)
+            ttl = self._effective_ttl_for_challenge(challenge)
+            expires_at = datetime.now() + timedelta(minutes=ttl["default_minutes"])
             self._update_runtime_expiry(challenge.id, expires_at)
             runtime.expires_at = expires_at
 

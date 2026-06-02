@@ -22,7 +22,7 @@ router = APIRouter()
 def list_challenges(
     access: ApiAccessContext = Depends(get_api_access_context),
 ):
-    _, challenge_service, runtime_service, _ = get_services()
+    config, challenge_service, runtime_service, _ = get_services()
     results = []
     challenges = filter_authorized_challenges(
         challenge_service.list_challenges(),
@@ -31,9 +31,14 @@ def list_challenges(
     for challenge in challenges:
         try:
             runtime = runtime_service.status(challenge.name)
-            results.append(serialize_challenge_with_runtime(challenge, runtime))
+            results.append(serialize_challenge_with_runtime(
+                challenge,
+                runtime,
+                runtime_service,
+                config,
+            ))
         except Exception:
-            results.append(serialize_challenge_basic(challenge) | {
+            results.append(serialize_challenge_basic(challenge, runtime_service, config) | {
                 "status": "unknown",
                 "running": False,
                 "remaining_seconds": None,
@@ -45,9 +50,9 @@ def list_challenges(
 def list_challenges_basic(
     access: ApiAccessContext = Depends(get_api_access_context),
 ):
-    _, challenge_service, _, _ = get_services()
+    config, challenge_service, runtime_service, _ = get_services()
     return [
-        serialize_challenge_basic(challenge)
+        serialize_challenge_basic(challenge, runtime_service, config)
         for challenge in filter_authorized_challenges(
             challenge_service.list_challenges(),
             access,
@@ -58,7 +63,7 @@ def list_challenges_basic(
 @router.post("/sync", dependencies=[Depends(verify_admin_secret)])
 def sync_challenges():
     try:
-        config, challenge_service, _, _ = get_services()
+        config, challenge_service, runtime_service, _ = get_services()
         git_repo = GitRepository(
             repo_url=config.github_repo,
             cache_dir=config.chall_dir,
@@ -75,7 +80,7 @@ def sync_challenges():
                 0,
             ),
             "challenges": [
-                serialize_challenge_basic(challenge)
+                serialize_challenge_basic(challenge, runtime_service, config)
                 for challenge in challenges
             ],
         }

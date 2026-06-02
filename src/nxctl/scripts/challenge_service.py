@@ -4,7 +4,8 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from nxctl.core.access import ACCESS_KEY_FILENAMES, hash_access_key
+from nxctl.core.access import hash_access_key
+from nxctl.core.challenge_config import load_inherited_challenge_config
 from nxctl.core.models import Challenge, ChallengePort
 from nxctl.core.db import get_db_connection, close_db_connection
 from nxctl.core.git import GitRepository
@@ -96,10 +97,9 @@ class ChallengeService:
         # Use the relative path from repo root as the challenge name.
         challenge_name = str(challenge_dir.relative_to(repo_root)).replace("\\", "/")
         challenge_path = str(challenge_dir.relative_to(repo_root)).replace("\\", "/")
-        access_key_hash, access_key_source = self._resolve_inherited_access_key(
-            challenge_dir,
-            repo_root,
-        )
+        local_config = load_inherited_challenge_config(challenge_dir, repo_root)
+        access_key_hash = hash_access_key(local_config.key)
+        access_key_source = local_config.key_source if access_key_hash else ""
 
         # Extract port and service type information
         service_port = 8080
@@ -121,43 +121,17 @@ class ChallengeService:
             service_type=service_type,
             access_key_hash=access_key_hash,
             access_key_source=access_key_source,
+            config_source=", ".join(local_config.config_sources),
+            ttl_default_minutes=local_config.ttl.get("default_minutes"),
+            ttl_extend_minutes=local_config.ttl.get("extend_minutes"),
+            ttl_extend_threshold_minutes=local_config.ttl.get("extend_threshold_minutes"),
+            ttl_extend_cooldown_seconds=local_config.ttl.get("extend_cooldown_seconds"),
+            can_restart=local_config.can_restart,
+            restart_cooldown_seconds=local_config.restart_cooldown_seconds,
         )
 
         logger.info(f"Discovered challenge: {challenge_name} (port {service_port}, type {service_type})")
         return challenge
-
-    def _resolve_inherited_access_key(self, challenge_dir: Path, repo_root: Path) -> tuple[str, str]:
-        """Return the nearest inherited access key hash and source path."""
-        try:
-            current = challenge_dir.resolve()
-            root = repo_root.resolve()
-            current.relative_to(root)
-        except Exception:
-            return "", ""
-
-        while True:
-            for filename in ACCESS_KEY_FILENAMES:
-                key_path = current / filename
-                if not key_path.is_file():
-                    continue
-                try:
-                    key_value = key_path.read_text(encoding="utf-8").strip()
-                except UnicodeDecodeError:
-                    key_value = key_path.read_text().strip()
-                key_hash = hash_access_key(key_value)
-                if not key_hash:
-                    return "", ""
-                try:
-                    key_source = str(key_path.relative_to(root)).replace("\\", "/")
-                except ValueError:
-                    key_source = str(key_path)
-                return key_hash, key_source
-
-            if current == root or current.parent == current:
-                break
-            current = current.parent
-
-        return "", ""
 
     def sync_challenges(
         self,
@@ -197,15 +171,28 @@ class ChallengeService:
             for challenge in challenges:
                 cursor.execute("""
                     INSERT INTO challenges
-                    (name, path, service_port, service_type, enabled, access_key_hash, access_key_source)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (
+                        name, path, service_port, service_type, enabled,
+                        access_key_hash, access_key_source, config_source,
+                        ttl_default_minutes, ttl_extend_minutes,
+                        ttl_extend_threshold_minutes, ttl_extend_cooldown_seconds,
+                        can_restart, restart_cooldown_seconds
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(name) DO UPDATE SET
                         path = excluded.path,
                         service_port = excluded.service_port,
                         service_type = excluded.service_type,
                         enabled = excluded.enabled,
                         access_key_hash = excluded.access_key_hash,
-                        access_key_source = excluded.access_key_source
+                        access_key_source = excluded.access_key_source,
+                        config_source = excluded.config_source,
+                        ttl_default_minutes = excluded.ttl_default_minutes,
+                        ttl_extend_minutes = excluded.ttl_extend_minutes,
+                        ttl_extend_threshold_minutes = excluded.ttl_extend_threshold_minutes,
+                        ttl_extend_cooldown_seconds = excluded.ttl_extend_cooldown_seconds,
+                        can_restart = excluded.can_restart,
+                        restart_cooldown_seconds = excluded.restart_cooldown_seconds
                 """, (
                     challenge.name,
                     challenge.path,
@@ -214,6 +201,13 @@ class ChallengeService:
                     challenge.enabled,
                     challenge.access_key_hash,
                     challenge.access_key_source,
+                    challenge.config_source,
+                    challenge.ttl_default_minutes,
+                    challenge.ttl_extend_minutes,
+                    challenge.ttl_extend_threshold_minutes,
+                    challenge.ttl_extend_cooldown_seconds,
+                    challenge.can_restart,
+                    challenge.restart_cooldown_seconds,
                 ))
                 cursor.execute("SELECT id FROM challenges WHERE name = ?", (challenge.name,))
                 row = cursor.fetchone()
@@ -271,7 +265,14 @@ class ChallengeService:
                 UPDATE challenges
                 SET enabled = 0,
                     access_key_hash = '',
-                    access_key_source = ''
+                    access_key_source = '',
+                    config_source = '',
+                    ttl_default_minutes = NULL,
+                    ttl_extend_minutes = NULL,
+                    ttl_extend_threshold_minutes = NULL,
+                    ttl_extend_cooldown_seconds = NULL,
+                    can_restart = NULL,
+                    restart_cooldown_seconds = NULL
                 WHERE id IN ({stale_placeholders})
             """,
             stale_ids,
@@ -325,7 +326,10 @@ class ChallengeService:
             enabled_filter = "" if include_disabled else "WHERE enabled = 1"
             cursor.execute("""
                 SELECT id, name, path, service_port, service_type, enabled,
-                       access_key_hash, access_key_source, created_at
+                       access_key_hash, access_key_source, config_source,
+                       ttl_default_minutes, ttl_extend_minutes,
+                       ttl_extend_threshold_minutes, ttl_extend_cooldown_seconds,
+                       can_restart, restart_cooldown_seconds, created_at
                 FROM challenges
                 {enabled_filter}
                 ORDER BY name
@@ -333,18 +337,7 @@ class ChallengeService:
 
             challenges = []
             for row in cursor.fetchall():
-                challenge = Challenge(
-                    id=row["id"],
-                    name=row["name"],
-                    path=row["path"],
-                    service_port=row["service_port"],
-                    service_type=row["service_type"],
-                    enabled=bool(row["enabled"]),
-                    access_key_hash=row["access_key_hash"] or "",
-                    access_key_source=row["access_key_source"] or "",
-                    created_at=row["created_at"],
-                )
-                challenges.append(challenge)
+                challenges.append(self._challenge_from_row(row))
 
             return challenges
 
@@ -402,7 +395,10 @@ class ChallengeService:
         try:
             cursor.execute("""
                 SELECT id, name, path, service_port, service_type, enabled,
-                       access_key_hash, access_key_source, created_at
+                       access_key_hash, access_key_source, config_source,
+                       ttl_default_minutes, ttl_extend_minutes,
+                       ttl_extend_threshold_minutes, ttl_extend_cooldown_seconds,
+                       can_restart, restart_cooldown_seconds, created_at
                 FROM challenges
                 WHERE name = ?
             """, (name,))
@@ -411,20 +407,31 @@ class ChallengeService:
             if not row:
                 return None
 
-            return Challenge(
-                id=row["id"],
-                name=row["name"],
-                path=row["path"],
-                service_port=row["service_port"],
-                service_type=row["service_type"],
-                enabled=bool(row["enabled"]),
-                access_key_hash=row["access_key_hash"] or "",
-                access_key_source=row["access_key_source"] or "",
-                created_at=row["created_at"],
-            )
+            return self._challenge_from_row(row)
 
         finally:
             close_db_connection(conn)
+
+    def _challenge_from_row(self, row) -> Challenge:
+        """Build a Challenge model from a SQLite row."""
+        return Challenge(
+            id=row["id"],
+            name=row["name"],
+            path=row["path"],
+            service_port=row["service_port"],
+            service_type=row["service_type"],
+            enabled=bool(row["enabled"]),
+            access_key_hash=row["access_key_hash"] or "",
+            access_key_source=row["access_key_source"] or "",
+            config_source=row["config_source"] or "",
+            ttl_default_minutes=row["ttl_default_minutes"],
+            ttl_extend_minutes=row["ttl_extend_minutes"],
+            ttl_extend_threshold_minutes=row["ttl_extend_threshold_minutes"],
+            ttl_extend_cooldown_seconds=row["ttl_extend_cooldown_seconds"],
+            can_restart=None if row["can_restart"] is None else bool(row["can_restart"]),
+            restart_cooldown_seconds=row["restart_cooldown_seconds"],
+            created_at=row["created_at"],
+        )
 
     def add_challenge(self, name: str, path: str, port: int, service_type: str = "http") -> Challenge:
         """Add a challenge manually."""

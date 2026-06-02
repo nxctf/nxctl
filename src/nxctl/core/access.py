@@ -3,7 +3,6 @@
 import hashlib
 import hmac
 
-ACCESS_KEY_FILENAMES = ("key",)
 ACCESS_KEY_HASH_PREFIX = "sha256:"
 
 

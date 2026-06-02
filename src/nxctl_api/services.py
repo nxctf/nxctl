@@ -23,6 +23,7 @@ def start_challenge_payload(name, challenge_service, runtime_service, export_man
     runtime = runtime_service.status(name)
     exports, failures = _start_available_exports(export_manager, name, challenge, ports)
     primary_port = ports[0].host_port if ports else challenge.service_port
+    lifecycle = runtime_service.effective_lifecycle(name)
 
     return {
         "ok": True,
@@ -30,6 +31,8 @@ def start_challenge_payload(name, challenge_service, runtime_service, export_man
         "status": "running",
         "port": primary_port,
         "ports": serialize_ports(ports),
+        "can_restart": bool(lifecycle["can_restart"]),
+        "restart_cooldown_seconds": int(lifecycle["restart_cooldown_seconds"]),
         "remaining_seconds": compute_remaining_seconds(runtime.expires_at),
         "exports": exports,
         "export_failures": failures,

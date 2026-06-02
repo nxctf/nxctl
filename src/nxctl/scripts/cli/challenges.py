@@ -1,6 +1,7 @@
 """CLI command handlers for challenge management."""
 
 import logging
+from nxctl.core.challenge_config import read_config_key
 from nxctl.core.git import GitRepository, GitError
 from nxctl.scripts.challenge_service import ChallengeDiscoveryError
 from nxctl.scripts.cli.base import (
@@ -45,9 +46,80 @@ def _key_text(config, challenge) -> str:
 
     key_path = (config.chall_dir / key_source).resolve()
     try:
-        return key_path.read_text(encoding="utf-8").strip() or "(empty)"
+        return read_config_key(key_path) or "(empty)"
     except Exception:
         return "(unavailable)"
+
+
+def _key_status_text(challenge) -> str:
+    return "Yes" if challenge.access_key_hash else "No"
+
+
+def _config_source_text(challenge) -> str:
+    return str(getattr(challenge, "config_source", "") or "-")
+
+
+def _config_int(config, attr: str, default: int) -> int:
+    value = getattr(config, attr, default)
+    if value is None:
+        return default
+    return int(value)
+
+
+def _effective_ttl(config, challenge) -> dict[str, int]:
+    return {
+        "default_minutes": int(
+            challenge.ttl_default_minutes
+            if challenge.ttl_default_minutes is not None
+            else _config_int(config, "default_ttl_minutes", 15)
+        ),
+        "extend_minutes": int(
+            challenge.ttl_extend_minutes
+            if challenge.ttl_extend_minutes is not None
+            else _config_int(config, "extend_time_minutes", 10)
+        ),
+        "extend_threshold_minutes": int(
+            challenge.ttl_extend_threshold_minutes
+            if challenge.ttl_extend_threshold_minutes is not None
+            else _config_int(config, "extend_threshold_minutes", 5)
+        ),
+        "extend_cooldown_seconds": int(
+            challenge.ttl_extend_cooldown_seconds
+            if challenge.ttl_extend_cooldown_seconds is not None
+            else _config_int(config, "extend_cooldown_seconds", 30)
+        ),
+    }
+
+
+def _ttl_summary(config, challenge) -> str:
+    ttl = _effective_ttl(config, challenge)
+    return (
+        f"{ttl['default_minutes']}m/"
+        f"+{ttl['extend_minutes']}m/"
+        f"<={ttl['extend_threshold_minutes']}m/"
+        f"{ttl['extend_cooldown_seconds']}s"
+    )
+
+
+def _effective_lifecycle(config, challenge) -> dict[str, int | bool]:
+    can_restart = getattr(challenge, "can_restart", None)
+    if can_restart is None:
+        can_restart = bool(getattr(config, "can_restart", True))
+
+    cooldown = getattr(challenge, "restart_cooldown_seconds", None)
+    if cooldown is None:
+        cooldown = _config_int(config, "restart_cooldown_seconds", 300)
+
+    return {
+        "can_restart": bool(can_restart),
+        "restart_cooldown_seconds": int(cooldown),
+    }
+
+
+def _restart_policy_text(config, challenge) -> str:
+    lifecycle = _effective_lifecycle(config, challenge)
+    status = "Enabled" if lifecycle["can_restart"] else "Disabled"
+    return f"{status}/{format_duration(lifecycle['restart_cooldown_seconds'])}"
 
 
 def cmd_sync(args) -> int:
@@ -98,22 +170,44 @@ def cmd_list(args) -> int:
 
 
         show_key = bool(getattr(args, "key", False))
-        width = 152 if show_key else 124
-        print(f"{'-' * width}")
-        if show_key:
-            print(f"{'Name':28} {'Primary':16} {'Ports':46} {'Key':24} {'Path'}")
+        show_all = bool(getattr(args, "all", False))
+        rows = []
+        if show_all:
+            for challenge in challenges:
+                rows.append([
+                    challenge.name,
+                    f"{challenge.service_port}/{challenge.service_type}",
+                    _ports_text(challenge_service, challenge),
+                    _key_text(config, challenge) if show_key else _key_status_text(challenge),
+                    _ttl_summary(config, challenge),
+                    _restart_policy_text(config, challenge),
+                    _config_source_text(challenge),
+                    challenge.path,
+                ])
+            print(table(
+                ["Name", "Primary", "Ports", "Key", "TTL", "Restart", "Config", "Path"],
+                rows,
+                [28, 16, 42, 24, 20, 10, 34, 54],
+            ))
+        elif show_key:
+            for challenge in challenges:
+                rows.append([
+                    challenge.name,
+                    f"{challenge.service_port}/{challenge.service_type}",
+                    _ports_text(challenge_service, challenge),
+                    _key_text(config, challenge),
+                    challenge.path,
+                ])
+            print(table(["Name", "Primary", "Ports", "Key", "Path"], rows, [28, 16, 46, 24, 64]))
         else:
-            print(f"{'Name':28} {'Primary':16} {'Ports':46} {'Path'}")
-        print(f"{'-' * width}")
-        for challenge in challenges:
-            primary = f"{challenge.service_port}/{challenge.service_type}"
-            ports_text = _ports_text(challenge_service, challenge)
-            if show_key:
-                key_text = _key_text(config, challenge)
-                print(f"{challenge.name:28} {primary:16} {ports_text:46} {key_text:24} {challenge.path}")
-            else:
-                print(f"{challenge.name:28} {primary:16} {ports_text:46} {challenge.path}")
-        print(f"{'-' * width}")
+            for challenge in challenges:
+                rows.append([
+                    challenge.name,
+                    f"{challenge.service_port}/{challenge.service_type}",
+                    _ports_text(challenge_service, challenge),
+                    challenge.path,
+                ])
+            print(table(["Name", "Primary", "Ports", "Path"], rows, [28, 16, 46, 64]))
         return 0
     except Exception as e:
         print(f"{red(ERR)} List failed: {str(e)}")
@@ -147,6 +241,10 @@ def cmd_inspect(args) -> int:
         bore_status = green("Enabled") if getattr(config, "enable_bore", True) else red("Disabled")
         restart_cd = yellow(f"{format_duration(cooldown)} left") if cooldown else green("Ready")
         ttl_value = green(ttl_text) if ttl_ok and ttl_text != "-" else red("Expired") if ttl_text != "-" else "-"
+        effective_ttl = _effective_ttl(config, challenge)
+        effective_lifecycle = _effective_lifecycle(config, challenge)
+        if not effective_lifecycle["can_restart"]:
+            restart_cd = red("Disabled")
         print(panel(
             f"Challenge: {challenge.name}",
             [
@@ -156,6 +254,8 @@ def cmd_inspect(args) -> int:
                 ("Host Port", challenge.service_port),
                 ("Ports", ports_text),
                 ("Enabled", green("Yes") if challenge.enabled else red("No")),
+                ("Key Required", green("Yes") if challenge.access_key_hash else "No"),
+                ("Config Source", _config_source_text(challenge)),
                 ("Created", format_datetime(challenge.created_at)),
             ],
         ))
@@ -170,6 +270,12 @@ def cmd_inspect(args) -> int:
                 ("Bore", bore_status),
                 ("Auto Export", green("Enabled")),
                 ("Auto Heal", green("Enabled") if getattr(config, "auto_heal_exports", False) else red("Disabled")),
+                ("TTL Default", f"{effective_ttl['default_minutes']}m"),
+                ("TTL Extend", f"{effective_ttl['extend_minutes']}m"),
+                ("Extend Window", f"{effective_ttl['extend_threshold_minutes']}m"),
+                ("Extend Cooldown", format_duration(effective_ttl["extend_cooldown_seconds"])),
+                ("Restart", green("Enabled") if effective_lifecycle["can_restart"] else red("Disabled")),
+                ("Restart Cooldown", format_duration(effective_lifecycle["restart_cooldown_seconds"])),
             ],
         ))
         print(panel(

@@ -1,6 +1,6 @@
 """Domain models for challenges and runtimes."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
@@ -16,6 +16,13 @@ class Challenge:
     enabled: bool = True
     access_key_hash: str = ""
     access_key_source: str = ""
+    config_source: str = ""
+    ttl_default_minutes: Optional[int] = None
+    ttl_extend_minutes: Optional[int] = None
+    ttl_extend_threshold_minutes: Optional[int] = None
+    ttl_extend_cooldown_seconds: Optional[int] = None
+    can_restart: Optional[bool] = None
+    restart_cooldown_seconds: Optional[int] = None
     created_at: Optional[datetime] = None
 
 

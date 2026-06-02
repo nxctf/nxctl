@@ -53,6 +53,13 @@ class TtlConfig(BaseModel):
 
 class DaemonConfig(BaseModel):
     interval_seconds: int = 10
+
+    class Config:
+        extra = "allow"
+
+
+class LifecycleConfig(BaseModel):
+    can_restart: bool = True
     restart_cooldown_seconds: int = 300
 
     class Config:
@@ -145,6 +152,7 @@ class Config(BaseModel):
     api: ApiConfig = Field(default_factory=ApiConfig)
     ttl: TtlConfig = Field(default_factory=TtlConfig)
     daemon: DaemonConfig = Field(default_factory=DaemonConfig)
+    lifecycle: LifecycleConfig = Field(default_factory=LifecycleConfig)
     exports: ExportsConfig = Field(default_factory=ExportsConfig)
     ports: PortsConfig = Field(default_factory=PortsConfig)
     tunnels: TunnelsConfig = Field(default_factory=TunnelsConfig)
@@ -268,7 +276,11 @@ class Config(BaseModel):
 
     @property
     def restart_cooldown_seconds(self) -> int:
-        return self.daemon.restart_cooldown_seconds
+        return self.lifecycle.restart_cooldown_seconds
+
+    @property
+    def can_restart(self) -> bool:
+        return self.lifecycle.can_restart
 
     @property
     def auto_heal_exports(self) -> bool:
@@ -418,7 +430,8 @@ class Config(BaseModel):
             "extend_threshold_minutes": ("ttl", "extend_threshold_minutes"),
             "extend_cooldown_seconds": ("ttl", "extend_cooldown_seconds"),
             "daemon_interval": ("daemon", "interval_seconds"),
-            "restart_cooldown_seconds": ("daemon", "restart_cooldown_seconds"),
+            "restart_cooldown_seconds": ("lifecycle", "restart_cooldown_seconds"),
+            "can_restart": ("lifecycle", "can_restart"),
             "auto_heal_exports": ("exports", "auto_heal"),
             "export_endpoint_check_interval_seconds": ("exports", "endpoint_check_interval_seconds"),
             "export_endpoint_check_timeout_seconds": ("exports", "endpoint_check_timeout_seconds"),
@@ -435,6 +448,13 @@ class Config(BaseModel):
             "ngrok_tokens": ("tunnels", "ngrok", "tokens"),
             "ngrok_max_sessions_per_token": ("tunnels", "ngrok", "max_sessions_per_token"),
         }
+
+        legacy_daemon = values.get("daemon")
+        if isinstance(legacy_daemon, dict) and "restart_cooldown_seconds" in legacy_daemon:
+            if "lifecycle" not in values or not isinstance(values["lifecycle"], dict):
+                values["lifecycle"] = {}
+            if "restart_cooldown_seconds" not in values["lifecycle"]:
+                values["lifecycle"]["restart_cooldown_seconds"] = legacy_daemon["restart_cooldown_seconds"]
 
         # Handle legacy flat pinggy_token
         if "pinggy_token" in values:

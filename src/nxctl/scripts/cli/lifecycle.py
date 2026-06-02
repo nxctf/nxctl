@@ -389,6 +389,8 @@ def cmd_restart(args) -> int:
         config, challenge_service, runtime_service, export_manager = get_services()
 
         with LifecycleLock(config):
+            runtime_service.ensure_restart_allowed(args.name)
+
             # 1. Check Cooldown
             remaining = runtime_service.check_restart_cooldown(args.name)
             if remaining:

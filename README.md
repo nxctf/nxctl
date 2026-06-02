@@ -466,3 +466,14 @@ cloudflared tunnel run edge
 # cloudflared tunnel delete edge
 cloudflared tunnel create nxctl
 ```
+
+```bash
+Remove-Item -Recurse -Force .\data
+```
+
+create a random hex string in bash:
+
+```bash
+head -c 16 /dev/urandom | xxd -p
+head -c 4 /dev/urandom | xxd -p
+```

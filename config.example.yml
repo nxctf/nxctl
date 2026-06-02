@@ -27,6 +27,9 @@ ttl:
 
 daemon:
   interval_seconds: 10
+
+lifecycle:
+  can_restart: true
   restart_cooldown_seconds: 300
 
 exports:

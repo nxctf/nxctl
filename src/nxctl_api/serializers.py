@@ -38,7 +38,8 @@ def compute_remaining_seconds(value):
 
 def build_extend_availability(runtime_service, config, challenge_name: str, runtime):
     """Build extend availability state for frontend/API clients."""
-    threshold_seconds = int((getattr(config, "extend_threshold_minutes", 5) or 0) * 60)
+    ttl = effective_ttl(runtime_service, config, challenge_name)
+    threshold_seconds = int((ttl["extend_threshold_minutes"] or 0) * 60)
     check_extend_cooldown = getattr(runtime_service, "check_extend_cooldown", None)
     if callable(check_extend_cooldown):
         cooldown_remaining = check_extend_cooldown(challenge_name) or 0
@@ -65,6 +66,61 @@ def build_extend_availability(runtime_service, config, challenge_name: str, runt
         "eligible_in_seconds": eligible_in_seconds,
         "cooldown_remaining_seconds": cooldown_remaining,
         "threshold_seconds": threshold_seconds,
+        "extend_minutes": ttl["extend_minutes"],
+        "cooldown_seconds": ttl["extend_cooldown_seconds"],
+    }
+
+
+def effective_ttl(runtime_service, config, challenge_name: str) -> dict[str, int]:
+    getter = getattr(runtime_service, "effective_ttl", None)
+    if callable(getter):
+        try:
+            return getter(challenge_name)
+        except Exception:
+            pass
+    return {
+        "default_minutes": int(getattr(config, "default_ttl_minutes", 15) or 15),
+        "extend_minutes": int(getattr(config, "extend_time_minutes", 10) or 10),
+        "extend_threshold_minutes": int(getattr(config, "extend_threshold_minutes", 5) or 5),
+        "extend_cooldown_seconds": int(getattr(config, "extend_cooldown_seconds", 30) or 30),
+    }
+
+
+def build_restart_availability(runtime_service, challenge_name: str, challenge):
+    cooldown = 0
+    checker = getattr(runtime_service, "check_restart_cooldown", None)
+    if callable(checker):
+        cooldown = int(checker(challenge_name) or 0)
+
+    lifecycle = effective_lifecycle(runtime_service, None, challenge_name, challenge)
+    enabled = bool(lifecycle["can_restart"])
+    return {
+        "can_restart": enabled and cooldown == 0,
+        "enabled": enabled,
+        "cooldown_remaining_seconds": cooldown,
+        "cooldown_seconds": int(lifecycle["restart_cooldown_seconds"]),
+    }
+
+
+def effective_lifecycle(runtime_service, config, challenge_name: str, challenge) -> dict[str, int | bool]:
+    getter = getattr(runtime_service, "effective_lifecycle", None)
+    if callable(getter):
+        try:
+            return getter(challenge_name)
+        except Exception:
+            pass
+
+    can_restart = getattr(challenge, "can_restart", None)
+    if can_restart is None:
+        can_restart = bool(getattr(config, "can_restart", True)) if config is not None else True
+
+    cooldown = getattr(challenge, "restart_cooldown_seconds", None)
+    if cooldown is None:
+        cooldown = int(getattr(config, "restart_cooldown_seconds", 300) or 0) if config is not None else 300
+
+    return {
+        "can_restart": bool(can_restart),
+        "restart_cooldown_seconds": int(cooldown),
     }
 
 
@@ -118,19 +174,23 @@ def serialize_ports(ports):
     ]
 
 
-def serialize_challenge_basic(challenge):
+def serialize_challenge_basic(challenge, runtime_service=None, config=None):
+    lifecycle = effective_lifecycle(runtime_service, config, challenge.name, challenge)
     return {
         "name": challenge.name,
         "type": challenge.service_type,
         "port": challenge.service_port,
         "path": challenge.path,
         "enabled": challenge.enabled,
+        "requires_key": bool(getattr(challenge, "access_key_hash", "")),
+        "can_restart": bool(lifecycle["can_restart"]),
+        "restart_cooldown_seconds": int(lifecycle["restart_cooldown_seconds"]),
     }
 
 
-def serialize_challenge_with_runtime(challenge, runtime):
+def serialize_challenge_with_runtime(challenge, runtime, runtime_service=None, config=None):
     status_value = getattr(runtime, "status", "unknown") or "unknown"
-    return serialize_challenge_basic(challenge) | {
+    return serialize_challenge_basic(challenge, runtime_service, config) | {
         "status": status_value,
         "running": status_value == "running",
         "remaining_seconds": compute_remaining_seconds(

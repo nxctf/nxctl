@@ -25,6 +25,13 @@ def init_database(db_path: str) -> None:
             enabled BOOLEAN DEFAULT 1,
             access_key_hash TEXT DEFAULT '',
             access_key_source TEXT DEFAULT '',
+            config_source TEXT DEFAULT '',
+            ttl_default_minutes INTEGER,
+            ttl_extend_minutes INTEGER,
+            ttl_extend_threshold_minutes INTEGER,
+            ttl_extend_cooldown_seconds INTEGER,
+            can_restart BOOLEAN,
+            restart_cooldown_seconds INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -116,6 +123,22 @@ def init_database(db_path: str) -> None:
         conn.commit()
     except sqlite3.OperationalError:
         pass
+
+    # Migration: Add inherited nxctl.yml challenge metadata
+    for statement in (
+        "ALTER TABLE challenges ADD COLUMN config_source TEXT DEFAULT ''",
+        "ALTER TABLE challenges ADD COLUMN ttl_default_minutes INTEGER",
+        "ALTER TABLE challenges ADD COLUMN ttl_extend_minutes INTEGER",
+        "ALTER TABLE challenges ADD COLUMN ttl_extend_threshold_minutes INTEGER",
+        "ALTER TABLE challenges ADD COLUMN ttl_extend_cooldown_seconds INTEGER",
+        "ALTER TABLE challenges ADD COLUMN can_restart BOOLEAN DEFAULT 1",
+        "ALTER TABLE challenges ADD COLUMN restart_cooldown_seconds INTEGER",
+    ):
+        try:
+            cursor.execute(statement)
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
 
     # Migration: challenge_ports table for multi-port challenges
     try:

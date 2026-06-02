@@ -195,6 +195,19 @@ def restart_challenge(
                 challenge_service.get_challenge(name),
                 access,
             )
+            try:
+                runtime_service.ensure_restart_allowed(name)
+            except Exception as exc:
+                if "Restart disabled" in str(exc):
+                    raise HTTPException(
+                        status_code=403,
+                        detail={
+                            "ok": False,
+                            "error": "restart_disabled",
+                            "message": str(exc),
+                        },
+                    )
+                raise
             remaining = runtime_service.check_restart_cooldown(name)
 
             if remaining:
