@@ -173,10 +173,26 @@ Example response shape from the API:
 | `nxctl api` | Run the FastAPI web server | `nxctl api --port 8000` |
 
 The API is secured with the `X-NXCTL-Token` header. Set the token with `NXCTL_API_TOKEN`.
-Protected challenges can also require an inherited challenge key. Add a `key`
-file anywhere in the challenge repository; every challenge under that directory
-inherits the nearest key. The key is hashed into SQLite during `sync`, so key
-additions, updates, and removals are picked up on the next sync.
+Protected challenges can also require inherited challenge metadata from
+`nxctl.yml`. Add `nxctl.yml` anywhere in the challenge repository; every
+challenge under that directory inherits its values, and nearer `nxctl.yml` files
+override only the fields they define. For example, a root file can define `key`,
+while a child challenge file defines only `ttl`; the child keeps the inherited
+key and uses its local TTL values. Challenge keys are hashed into SQLite during
+`sync`, so key additions, updates, and removals are picked up on the next sync.
+
+```yaml
+key: shared-team-key
+
+ttl:
+  default_minutes: 20
+  extend_minutes: 10
+
+lifecycle:
+  can_restart: true
+  restart_cooldown_seconds: 300
+```
+
 Sync also disables stale challenge rows that are no longer discovered in the
 repository, which covers renamed or deleted challenge folders without orphaning
 runtime history.

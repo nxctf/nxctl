@@ -8,7 +8,6 @@ import yaml
 
 
 CHALLENGE_CONFIG_FILENAME = "nxctl.yml"
-LEGACY_ACCESS_KEY_FILENAME = "key"
 TTL_FIELDS = (
     "default_minutes",
     "extend_minutes",
@@ -53,14 +52,6 @@ def load_inherited_challenge_config(challenge_dir: Path, repo_root: Path) -> Cha
 
     effective = ChallengeLocalConfig()
     for directory in directories:
-        legacy_key_path = directory / LEGACY_ACCESS_KEY_FILENAME
-        if legacy_key_path.is_file():
-            raise ChallengeConfigError(
-                "Legacy key files are no longer supported. "
-                f"Move {relative_repo_path(legacy_key_path, root)} into "
-                f"{relative_repo_path(directory / CHALLENGE_CONFIG_FILENAME, root)} as `key:`."
-            )
-
         config_path = directory / CHALLENGE_CONFIG_FILENAME
         if not config_path.is_file():
             continue
