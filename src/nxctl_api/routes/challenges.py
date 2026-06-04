@@ -9,6 +9,7 @@ from nxctl_api.auth import (
     verify_admin_secret,
 )
 from nxctl_api.serializers import (
+    serialize_challenge_admin,
     serialize_challenge_basic,
     serialize_challenge_with_runtime,
 )
@@ -57,6 +58,15 @@ def list_challenges_basic(
             challenge_service.list_challenges(),
             access,
         )
+    ]
+
+
+@router.get("/admin/challenges", dependencies=[Depends(verify_admin_secret)])
+def list_admin_challenges():
+    config, challenge_service, _, _ = get_services()
+    return [
+        serialize_challenge_admin(challenge, config)
+        for challenge in challenge_service.list_challenges(include_disabled=True)
     ]
 
 

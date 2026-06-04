@@ -1,6 +1,9 @@
 """Serialization helpers for API responses."""
 
 from datetime import datetime
+from pathlib import Path
+
+from nxctl.core.challenge_config import read_config_key
 
 
 def serialize_datetime(value):
@@ -185,6 +188,39 @@ def serialize_challenge_basic(challenge, runtime_service=None, config=None):
         "requires_key": bool(getattr(challenge, "access_key_hash", "")),
         "can_restart": bool(lifecycle["can_restart"]),
         "restart_cooldown_seconds": int(lifecycle["restart_cooldown_seconds"]),
+    }
+
+
+def read_challenge_access_key(config, challenge):
+    if not bool(getattr(challenge, "access_key_hash", "")):
+        return None
+
+    key_source = str(getattr(challenge, "access_key_source", "") or "").strip()
+    chall_dir = getattr(config, "chall_dir", None) if config is not None else None
+    if not key_source or chall_dir is None:
+        return None
+
+    try:
+        chall_root = Path(chall_dir).resolve()
+        key_path = (chall_root / key_source).resolve()
+        key_path.relative_to(chall_root)
+        key = read_config_key(key_path)
+    except Exception:
+        return None
+
+    return key or None
+
+
+def serialize_challenge_admin(challenge, config):
+    key = read_challenge_access_key(config, challenge)
+    requires_key = bool(getattr(challenge, "access_key_hash", ""))
+    return {
+        "name": challenge.name,
+        "key": key,
+        "requires_key": requires_key,
+        "key_available": key is not None,
+        "key_source": str(getattr(challenge, "access_key_source", "") or ""),
+        "enabled": challenge.enabled,
     }
 
 

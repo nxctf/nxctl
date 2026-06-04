@@ -10,6 +10,7 @@ api_test_5() {
 
   make_request "POST /up without all=true" admin POST "/up" "400"
   make_request "POST /down without all=true" admin POST "/down" "400"
+  make_request "GET /admin/challenges" admin GET "/admin/challenges" "200"
 
   make_request "POST /up/${CHALLENGE} for extended checks" client POST "/up/${CHALLENGE_ENC}" "200" "$MUTATION_CURL_TIMEOUT"
   make_request "POST /extend/${CHALLENGE}" client POST "/extend/${CHALLENGE_ENC}" "200,400,429"
