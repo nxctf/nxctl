@@ -182,7 +182,7 @@ def serialize_challenge_basic(challenge, runtime_service=None, config=None):
     return {
         "name": challenge.name,
         "type": challenge.service_type,
-        "port": challenge.service_port,
+        "port": challenge.service_port or None,
         "path": challenge.path,
         "enabled": challenge.enabled,
         "requires_key": bool(getattr(challenge, "access_key_hash", "")),

@@ -22,7 +22,7 @@ def start_challenge_payload(name, challenge_service, runtime_service, export_man
     ports = challenge_service.list_challenge_ports(name)
     runtime = runtime_service.status(name)
     exports, failures = _start_available_exports(export_manager, name, challenge, ports)
-    primary_port = ports[0].host_port if ports else challenge.service_port
+    primary_port = ports[0].host_port if ports else None
     lifecycle = runtime_service.effective_lifecycle(name)
 
     return {

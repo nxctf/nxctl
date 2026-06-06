@@ -142,7 +142,7 @@ def inspect_challenge(
             "challenge": {
                 "name": challenge.name,
                 "path": challenge.path,
-                "port": challenge.service_port,
+                "port": challenge.service_port or None,
                 "type": challenge.service_type,
                 "enabled": challenge.enabled,
                 "requires_key": bool(getattr(challenge, "access_key_hash", "")),

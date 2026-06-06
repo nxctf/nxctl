@@ -102,11 +102,14 @@ def _start_available_exports(export_manager, challenge_name: str, challenge, por
     with ChallengeLock(challenge_name, export_manager.config):
         all_exports: list[dict] = []
         all_failures: list[dict] = []
-        export_ports = ports or [SimpleNamespace(
-            host_port=challenge.service_port,
-            service_port=challenge.service_port,
-            service_type=challenge.service_type,
-        )]
+        if ports is None and getattr(challenge, "service_port", 0):
+            export_ports = [SimpleNamespace(
+                host_port=challenge.service_port,
+                service_port=challenge.service_port,
+                service_type=challenge.service_type,
+            )]
+        else:
+            export_ports = ports or []
 
         for port in export_ports:
             port_challenge = SimpleNamespace(

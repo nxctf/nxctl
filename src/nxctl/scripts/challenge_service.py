@@ -9,7 +9,7 @@ from nxctl.core.challenge_config import load_inherited_challenge_config
 from nxctl.core.models import Challenge, ChallengePort
 from nxctl.core.db import get_db_connection, close_db_connection
 from nxctl.core.git import GitRepository
-from nxctl.core.yaml import extract_ports_from_compose, extract_port_from_compose, detect_service_type_from_compose
+from nxctl.core.yaml import extract_ports_from_compose
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +102,7 @@ class ChallengeService:
         access_key_source = local_config.key_source if access_key_hash else ""
 
         # Extract port and service type information
-        service_port = 8080
+        service_port = 0
         service_type = "http"
 
         if docker_compose.exists():
@@ -110,9 +110,6 @@ class ChallengeService:
             if port_bindings:
                 service_port = int(port_bindings[0]["host_port"])
                 service_type = str(port_bindings[0]["service_type"])
-            else:
-                service_port = extract_port_from_compose(docker_compose)
-                service_type = detect_service_type_from_compose(docker_compose)
 
         challenge = Challenge(
             name=challenge_name,
@@ -292,7 +289,7 @@ class ChallengeService:
         except Exception:
             ports = []
 
-        if not ports:
+        if not ports and challenge.service_port:
             ports = [{
                 "host_port": challenge.service_port,
                 "internal_port": challenge.service_port,
@@ -375,7 +372,7 @@ class ChallengeService:
                 return ports
 
             challenge = self.get_challenge(name)
-            if not challenge:
+            if not challenge or not challenge.service_port:
                 return []
             return [ChallengePort(
                 challenge_id=challenge.id or 0,

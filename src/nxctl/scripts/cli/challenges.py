@@ -33,6 +33,14 @@ def _ports_text(challenge_service, challenge) -> str:
     ports = challenge_service.list_challenge_ports(challenge.name)
     if ports:
         return ", ".join(f"{p.host_port}:{p.internal_port}/{p.service_type}" for p in ports)
+    if not challenge.service_port:
+        return "container-only"
+    return f"{challenge.service_port}/{challenge.service_type}"
+
+
+def _primary_text(challenge) -> str:
+    if not challenge.service_port:
+        return "-"
     return f"{challenge.service_port}/{challenge.service_type}"
 
 
@@ -176,7 +184,7 @@ def cmd_list(args) -> int:
             for challenge in challenges:
                 rows.append([
                     challenge.name,
-                    f"{challenge.service_port}/{challenge.service_type}",
+                    _primary_text(challenge),
                     _ports_text(challenge_service, challenge),
                     _key_text(config, challenge) if show_key else _key_status_text(challenge),
                     _ttl_summary(config, challenge),
@@ -193,7 +201,7 @@ def cmd_list(args) -> int:
             for challenge in challenges:
                 rows.append([
                     challenge.name,
-                    f"{challenge.service_port}/{challenge.service_type}",
+                    _primary_text(challenge),
                     _ports_text(challenge_service, challenge),
                     _key_text(config, challenge),
                     challenge.path,
@@ -203,7 +211,7 @@ def cmd_list(args) -> int:
             for challenge in challenges:
                 rows.append([
                     challenge.name,
-                    f"{challenge.service_port}/{challenge.service_type}",
+                    _primary_text(challenge),
                     _ports_text(challenge_service, challenge),
                     challenge.path,
                 ])
@@ -224,7 +232,7 @@ def cmd_inspect(args) -> int:
 
         container_port = get_container_port(config, challenge)
         ports = challenge_service.list_challenge_ports(args.name)
-        ports_text = ", ".join(f"{p.host_port}:{p.internal_port}/{p.service_type}" for p in ports) or f"{challenge.service_port}:{container_port}/{challenge.service_type}"
+        ports_text = ", ".join(f"{p.host_port}:{p.internal_port}/{p.service_type}" for p in ports) or "container-only"
         runtime = runtime_service.status(args.name)
         cooldown = runtime_service.check_restart_cooldown(args.name)
         exports = export_manager.list_exports(args.name, check_health=True)
@@ -250,8 +258,8 @@ def cmd_inspect(args) -> int:
             [
                 ("Path", challenge.path),
                 ("Type", protocol),
-                ("Internal Port", container_port),
-                ("Host Port", challenge.service_port),
+                ("Internal Port", container_port if challenge.service_port else "-"),
+                ("Host Port", challenge.service_port or "-"),
                 ("Ports", ports_text),
                 ("Enabled", green("Yes") if challenge.enabled else red("No")),
                 ("Key Required", green("Yes") if challenge.access_key_hash else "No"),

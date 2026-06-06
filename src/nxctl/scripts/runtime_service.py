@@ -664,7 +664,7 @@ class RuntimeService:
             configured_ports = extract_ports_from_compose(docker_compose)
             if not configured_ports:
                 configured_ports = self._get_challenge_ports_from_db(challenge.id)
-            if not configured_ports:
+            if not configured_ports and challenge.service_port:
                 configured_ports = [{
                     "host_port": challenge.service_port,
                     "internal_port": challenge.service_port,
@@ -718,12 +718,15 @@ class RuntimeService:
                 if not docker_compose_run.exists():
                     raise RuntimeError(f"Generated compose file was not created: {docker_compose_run}")
 
-                primary_port = int(allocated_ports[0]["host_port"])
                 self._replace_challenge_ports(challenge.id, allocated_ports)
+                primary_port = int(allocated_ports[0]["host_port"]) if allocated_ports else 0
                 challenge.service_port = primary_port
 
                 try:
-                    logger.info(f"Starting challenge: {challenge_name} on port {primary_port}")
+                    if primary_port:
+                        logger.info(f"Starting challenge: {challenge_name} on port {primary_port}")
+                    else:
+                        logger.info(f"Starting challenge without published ports: {challenge_name}")
                     run_docker_compose_up(docker_compose_run, cwd=challenge_dir, detach=True)
                     break
                 except DockerError as start_error:
@@ -960,6 +963,8 @@ class RuntimeService:
                     str(ports[0].get("service_type") or "http"),
                     challenge_id,
                 ))
+            else:
+                cursor.execute("UPDATE challenges SET service_port = 0 WHERE id = ?", (challenge_id,))
             conn.commit()
         finally:
             close_db_connection(conn)
