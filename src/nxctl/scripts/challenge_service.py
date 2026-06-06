@@ -116,6 +116,7 @@ class ChallengeService:
             path=challenge_path,
             service_port=service_port,
             service_type=service_type,
+            enabled=True if local_config.enabled is None else local_config.enabled,
             access_key_hash=access_key_hash,
             access_key_source=access_key_source,
             config_source=", ".join(local_config.config_sources),

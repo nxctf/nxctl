@@ -49,6 +49,7 @@ def _status_payload(config, runtime_service, export_manager, challenge):
 
     return {
         "name": challenge.name,
+        "enabled": challenge.enabled,
         "status": runtime.status,
         "container_id": runtime.container_id,
         "remaining_seconds": compute_remaining_seconds(runtime.expires_at),

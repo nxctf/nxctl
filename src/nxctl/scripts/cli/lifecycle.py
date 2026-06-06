@@ -244,7 +244,75 @@ def _stop_result_has_errors(result: dict) -> bool:
     return False
 
 
-def _cmd_up_one(name: str, challenge_service, runtime_service, export_manager) -> bool:
+def restart_challenge_lifecycle(
+    name: str,
+    challenge_service,
+    runtime_service,
+    export_manager,
+    *,
+    container: bool = False,
+    provider: bool = False,
+    force: bool = False,
+    start_disabled: bool = False,
+    reporter: ProgressReporter | None = None,
+) -> dict:
+    """Restart a challenge runtime/export using the shared lifecycle path."""
+    if not force:
+        runtime_service.ensure_restart_allowed(name)
+        remaining = runtime_service.check_restart_cooldown(name)
+        if remaining:
+            raise RuntimeError(f"Restart cooldown active. Wait {remaining}s")
+
+    restart_all = not (container or provider)
+    do_container = restart_all or container
+    do_provider = restart_all or provider
+
+    challenge = challenge_service.get_challenge(name)
+    if not challenge:
+        raise RuntimeError(f"Challenge not found: {name}")
+
+    stopped_exports = []
+    exports = []
+    failures = []
+
+    if do_provider:
+        stopped_exports = _stop_exports_for_challenge(name, challenge, export_manager, reporter)
+
+    if do_container:
+        if reporter:
+            with reporter.step("Stopping Docker runtime", "Docker runtime stopped; compose cleanup complete"):
+                runtime_service.stop(name)
+            with reporter.step("Starting Docker runtime", "Docker runtime started"):
+                runtime_service.start(name, force=start_disabled)
+        else:
+            runtime_service.stop(name)
+            runtime_service.start(name, force=start_disabled)
+        challenge = challenge_service.get_challenge(name) or challenge
+        ports = challenge_service.list_challenge_ports(name)
+        if reporter:
+            reporter.ok(f"Allocated host ports: {_port_summary(ports)}")
+
+    if do_provider:
+        ports = challenge_service.list_challenge_ports(name)
+        if reporter:
+            with reporter.step("Creating exports", "Export creation complete"):
+                exports, failures = _start_available_exports(export_manager, name, challenge, ports)
+        else:
+            exports, failures = _start_available_exports(export_manager, name, challenge, ports)
+
+    runtime_service.update_restart_time(name)
+
+    return {
+        "challenge": name,
+        "scope": "all" if restart_all else "container" if container else "provider",
+        "force": bool(force),
+        "stopped_exports": stopped_exports,
+        "exports": exports,
+        "export_failures": failures,
+    }
+
+
+def _cmd_up_one(name: str, challenge_service, runtime_service, export_manager, force: bool = False) -> bool:
     """Start one challenge and render the normal up output."""
     try:
         print(f"{bold(f'Starting challenge: {name}')}")
@@ -253,10 +321,12 @@ def _cmd_up_one(name: str, challenge_service, runtime_service, export_manager) -
         if not challenge:
             print(f"{red(ERR)} Challenge not found: {name}")
             return False
+        if force and not challenge.enabled:
+            step_warn("Starting disabled challenge because --force was provided")
         step_ok("Loaded challenge config")
 
         with spinner("Starting Docker container"):
-            runtime_service.start(name)
+            runtime_service.start(name, force=force)
         challenge = challenge_service.get_challenge(name) or challenge
         ports = challenge_service.list_challenge_ports(name)
         runtime = runtime_service.status(name)
@@ -308,7 +378,13 @@ def cmd_up(args) -> int:
                 print(f"{red(ERR)} Please provide a challenge name or use --all")
                 return 1
 
-            return 0 if _cmd_up_one(args.name, challenge_service, runtime_service, export_manager) else 1
+            return 0 if _cmd_up_one(
+                args.name,
+                challenge_service,
+                runtime_service,
+                export_manager,
+                force=getattr(args, "force", False),
+            ) else 1
     except Exception as e:
         print(f"{red(ERR)} Up failed: {str(e)}")
         return 1
@@ -392,19 +468,6 @@ def cmd_restart(args) -> int:
         config, challenge_service, runtime_service, export_manager = get_services()
 
         with LifecycleLock(config):
-            runtime_service.ensure_restart_allowed(args.name)
-
-            # 1. Check Cooldown
-            remaining = runtime_service.check_restart_cooldown(args.name)
-            if remaining:
-                print(f"{red(ERR)} Restart denied: Cooldown active. Please wait {remaining}s.")
-                return 1
-
-            # 2. Determine what to restart
-            restart_all = not (args.container or args.provider)
-            do_container = restart_all or args.container
-            do_provider = restart_all or args.provider
-
             challenge = challenge_service.get_challenge(args.name)
             if not challenge:
                 print(f"{red(ERR)} Challenge not found: {args.name}")
@@ -412,36 +475,25 @@ def cmd_restart(args) -> int:
 
             print(f"{bold(f'Restarting challenge: {args.name}')}")
             reporter = ProgressReporter(indent=2)
-
-            # Handle Provider Stop
-            if do_provider:
-                stopped_exports = _stop_exports_for_challenge(args.name, challenge, export_manager, reporter)
-                if any(export.get("error") for export in stopped_exports):
-                    reporter.warn("Some exports failed to stop; continuing restart")
-
-            # Handle Container Restart
-            if do_container:
-                with reporter.step("Stopping Docker runtime", "Docker runtime stopped; compose cleanup complete"):
-                    runtime_service.stop(args.name)
-                with reporter.step("Starting Docker runtime", "Docker runtime started"):
-                    runtime_service.start(args.name)
-                # Re-fetch challenge for updated data
-                challenge = challenge_service.get_challenge(args.name)
-                ports = challenge_service.list_challenge_ports(args.name)
-                reporter.ok(f"Allocated host ports: {_port_summary(ports)}")
-
-            # Re-start provider if needed
-            if do_provider:
-                ports = challenge_service.list_challenge_ports(args.name)
-                with reporter.step("Creating exports", "Export creation complete"):
-                    exports, failures = _start_available_exports(export_manager, args.name, challenge, ports)
-                print(box("Exports", exports_table(exports), width=116))
-                for failure in failures:
+            result = restart_challenge_lifecycle(
+                args.name,
+                challenge_service,
+                runtime_service,
+                export_manager,
+                container=args.container,
+                provider=args.provider,
+                force=getattr(args, "force", False),
+                start_disabled=getattr(args, "force", False),
+                reporter=reporter,
+            )
+            if result["force"]:
+                reporter.warn("Restart policy and cooldown bypassed")
+            if any(export.get("error") for export in result["stopped_exports"]):
+                reporter.warn("Some exports failed to stop; continuing restart")
+            if result["exports"] or result["export_failures"]:
+                print(box("Exports", exports_table(result["exports"]), width=116))
+                for failure in result["export_failures"]:
                     reporter.warn(f"{failure['provider']} export failed: {format_error(failure['error'])}")
-
-            # 3. Update last_restart time
-            with reporter.step("Updating restart cooldown", "Restart cooldown updated"):
-                runtime_service.update_restart_time(args.name)
 
             print(f"{green(OK)} Restart complete")
             return 0
@@ -497,11 +549,15 @@ def cmd_status(args) -> int:
 
             # 3. Get data for display
             challenges = [challenge_service.get_challenge(args.name)] if args.name else challenge_service.list_challenges()
-            challenges = [challenge for challenge in challenges if challenge]
+            challenges = [
+                challenge
+                for challenge in challenges
+                if challenge and challenge.enabled
+            ]
 
             if not challenges:
                 if not watch_mode:
-                    print(f"{yellow('No challenges found')}")
+                    print(f"{yellow('No enabled challenges found')}")
                     return 0
 
             if watch_mode:

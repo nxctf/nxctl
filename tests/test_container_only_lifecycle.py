@@ -85,6 +85,36 @@ class ContainerOnlyLifecycleTests(unittest.TestCase):
             self.assertEqual(failures, [])
             export_manager.start_available_exports.assert_not_called()
 
+    def test_sync_saves_inherited_enabled_flag(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            repo_root = root / "repo"
+            disabled_dir = repo_root / "misc" / "disabled"
+            enabled_dir = repo_root / "misc" / "enabled"
+            disabled_dir.mkdir(parents=True)
+            enabled_dir.mkdir(parents=True)
+            (repo_root / "nxctl.yml").write_text("enabled: false", encoding="utf-8")
+            (enabled_dir / "nxctl.yml").write_text("enable: true", encoding="utf-8")
+            compose = "\n".join(
+                [
+                    "services:",
+                    "  app:",
+                    "    image: busybox",
+                    "    command: ['sh', '-c', 'sleep 3600']",
+                ]
+            )
+            (disabled_dir / "docker-compose.yml").write_text(compose, encoding="utf-8")
+            (enabled_dir / "docker-compose.yml").write_text(compose, encoding="utf-8")
+
+            db_path = root / "nxctl.db"
+            init_database(str(db_path))
+            challenge_service = ChallengeService(str(db_path))
+            challenges = challenge_service.discover_challenges(repo_root)
+            challenge_service._save_challenges_to_db(challenges)
+
+            self.assertFalse(challenge_service.get_challenge("misc/disabled").enabled)
+            self.assertTrue(challenge_service.get_challenge("misc/enabled").enabled)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -26,6 +26,7 @@ class ChallengeLocalConfig:
 
     key: str = ""
     key_source: str = ""
+    enabled: bool | None = None
     ttl: dict[str, int] = field(default_factory=dict)
     can_restart: bool | None = None
     restart_cooldown_seconds: int | None = None
@@ -65,6 +66,14 @@ def load_inherited_challenge_config(challenge_dir: Path, repo_root: Path) -> Cha
             if key:
                 effective.key = key
                 effective.key_source = source
+
+        enabled_field = "enabled" if "enabled" in raw_config else "enable" if "enable" in raw_config else ""
+        if enabled_field:
+            effective.enabled = parse_bool(
+                raw_config[enabled_field],
+                source,
+                enabled_field,
+            )
 
         ttl_config = raw_config.get("ttl")
         if ttl_config is not None:

@@ -146,6 +146,7 @@ Examples:
     add_debug_flag(up_cmd, default=argparse.SUPPRESS)
     up_cmd.add_argument("name", nargs="?", help="Challenge name")
     up_cmd.add_argument("--all", action="store_true", help="Start all enabled challenges")
+    up_cmd.add_argument("--force", action="store_true", help="Start a disabled challenge from the CLI")
     up_cmd.set_defaults(func=cmd_up)
 
     down_cmd = subparsers.add_parser("down", help="Stop container + exports")
@@ -159,6 +160,7 @@ Examples:
     restart_cmd.add_argument("name", help="Challenge name")
     restart_cmd.add_argument("--container", action="store_true", help="Restart only the docker container")
     restart_cmd.add_argument("--provider", action="store_true", help="Restart only the tunnel provider")
+    restart_cmd.add_argument("--force", action="store_true", help="Bypass restart policy and cooldown")
     restart_cmd.set_defaults(func=cmd_restart)
 
     status_cmd = subparsers.add_parser("status", help="Show running challenges + exports")

@@ -44,6 +44,10 @@ def _primary_text(challenge) -> str:
     return f"{challenge.service_port}/{challenge.service_type}"
 
 
+def _enabled_text(challenge) -> str:
+    return green("Enabled") if challenge.enabled else red("Disabled")
+
+
 def _key_text(config, challenge) -> str:
     if not challenge.access_key_hash:
         return "No"
@@ -171,7 +175,7 @@ def cmd_sync(args) -> int:
 def cmd_list(args) -> int:
     try:
         config, challenge_service, _, _ = get_services()
-        challenges = challenge_service.list_challenges()
+        challenges = challenge_service.list_challenges(include_disabled=True)
         if not challenges:
             print(f"{yellow('No challenges found')}")
             return 0
@@ -184,6 +188,7 @@ def cmd_list(args) -> int:
             for challenge in challenges:
                 rows.append([
                     challenge.name,
+                    _enabled_text(challenge),
                     _primary_text(challenge),
                     _ports_text(challenge_service, challenge),
                     _key_text(config, challenge) if show_key else _key_status_text(challenge),
@@ -193,29 +198,31 @@ def cmd_list(args) -> int:
                     challenge.path,
                 ])
             print(table(
-                ["Name", "Primary", "Ports", "Key", "TTL", "Restart", "Config", "Path"],
+                ["Name", "Status", "Primary", "Ports", "Key", "TTL", "Restart", "Config", "Path"],
                 rows,
-                [28, 16, 42, 24, 20, 10, 34, 54],
+                [28, 10, 16, 42, 24, 20, 10, 34, 54],
             ))
         elif show_key:
             for challenge in challenges:
                 rows.append([
                     challenge.name,
+                    _enabled_text(challenge),
                     _primary_text(challenge),
                     _ports_text(challenge_service, challenge),
                     _key_text(config, challenge),
                     challenge.path,
                 ])
-            print(table(["Name", "Primary", "Ports", "Key", "Path"], rows, [28, 16, 46, 24, 64]))
+            print(table(["Name", "Status", "Primary", "Ports", "Key", "Path"], rows, [28, 10, 16, 46, 24, 64]))
         else:
             for challenge in challenges:
                 rows.append([
                     challenge.name,
+                    _enabled_text(challenge),
                     _primary_text(challenge),
                     _ports_text(challenge_service, challenge),
                     challenge.path,
                 ])
-            print(table(["Name", "Primary", "Ports", "Path"], rows, [28, 16, 46, 64]))
+            print(table(["Name", "Status", "Primary", "Ports", "Path"], rows, [28, 10, 16, 46, 64]))
         return 0
     except Exception as e:
         print(f"{red(ERR)} List failed: {str(e)}")

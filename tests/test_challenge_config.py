@@ -23,6 +23,7 @@ class ChallengeConfigInheritanceTests(unittest.TestCase):
                 "\n".join(
                     [
                         "key: root-key",
+                        "enabled: false",
                         "ttl:",
                         "  default_minutes: 30",
                         "  extend_minutes: 5",
@@ -37,6 +38,7 @@ class ChallengeConfigInheritanceTests(unittest.TestCase):
                     [
                         "ttl:",
                         "  extend_minutes: 15",
+                        "enable: true",
                     ]
                 ),
                 encoding="utf-8",
@@ -58,6 +60,7 @@ class ChallengeConfigInheritanceTests(unittest.TestCase):
         self.assertEqual(config.ttl["default_minutes"], 30)
         self.assertEqual(config.ttl["extend_minutes"], 15)
         self.assertNotIn("extend_threshold_minutes", config.ttl)
+        self.assertTrue(config.enabled)
         self.assertFalse(config.can_restart)
         self.assertEqual(config.restart_cooldown_seconds, 120)
         self.assertEqual(
@@ -80,6 +83,18 @@ class ChallengeConfigInheritanceTests(unittest.TestCase):
         self.assertEqual(config.key, "nxctl-root-key")
         self.assertEqual(config.key_source, "nxctl.yml")
         self.assertEqual(config.config_sources, ["nxctl.yml"])
+
+    def test_enabled_flag_inherits_when_not_overridden(self):
+        with TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            challenge_dir = repo_root / "misc" / "hidden"
+            challenge_dir.mkdir(parents=True)
+
+            (repo_root / "nxctl.yml").write_text("enable: false", encoding="utf-8")
+
+            config = load_inherited_challenge_config(challenge_dir, repo_root)
+
+        self.assertFalse(config.enabled)
 
 
 if __name__ == "__main__":

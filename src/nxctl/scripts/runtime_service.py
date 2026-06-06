@@ -616,14 +616,14 @@ class RuntimeService:
         except DockerError as e:
             raise RuntimeError(f"Build failed: {str(e)}")
 
-    def start(self, challenge_name: str) -> RuntimeInstance:
+    def start(self, challenge_name: str, force: bool = False) -> RuntimeInstance:
         """Start a challenge runtime (includes automatic build)."""
         # Get challenge from DB
         challenge = self._get_challenge_from_db(challenge_name)
         if not challenge:
             raise RuntimeError(f"Challenge not found: {challenge_name}")
 
-        if not challenge.enabled:
+        if not challenge.enabled and not force:
             raise RuntimeError(f"Challenge is disabled: {challenge_name}")
 
         # Check if already running

@@ -221,6 +221,8 @@ def serialize_challenge_admin(challenge, config):
         "key_available": key is not None,
         "key_source": str(getattr(challenge, "access_key_source", "") or ""),
         "enabled": challenge.enabled,
+        "port": challenge.service_port or None,
+        "type": challenge.service_type,
     }
 
 

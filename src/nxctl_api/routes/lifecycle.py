@@ -16,8 +16,8 @@ from nxctl.core.utils import LifecycleLock
 from nxctl_api.services import start_challenge_payload
 from nxctl.scripts.cli.base import get_services
 from nxctl.scripts.cli.lifecycle import (
-    _start_available_exports,
     _stop_challenge_completely,
+    restart_challenge_lifecycle,
 )
 
 router = APIRouter()
@@ -181,6 +181,16 @@ def down_all_challenges(all: bool = False):
         )
 
 
+@router.post("/admin/down", dependencies=[Depends(verify_admin_secret)])
+def admin_down_all_challenges():
+    return down_all_challenges(all=True)
+
+
+@router.post("/admin/down/{name:path}", dependencies=[Depends(verify_admin_secret)])
+def admin_down_challenge(name: str):
+    return down_challenge(name)
+
+
 @router.post("/restart/{name:path}")
 def restart_challenge(
     name: str,
@@ -216,36 +226,66 @@ def restart_challenge(
                     detail=f"Restart cooldown active. Wait {remaining}s",
                 )
 
-            restart_all = not (container or provider)
-            do_container = restart_all or container
-            do_provider = restart_all or provider
-
-            if do_provider:
-                export_manager.stop_all_exports(name)
-
-            if do_container:
-                runtime_service.stop(name)
-                runtime_service.start(name)
-                challenge = challenge_service.get_challenge(name)
-
-            if do_provider:
-                ports = challenge_service.list_challenge_ports(name)
-                exports, failures = _start_available_exports(
-                    export_manager,
-                    name,
-                    challenge,
-                    ports,
-                )
-            else:
-                exports, failures = [], []
-
-            runtime_service.update_restart_time(name)
+            result = restart_challenge_lifecycle(
+                name,
+                challenge_service,
+                runtime_service,
+                export_manager,
+                container=container,
+                provider=provider,
+            )
 
         return {
             "message": f"Challenge {name} restarted",
-            "scope": "all" if restart_all else "container" if container else "provider",
-            "exports": exports,
-            "export_failures": failures,
+            "scope": result["scope"],
+            "force": result["force"],
+            "exports": result["exports"],
+            "export_failures": result["export_failures"],
+        }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/admin/restart/{name:path}", dependencies=[Depends(verify_admin_secret)])
+def admin_restart_challenge(
+    name: str,
+    container: bool = False,
+    provider: bool = False,
+    force: bool = True,
+):
+    try:
+        config, challenge_service, runtime_service, export_manager = get_services()
+        with LifecycleLock(config):
+            challenge = challenge_service.get_challenge(name)
+            if not challenge:
+                raise HTTPException(
+                    status_code=404,
+                    detail={
+                        "ok": False,
+                        "error": "challenge_not_found",
+                    },
+                )
+
+            result = restart_challenge_lifecycle(
+                name,
+                challenge_service,
+                runtime_service,
+                export_manager,
+                container=container,
+                provider=provider,
+                force=force,
+            )
+
+        return {
+            "ok": True,
+            "message": f"Challenge {name} restarted",
+            "scope": result["scope"],
+            "force": result["force"],
+            "exports": result["exports"],
+            "export_failures": result["export_failures"],
         }
 
     except HTTPException:

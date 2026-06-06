@@ -110,7 +110,7 @@ _nxctl_completion() {
                 COMPREPLY=( $(compgen -W "--all" -- "${cur}") )
             fi
             if [[ "${cmd}" == "up" ]] && [[ "${cur}" == -* ]]; then
-                COMPREPLY=( $(compgen -W "--all" -- "${cur}") )
+                COMPREPLY=( $(compgen -W "--all --force" -- "${cur}") )
             fi
             ;;
         restart)
@@ -121,7 +121,7 @@ _nxctl_completion() {
                     COMPREPLY=( $(compgen -W "${challenges}" -- "${cur}") )
                 fi
             else
-                COMPREPLY=( $(compgen -W "--container --provider" -- "${cur}") )
+                COMPREPLY=( $(compgen -W "--container --provider --force" -- "${cur}") )
             fi
             ;;
         daemon)
