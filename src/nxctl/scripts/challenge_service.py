@@ -469,18 +469,154 @@ class ChallengeService:
         finally:
             close_db_connection(conn)
 
-    def remove_challenge(self, name: str) -> bool:
+    def remove_challenge(self, name: str, runtime_service=None, export_manager=None, config=None) -> bool:
         """Remove a challenge."""
+        # 1. Fetch challenge info first to stop it and find its path/id
+        challenge = self.get_challenge(name)
+        if not challenge:
+            return False
+
+        # 2. Stop containers and exports if services are provided
+        if runtime_service and export_manager:
+            try:
+                from nxctl.scripts.cli.lifecycle import _stop_challenge_completely
+                _stop_challenge_completely(name, self, runtime_service, export_manager)
+            except Exception as stop_exc:
+                logger.warning(f"Failed to stop challenge {name} before removing: {stop_exc}")
+
+        # 3. Clean filesystem artifacts if config is provided
+        if config:
+            from nxctl.core.utils import safe_runtime_name
+            # Source cache folder
+            if challenge.path:
+                try:
+                    chall_dir = Path(config.chall_dir).resolve()
+                    challenge_dir = (chall_dir / challenge.path).resolve()
+                    if challenge_dir.exists() and challenge_dir != chall_dir and challenge_dir.is_relative_to(chall_dir):
+                        import shutil
+                        shutil.rmtree(challenge_dir, ignore_errors=True)
+                        logger.info(f"Deleted source cache directory: {challenge_dir}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete source cache directory for {name}: {e}")
+            # Generated docker-compose file
+            try:
+                compose_file = (Path(config.compose_dir) / f"{safe_runtime_name(name)}.docker-compose.yml").resolve()
+                if compose_file.is_file():
+                    compose_file.unlink(missing_ok=True)
+                    logger.info(f"Deleted generated compose file: {compose_file}")
+            except Exception as e:
+                logger.warning(f"Failed to delete generated compose file for {name}: {e}")
+            # Lock file
+            try:
+                lock_file = (Path(config.locks_dir) / f"{safe_runtime_name(name)}.lock").resolve()
+                if lock_file.is_file():
+                    lock_file.unlink(missing_ok=True)
+                    logger.info(f"Deleted lock file: {lock_file}")
+            except Exception as e:
+                logger.warning(f"Failed to delete lock file for {name}: {e}")
+
+        # 4. Perform database deletion
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
 
         try:
-            cursor.execute("DELETE FROM challenges WHERE name = ?", (name,))
+            # Delete ports for this challenge
+            cursor.execute("DELETE FROM challenge_ports WHERE challenge_id = ?", (challenge.id,))
+            # Delete exports for this challenge
+            cursor.execute("DELETE FROM challenge_exports WHERE runtime_id IN (SELECT id FROM runtime_instances WHERE challenge_id = ?)", (challenge.id,))
+            # Delete runtime instances
+            cursor.execute("DELETE FROM runtime_instances WHERE challenge_id = ?", (challenge.id,))
+            # Delete the challenge itself
+            cursor.execute("DELETE FROM challenges WHERE id = ?", (challenge.id,))
             conn.commit()
             return cursor.rowcount > 0
 
         except Exception as e:
             conn.rollback()
             raise ChallengeDiscoveryError(f"Failed to remove challenge: {str(e)}")
+        finally:
+            close_db_connection(conn)
+
+    def prune_disabled_challenges(self, runtime_service=None, export_manager=None, config=None, all_challenges: bool = False) -> int:
+        """Remove all disabled (or all) challenges and their associated records from the database and filesystem."""
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+
+        try:
+            if all_challenges:
+                cursor.execute("SELECT id, name, path FROM challenges")
+            else:
+                cursor.execute("SELECT id, name, path FROM challenges WHERE enabled = 0")
+            disabled_rows = cursor.fetchall()
+            if not disabled_rows:
+                return 0
+
+            disabled_challenges = []
+            disabled_ids = []
+            for row in disabled_rows:
+                disabled_ids.append(int(row["id"]))
+                disabled_challenges.append({
+                    "id": int(row["id"]),
+                    "name": str(row["name"]),
+                    "path": str(row["path"] or ""),
+                })
+
+            # Stop challenges and cleanup exports/containers
+            for chall in disabled_challenges:
+                name = chall["name"]
+                if runtime_service and export_manager:
+                    try:
+                        from nxctl.scripts.cli.lifecycle import _stop_challenge_completely
+                        _stop_challenge_completely(name, self, runtime_service, export_manager)
+                    except Exception as stop_exc:
+                        logger.warning(f"Failed to stop disabled challenge {name} before pruning: {stop_exc}")
+
+                # Clean filesystem artifacts if config is provided
+                if config:
+                    from nxctl.core.utils import safe_runtime_name
+                    # Source cache folder
+                    if chall["path"]:
+                        try:
+                            chall_dir = Path(config.chall_dir).resolve()
+                            challenge_dir = (chall_dir / chall["path"]).resolve()
+                            if challenge_dir.exists() and challenge_dir != chall_dir and challenge_dir.is_relative_to(chall_dir):
+                                import shutil
+                                shutil.rmtree(challenge_dir, ignore_errors=True)
+                                logger.info(f"Deleted source cache directory: {challenge_dir}")
+                        except Exception as e:
+                            logger.warning(f"Failed to delete source cache directory for {name}: {e}")
+                    # Generated docker-compose file
+                    try:
+                        compose_file = (Path(config.compose_dir) / f"{safe_runtime_name(name)}.docker-compose.yml").resolve()
+                        if compose_file.is_file():
+                            compose_file.unlink(missing_ok=True)
+                            logger.info(f"Deleted generated compose file: {compose_file}")
+                    except Exception as e:
+                        logger.warning(f"Failed to delete generated compose file for {name}: {e}")
+                    # Lock file
+                    try:
+                        lock_file = (Path(config.locks_dir) / f"{safe_runtime_name(name)}.lock").resolve()
+                        if lock_file.is_file():
+                            lock_file.unlink(missing_ok=True)
+                            logger.info(f"Deleted lock file: {lock_file}")
+                    except Exception as e:
+                        logger.warning(f"Failed to delete lock file for {name}: {e}")
+
+            placeholders = ", ".join("?" for _ in disabled_ids)
+            # Delete ports for these challenges
+            cursor.execute(f"DELETE FROM challenge_ports WHERE challenge_id IN ({placeholders})", disabled_ids)
+            # Delete exports for these challenges
+            cursor.execute(f"DELETE FROM challenge_exports WHERE runtime_id IN (SELECT id FROM runtime_instances WHERE challenge_id IN ({placeholders}))", disabled_ids)
+            # Delete runtime instances
+            cursor.execute(f"DELETE FROM runtime_instances WHERE challenge_id IN ({placeholders})", disabled_ids)
+            # Delete the challenges themselves
+            cursor.execute(f"DELETE FROM challenges WHERE id IN ({placeholders})", disabled_ids)
+            
+            conn.commit()
+            return len(disabled_ids)
+
+        except Exception as e:
+            conn.rollback()
+            raise ChallengeDiscoveryError(f"Failed to prune challenges: {str(e)}")
         finally:
             close_db_connection(conn)

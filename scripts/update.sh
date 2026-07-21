@@ -217,4 +217,14 @@ bash "$PROJECT_DIR/scripts/uninstall.sh" --wrappers-only
 info "Installing updated command wrappers..."
 bash "$PROJECT_DIR/scripts/install.sh"
 
+# Restart systemd services if they are currently active
+if command -v systemctl >/dev/null 2>&1; then
+    for service_name in nxctl-daemon nxctl-api; do
+        if systemctl is-active --quiet "$service_name" 2>/dev/null; then
+            info "Restarting active service: $service_name..."
+            sudo systemctl restart "$service_name"
+        fi
+    done
+fi
+
 ok "NXCTL update complete."

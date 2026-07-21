@@ -254,6 +254,7 @@ def restart_challenge_lifecycle(
     provider: bool = False,
     force: bool = False,
     start_disabled: bool = False,
+    no_cache: bool = False,
     reporter: ProgressReporter | None = None,
 ) -> dict:
     """Restart a challenge runtime/export using the shared lifecycle path."""
@@ -283,10 +284,10 @@ def restart_challenge_lifecycle(
             with reporter.step("Stopping Docker runtime", "Docker runtime stopped; compose cleanup complete"):
                 runtime_service.stop(name)
             with reporter.step("Starting Docker runtime", "Docker runtime started"):
-                runtime_service.start(name, force=start_disabled)
+                runtime_service.start(name, force=start_disabled, no_cache=no_cache)
         else:
             runtime_service.stop(name)
-            runtime_service.start(name, force=start_disabled)
+            runtime_service.start(name, force=start_disabled, no_cache=no_cache)
         challenge = challenge_service.get_challenge(name) or challenge
         ports = challenge_service.list_challenge_ports(name)
         if reporter:
@@ -312,7 +313,7 @@ def restart_challenge_lifecycle(
     }
 
 
-def _cmd_up_one(name: str, challenge_service, runtime_service, export_manager, force: bool = False) -> bool:
+def _cmd_up_one(name: str, challenge_service, runtime_service, export_manager, force: bool = False, no_cache: bool = False) -> bool:
     """Start one challenge and render the normal up output."""
     try:
         print(f"{bold(f'Starting challenge: {name}')}")
@@ -326,7 +327,7 @@ def _cmd_up_one(name: str, challenge_service, runtime_service, export_manager, f
         step_ok("Loaded challenge config")
 
         with spinner("Starting Docker container"):
-            runtime_service.start(name, force=force)
+            runtime_service.start(name, force=force, no_cache=no_cache)
         challenge = challenge_service.get_challenge(name) or challenge
         ports = challenge_service.list_challenge_ports(name)
         runtime = runtime_service.status(name)
@@ -364,7 +365,7 @@ def cmd_up(args) -> int:
                 ok_count = 0
                 failed_count = 0
                 for challenge in challenges:
-                    if _cmd_up_one(challenge.name, challenge_service, runtime_service, export_manager):
+                    if _cmd_up_one(challenge.name, challenge_service, runtime_service, export_manager, no_cache=getattr(args, "no_cache", False)):
                         ok_count += 1
                     else:
                         failed_count += 1
@@ -384,11 +385,11 @@ def cmd_up(args) -> int:
                 runtime_service,
                 export_manager,
                 force=getattr(args, "force", False),
+                no_cache=getattr(args, "no_cache", False),
             ) else 1
     except Exception as e:
         print(f"{red(ERR)} Up failed: {str(e)}")
         return 1
-
 
 def cmd_down(args) -> int:
     try:

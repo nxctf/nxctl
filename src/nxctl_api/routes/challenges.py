@@ -62,11 +62,11 @@ def list_challenges_basic(
 
 
 @router.get("/admin/challenges", dependencies=[Depends(verify_admin_secret)])
-def list_admin_challenges():
+def list_admin_challenges(include_disabled: bool = False):
     config, challenge_service, _, _ = get_services()
     return [
         serialize_challenge_admin(challenge, config)
-        for challenge in challenge_service.list_challenges(include_disabled=True)
+        for challenge in challenge_service.list_challenges(include_disabled=include_disabled)
     ]
 
 

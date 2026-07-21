@@ -47,7 +47,12 @@ def _compose_cmd(cwd: Path | None = None) -> list[str]:
     return cmd
 
 
-def run_docker_compose_build(compose_path: Path, cwd: Optional[Path] = None, timeout: int = 300) -> str:
+def run_docker_compose_build(
+    compose_path: Path,
+    cwd: Optional[Path] = None,
+    timeout: int = 300,
+    no_cache: bool = False,
+) -> str:
     """Build Docker image using docker compose.
 
     Tries docker compose v2 first, falls back to v1.
@@ -65,6 +70,8 @@ def run_docker_compose_build(compose_path: Path, cwd: Optional[Path] = None, tim
 
     try:
         cmd = _compose_cmd(cwd) + ["-f", str(compose_path), "build"]
+        if no_cache:
+            cmd.append("--no-cache")
         result = subprocess.run(
             cmd,
             cwd=str(cwd),

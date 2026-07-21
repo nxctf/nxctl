@@ -6,7 +6,7 @@ from nxctl_api.serializers import compute_remaining_seconds, serialize_ports
 from nxctl.scripts.cli.lifecycle import _start_available_exports
 
 
-def start_challenge_payload(name, challenge_service, runtime_service, export_manager):
+def start_challenge_payload(name, challenge_service, runtime_service, export_manager, no_cache: bool = False):
     challenge = challenge_service.get_challenge(name)
     if not challenge:
         raise HTTPException(
@@ -17,7 +17,7 @@ def start_challenge_payload(name, challenge_service, runtime_service, export_man
             },
         )
 
-    runtime_service.start(name)
+    runtime_service.start(name, no_cache=no_cache)
     challenge = challenge_service.get_challenge(name) or challenge
     ports = challenge_service.list_challenge_ports(name)
     runtime = runtime_service.status(name)

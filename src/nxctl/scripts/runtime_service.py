@@ -591,7 +591,7 @@ class RuntimeService:
         finally:
             close_db_connection(conn)
 
-    def build(self, challenge_name: str) -> str:
+    def build(self, challenge_name: str, no_cache: bool = False) -> str:
         """Build Docker image for a challenge."""
         # Get challenge from DB
         challenge = self._get_challenge_from_db(challenge_name)
@@ -610,13 +610,13 @@ class RuntimeService:
 
         try:
             logger.info(f"Building image for challenge: {challenge_name}")
-            run_docker_compose_build(docker_compose, cwd=challenge_dir)
+            run_docker_compose_build(docker_compose, cwd=challenge_dir, no_cache=no_cache)
             logger.info(f"Successfully built image for {challenge_name}")
             return f"{challenge_name}:latest"
         except DockerError as e:
             raise RuntimeError(f"Build failed: {str(e)}")
 
-    def start(self, challenge_name: str, force: bool = False) -> RuntimeInstance:
+    def start(self, challenge_name: str, force: bool = False, no_cache: bool = False) -> RuntimeInstance:
         """Start a challenge runtime (includes automatic build)."""
         # Get challenge from DB
         challenge = self._get_challenge_from_db(challenge_name)
@@ -650,7 +650,7 @@ class RuntimeService:
         # Auto-build before starting
         try:
             logger.info(f"Building image for challenge: {challenge_name}")
-            run_docker_compose_build(docker_compose, cwd=challenge_dir)
+            run_docker_compose_build(docker_compose, cwd=challenge_dir, no_cache=no_cache)
             logger.info(f"Successfully built image for {challenge_name}")
         except DockerError as e:
             raise RuntimeError(f"Build failed: {str(e)}")

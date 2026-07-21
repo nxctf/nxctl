@@ -48,7 +48,7 @@ class RestartLifecycleTests(unittest.TestCase):
                 )
 
         self.assertTrue(ok)
-        runtime_service.start.assert_called_once_with("misc/disabled", force=True)
+        runtime_service.start.assert_called_once_with("misc/disabled", force=True, no_cache=False)
 
     def test_force_restart_bypasses_policy_without_allowing_disabled_start_by_default(self):
         challenge = SimpleNamespace(name="misc/worker", service_port=0, service_type="http")
@@ -81,7 +81,7 @@ class RestartLifecycleTests(unittest.TestCase):
         runtime_service.ensure_restart_allowed.assert_not_called()
         runtime_service.check_restart_cooldown.assert_not_called()
         runtime_service.stop.assert_called_once_with("misc/worker")
-        runtime_service.start.assert_called_once_with("misc/worker", force=False)
+        runtime_service.start.assert_called_once_with("misc/worker", force=False, no_cache=False)
         runtime_service.update_restart_time.assert_called_once_with("misc/worker")
 
     def test_cli_force_restart_can_explicitly_allow_disabled_start(self):
@@ -109,7 +109,7 @@ class RestartLifecycleTests(unittest.TestCase):
             start_disabled=True,
         )
 
-        runtime_service.start.assert_called_once_with("misc/worker", force=True)
+        runtime_service.start.assert_called_once_with("misc/worker", force=True, no_cache=False)
 
 
 if __name__ == "__main__":

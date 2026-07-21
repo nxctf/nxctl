@@ -26,6 +26,7 @@ router = APIRouter()
 @router.post("/up/{name:path}")
 def up_challenge(
     name: str,
+    no_cache: bool = False,
     access: ApiAccessContext = Depends(get_api_access_context),
 ):
     try:
@@ -40,6 +41,7 @@ def up_challenge(
                 challenge_service,
                 runtime_service,
                 export_manager,
+                no_cache=no_cache,
             )
     except HTTPException:
         raise

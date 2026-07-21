@@ -58,6 +58,7 @@ from nxctl.scripts.cli.challenges import (
     cmd_inspect,
     cmd_add,
     cmd_remove,
+    cmd_prune,
 )
 from nxctl.scripts.cli.lifecycle import (
     cmd_up,
@@ -141,12 +142,18 @@ Examples:
     remove_cmd.add_argument("name", help="Challenge name")
     remove_cmd.set_defaults(func=cmd_remove)
 
+    prune_cmd = subparsers.add_parser("prune", help="Remove disabled challenges (or all challenges) from the database and filesystem")
+    add_debug_flag(prune_cmd, default=argparse.SUPPRESS)
+    prune_cmd.add_argument("--all", action="store_true", help="Remove all challenges (enabled and disabled) for a complete system reset")
+    prune_cmd.set_defaults(func=cmd_prune)
+
     # ======== LIFECYCLE ========
     up_cmd = subparsers.add_parser("up", help="Build + start + auto-export")
     add_debug_flag(up_cmd, default=argparse.SUPPRESS)
     up_cmd.add_argument("name", nargs="?", help="Challenge name")
     up_cmd.add_argument("--all", action="store_true", help="Start all enabled challenges")
     up_cmd.add_argument("--force", action="store_true", help="Start a disabled challenge from the CLI")
+    up_cmd.add_argument("--no-cache", action="store_true", help="Build image without using docker cache")
     up_cmd.set_defaults(func=cmd_up)
 
     down_cmd = subparsers.add_parser("down", help="Stop container + exports")
