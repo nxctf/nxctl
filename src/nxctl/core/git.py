@@ -186,6 +186,14 @@ class GitRepository:
         env = os.environ.copy()
         env["GIT_TERMINAL_PROMPT"] = "0"
 
+        # Discard any local deletions or modifications to restore files deleted by prune/remove
+        subprocess.run(
+            ["git", "-C", str(self.local_path), "checkout", "."],
+            capture_output=True,
+            timeout=30,
+            env=env
+        )
+
         result = subprocess.run(
             [
                 "git",

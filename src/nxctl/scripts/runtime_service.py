@@ -791,7 +791,10 @@ class RuntimeService:
         # Find challenge directory
         challenge_dir = (self.git_cache_dir / challenge.path).resolve()
         if not challenge_dir.exists():
-            raise RuntimeError(f"Challenge directory not found: {challenge_dir}")
+            logger.warning(f"Challenge directory not found: {challenge_dir}")
+            if challenge.id:
+                self._update_runtime_status(challenge.id, "stopped")
+            return False
 
         docker_compose = challenge_dir / "docker-compose.yml"
         docker_compose_run = self._runtime_compose_file(challenge_name)

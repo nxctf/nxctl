@@ -538,15 +538,76 @@ class ChallengeService:
             close_db_connection(conn)
 
     def prune_disabled_challenges(self, runtime_service=None, export_manager=None, config=None, all_challenges: bool = False) -> int:
-        """Remove all disabled (or all) challenges and their associated records from the database and filesystem."""
+        """Remove disabled (or all) challenges and their associated records from the database and filesystem."""
+        if all_challenges:
+            conn = get_db_connection(self.db_path)
+            cursor = conn.cursor()
+            try:
+                cursor.execute("SELECT id, name, path FROM challenges")
+                rows = cursor.fetchall()
+                count = len(rows)
+
+                # 1. Stop all challenges completely
+                for row in rows:
+                    name = str(row["name"])
+                    if runtime_service and export_manager:
+                        try:
+                            from nxctl.scripts.cli.lifecycle import _stop_challenge_completely
+                            _stop_challenge_completely(name, self, runtime_service, export_manager)
+                        except Exception as stop_exc:
+                            logger.warning(f"Failed to stop challenge {name} before purging: {stop_exc}")
+            finally:
+                close_db_connection(conn)
+
+            # 2. Delete filesystem artifacts if config is provided
+            if config:
+                import shutil
+                # Delete chall_dir
+                try:
+                    chall_dir = Path(config.chall_dir).resolve()
+                    if chall_dir.exists():
+                        shutil.rmtree(chall_dir, ignore_errors=True)
+                        logger.info(f"Deleted chall_dir: {chall_dir}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete chall_dir: {e}")
+
+                # Delete runtime_dir
+                try:
+                    runtime_dir = Path(config.runtime_dir).resolve()
+                    if runtime_dir.exists():
+                        shutil.rmtree(runtime_dir, ignore_errors=True)
+                        logger.info(f"Deleted runtime_dir: {runtime_dir}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete runtime_dir: {e}")
+
+                # Delete db_file
+                try:
+                    db_file = Path(config.db_file).resolve()
+                    if db_file.exists():
+                        db_file.unlink(missing_ok=True)
+                        logger.info(f"Deleted db_file: {db_file}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete db_file: {e}")
+            else:
+                # Fallback database deletion for tests if config is not passed
+                conn = get_db_connection(self.db_path)
+                cursor = conn.cursor()
+                try:
+                    cursor.execute("DELETE FROM challenge_ports")
+                    cursor.execute("DELETE FROM challenge_exports")
+                    cursor.execute("DELETE FROM runtime_instances")
+                    cursor.execute("DELETE FROM challenges")
+                    conn.commit()
+                finally:
+                    close_db_connection(conn)
+
+            return count
+
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
 
         try:
-            if all_challenges:
-                cursor.execute("SELECT id, name, path FROM challenges")
-            else:
-                cursor.execute("SELECT id, name, path FROM challenges WHERE enabled = 0")
+            cursor.execute("SELECT id, name, path FROM challenges WHERE enabled = 0")
             disabled_rows = cursor.fetchall()
             if not disabled_rows:
                 return 0
