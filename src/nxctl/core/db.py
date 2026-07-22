@@ -140,26 +140,7 @@ def init_database(db_path: str) -> None:
         except sqlite3.OperationalError:
             pass
 
-    # Migration: challenge_ports table for multi-port challenges
-    try:
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS challenge_ports (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                challenge_id INTEGER NOT NULL,
-                host_port INTEGER NOT NULL,
-                internal_port INTEGER NOT NULL,
-                service_type TEXT DEFAULT 'http',
-                service_name TEXT,
-                protocol TEXT DEFAULT 'tcp',
-                is_primary BOOLEAN DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (challenge_id) REFERENCES challenges(id),
-                UNIQUE(challenge_id, internal_port, protocol)
-            )
-        """)
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass
+
 
     conn.close()
 

@@ -462,7 +462,7 @@ class RuntimeService:
 
         # Calculate remaining time
         expires_at = runtime.expires_at
-        remaining = expires_at - datetime.now()
+        remaining = expires_at - datetime.utcnow()
         remaining_mins = remaining.total_seconds() / 60
 
         if remaining_mins > ttl["extend_threshold_minutes"]:
@@ -633,7 +633,7 @@ class RuntimeService:
             # Backfill expiry if missing
             if not runtime.expires_at:
                 ttl = self._effective_ttl_for_challenge(challenge)
-                expires_at = datetime.now() + timedelta(minutes=ttl["default_minutes"])
+                expires_at = datetime.utcnow() + timedelta(minutes=ttl["default_minutes"])
                 self._update_runtime_expiry(challenge.id, expires_at)
                 runtime.expires_at = expires_at
             return runtime
@@ -659,6 +659,7 @@ class RuntimeService:
             # Load and modify docker-compose
             with open(docker_compose, "r", encoding="utf-8") as f:
                 compose_data = yaml.safe_load(f) or {}
+            self._validate_external_networks(compose_data, challenge_name)
             compose_data = self._prepare_external_runtime_compose(compose_data, challenge_dir)
 
             configured_ports = extract_ports_from_compose(docker_compose)
@@ -748,7 +749,7 @@ class RuntimeService:
 
             # Set expiry
             ttl = self._effective_ttl_for_challenge(challenge)
-            expires_at = datetime.now() + timedelta(minutes=ttl["default_minutes"])
+            expires_at = datetime.utcnow() + timedelta(minutes=ttl["default_minutes"])
 
             # Save to database
             if challenge.id is None:
@@ -859,7 +860,7 @@ class RuntimeService:
         # Auto-backfill expiry for legacy records that are still running
         if runtime.status == 'running' and not runtime.expires_at:
             ttl = self._effective_ttl_for_challenge(challenge)
-            expires_at = datetime.now() + timedelta(minutes=ttl["default_minutes"])
+            expires_at = datetime.utcnow() + timedelta(minutes=ttl["default_minutes"])
             self._update_runtime_expiry(challenge.id, expires_at)
             runtime.expires_at = expires_at
 
@@ -870,6 +871,32 @@ class RuntimeService:
         challenge = self._get_challenge_from_db(challenge_name)
         if challenge and challenge.id is not None:
             self._update_runtime_status(challenge.id, "stopped")
+
+    def _validate_external_networks(self, compose_data: dict, challenge_name: str) -> None:
+        """Verify that any external Docker networks referenced in compose exist."""
+        networks = compose_data.get("networks", {})
+        if not isinstance(networks, dict):
+            return
+
+        for net_key, net_config in networks.items():
+            if isinstance(net_config, dict) and net_config.get("external"):
+                net_name = net_config.get("name") or net_key
+                try:
+                    res = subprocess.run(
+                        ["docker", "network", "inspect", str(net_name)],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    if res.returncode != 0:
+                        raise RuntimeError(
+                            f"External Docker network '{net_name}' required by '{challenge_name}' not found. "
+                            f"Please start the parent challenge or create the network first."
+                        )
+                except Exception as e:
+                    if isinstance(e, RuntimeError):
+                        raise
+                    logger.warning(f"Failed to check Docker network '{net_name}': {e}")
 
     def _save_runtime_to_db(self, challenge_id: int, status: str, container_id: str = "", expires_at: datetime = None) -> None:
         """Save runtime instance to database."""
@@ -887,7 +914,7 @@ class RuntimeService:
             cursor.execute("""
                 INSERT INTO runtime_instances
                 (challenge_id, status, container_id, started_at, expires_at)
-                VALUES (?, ?, ?, datetime('now', 'localtime'), ?)
+                VALUES (?, ?, ?, datetime('now'), ?)
             """, (challenge_id, status, container_id, expires_at.strftime('%Y-%m-%d %H:%M:%S') if expires_at else None))
 
             conn.commit()

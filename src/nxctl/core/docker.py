@@ -75,8 +75,6 @@ def run_docker_compose_build(
         result = subprocess.run(
             cmd,
             cwd=str(cwd),
-            capture_output=True,
-            text=True,
             timeout=timeout,
             check=True,
         )
@@ -85,7 +83,7 @@ def run_docker_compose_build(
     except subprocess.TimeoutExpired:
         raise DockerError("Build operation timed out")
     except subprocess.CalledProcessError as e:
-        raise DockerError(f"Build failed: {e.stderr}")
+        raise DockerError(f"Build failed with exit code {e.returncode}")
     except Exception as e:
         raise DockerError(f"Build failed: {str(e)}")
 

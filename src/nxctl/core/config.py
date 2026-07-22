@@ -398,7 +398,12 @@ class Config(BaseModel):
 
     @root_validator(pre=True)
     def _normalize_values(cls, values):
-        base_dir = Path(values.get("_config_dir") or os.getcwd()).resolve()
+        try:
+            cwd = os.getcwd()
+        except (OSError, FileNotFoundError):
+            # Fallback to repo root or config module parent if current directory was deleted
+            cwd = Path(__file__).resolve().parents[3]
+        base_dir = Path(values.get("_config_dir") or cwd).resolve()
 
         # Extract legacy data dir values to find the definitive data_dir
         data_dir = (

@@ -386,7 +386,7 @@ class ChallengeService:
             close_db_connection(conn)
 
     def get_challenge(self, name: str) -> Optional[Challenge]:
-        """Get a single challenge by name."""
+        """Get a single challenge by exact name or partial match."""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
 
@@ -402,10 +402,28 @@ class ChallengeService:
             """, (name,))
 
             row = cursor.fetchone()
-            if not row:
-                return None
+            if row:
+                return self._challenge_from_row(row)
 
-            return self._challenge_from_row(row)
+            cursor.execute("""
+                SELECT id, name, path, service_port, service_type, enabled,
+                       access_key_hash, access_key_source, config_source,
+                       ttl_default_minutes, ttl_extend_minutes,
+                       ttl_extend_threshold_minutes, ttl_extend_cooldown_seconds,
+                       can_restart, restart_cooldown_seconds, created_at
+                FROM challenges
+                WHERE name LIKE ? OR name LIKE ? OR name LIKE ?
+            """, (f"{name}%", f"%/{name}%", f"%{name}%"))
+
+            rows = cursor.fetchall()
+            if len(rows) == 1:
+                return self._challenge_from_row(rows[0])
+            elif len(rows) > 1:
+                prefix_matches = [r for r in rows if r["name"].startswith(name)]
+                if len(prefix_matches) == 1:
+                    return self._challenge_from_row(prefix_matches[0])
+
+            return None
 
         finally:
             close_db_connection(conn)

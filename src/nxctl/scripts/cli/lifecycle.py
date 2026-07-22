@@ -654,7 +654,7 @@ def _daemon_cycle(config, challenge_service, runtime_service, export_manager, la
             JOIN challenges c ON r.challenge_id = c.id
             WHERE r.status = 'running'
             AND r.expires_at IS NOT NULL
-            AND r.expires_at < datetime('now', 'localtime')
+            AND r.expires_at < datetime('now')
         """)
         expired = [row["name"] for row in cursor.fetchall()]
 
@@ -700,9 +700,11 @@ def _daemon_cycle(config, challenge_service, runtime_service, export_manager, la
         for name in running_names:
             try:
                 challenge = challenge_service.get_challenge(name)
-                if runtime_service.status(name).status != "running":
+                if not challenge or runtime_service.status(name).status != "running":
                     continue
                 ports = challenge_service.list_challenge_ports(name)
+                if not ports:
+                    continue
                 _start_available_exports(export_manager, name, challenge, ports)
             except Exception as heal_err:
                 print(f"{red('[daemon]')} Heal failed for {name}: {heal_err}")
