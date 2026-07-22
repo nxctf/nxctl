@@ -115,6 +115,34 @@ class ContainerOnlyLifecycleTests(unittest.TestCase):
             self.assertFalse(challenge_service.get_challenge("misc/disabled").enabled)
             self.assertTrue(challenge_service.get_challenge("misc/enabled").enabled)
 
+    @patch("nxctl.scripts.runtime_service.subprocess.run")
+    def test_validate_external_networks_subprocess_check(self, mock_run):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = SimpleNamespace(
+                compose_dir=root / "runtime" / "compose",
+                locks_dir=root / "runtime" / "locks",
+            )
+            runtime_service = RuntimeService(config, str(root / "db.sqlite"), str(root))
+
+            mock_run.return_value = SimpleNamespace(returncode=0)
+            compose_data = {
+                "networks": {
+                    "my_net": {
+                        "external": True,
+                        "name": "custom-ctf-network-name"
+                    }
+                }
+            }
+            runtime_service._validate_external_networks(compose_data, "any-challenge")
+            mock_run.assert_called_once_with(
+                ["docker", "network", "inspect", "custom-ctf-network-name"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
+
