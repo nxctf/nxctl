@@ -605,7 +605,7 @@ class ExportManager:
 
         protocol = str(export.get("protocol") or "").lower()
         if endpoint.startswith("tcp://") or protocol == PROTOCOL_TCP:
-            return self._test_tcp_endpoint(endpoint, timeout)
+            return self._test_tcp_endpoint(endpoint, timeout, export)
 
         return self._test_http_endpoint(endpoint, timeout)
 
@@ -669,16 +669,33 @@ class ExportManager:
         )
         return any(marker in body for marker in failure_markers)
 
-    def _test_tcp_endpoint(self, endpoint: str, timeout: float) -> tuple[bool, str]:
+    def _test_tcp_endpoint(self, endpoint: str, timeout: float, export: Optional[dict] = None) -> tuple[bool, str]:
         parsed = urlparse(endpoint if "://" in endpoint else f"tcp://{endpoint}")
         host = parsed.hostname
         port = parsed.port
         if not host or not port:
             return False, "invalid tcp endpoint"
 
+        local_port = int((export or {}).get("port") or 0)
+        if local_port > 0:
+            from nxctl.core.utils import is_port_in_use
+            if not is_port_in_use(local_port):
+                return False, f"local port {local_port} not listening"
+
         try:
-            with socket.create_connection((host, port), timeout=timeout):
-                return True, ""
+            probe_timeout = min(max(timeout, 1.0), 2.0)
+            with socket.create_connection((host, port), timeout=probe_timeout) as sock:
+                sock.settimeout(probe_timeout)
+                try:
+                    data = sock.recv(1024)
+                    if not data:
+                        return False, "connection closed by remote host (zombie tunnel)"
+                except (socket.timeout, TimeoutError):
+                    # Connection remained open without EOF -> healthy TCP tunnel
+                    pass
+                except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError, OSError) as exc:
+                    return False, f"connection reset by remote: {exc}"
+            return True, ""
         except Exception as exc:
             return False, str(exc)
 
