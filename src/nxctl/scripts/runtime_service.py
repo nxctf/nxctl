@@ -866,10 +866,29 @@ class RuntimeService:
                 if docker_compose_run.exists():
                     from nxctl.core.docker import _compose_cmd
                     from nxctl.core.utils import get_challenge_dir
-                    cmd = _compose_cmd(get_challenge_dir(challenge.path)) + ["-f", str(docker_compose_run), "ps", "-q"]
-                    res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-                    if res.returncode == 0 and res.stdout.strip():
-                        is_running = True
+                    chall_dir = get_challenge_dir(challenge.path)
+
+                    try:
+                        cmd = _compose_cmd(chall_dir) + ["-f", str(docker_compose_run), "ps", "--filter", "status=running", "-q"]
+                        res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                        if res.returncode == 0 and res.stdout.strip():
+                            is_running = True
+                    except Exception:
+                        pass
+
+                    if not is_running:
+                        try:
+                            cmd = _compose_cmd(chall_dir) + ["-f", str(docker_compose_run), "ps"]
+                            res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                            if res.returncode == 0:
+                                for line in res.stdout.strip().splitlines():
+                                    line_lower = line.lower()
+                                    if ("up " in line_lower or "running" in line_lower) and "exited" not in line_lower:
+                                        is_running = True
+                                        break
+                        except Exception:
+                            pass
+
                 if not is_running:
                     from nxctl.core.docker import get_running_containers_for_challenge
                     running_cids = get_running_containers_for_challenge(challenge_name)
