@@ -525,7 +525,7 @@ class RuntimeService:
         cursor = conn.cursor()
         try:
             cursor.execute(
-                "UPDATE runtime_instances SET last_restart = datetime('now', 'localtime') WHERE challenge_id = ?",
+                "UPDATE runtime_instances SET last_restart = datetime('now') WHERE challenge_id = ?",
                 (challenge.id,)
             )
             conn.commit()
@@ -542,7 +542,7 @@ class RuntimeService:
         cursor = conn.cursor()
         try:
             cursor.execute(
-                "UPDATE runtime_instances SET last_activity = datetime('now', 'localtime') WHERE challenge_id = ?",
+                "UPDATE runtime_instances SET last_activity = datetime('now') WHERE challenge_id = ?",
                 (challenge.id,)
             )
             conn.commit()
@@ -562,7 +562,7 @@ class RuntimeService:
                 JOIN challenges c ON r.challenge_id = c.id
                 WHERE r.status = 'running'
                 AND r.expires_at IS NOT NULL
-                AND r.expires_at < datetime('now', 'localtime')
+                AND r.expires_at < datetime('now')
             """)
 
             expired = [row["name"] for row in cursor.fetchall()]
@@ -857,6 +857,31 @@ class RuntimeService:
                 status="stopped",
                 container_id=None,
             )
+
+        # Cross-check SQLite 'running' status against actual Docker container status
+        if runtime.status == 'running':
+            try:
+                docker_compose_run = self._runtime_compose_file(challenge_name)
+                is_running = False
+                if docker_compose_run.exists():
+                    from nxctl.core.docker import _compose_cmd
+                    from nxctl.core.utils import get_challenge_dir
+                    cmd = _compose_cmd(get_challenge_dir(challenge.path)) + ["-f", str(docker_compose_run), "ps", "-q"]
+                    res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                    if res.returncode == 0 and res.stdout.strip():
+                        is_running = True
+                if not is_running:
+                    from nxctl.core.docker import get_running_containers_for_challenge
+                    running_cids = get_running_containers_for_challenge(challenge_name)
+                    if running_cids:
+                        is_running = True
+
+                if not is_running:
+                    logger.info(f"Reconciling status for challenge {challenge_name}: Docker container not running, updating status to stopped.")
+                    self._update_runtime_status(challenge.id, "stopped")
+                    runtime.status = "stopped"
+            except Exception as check_exc:
+                logger.debug(f"Could not verify Docker status for {challenge_name}: {check_exc}")
 
         # Auto-backfill expiry for legacy records that are still running
         if runtime.status == 'running' and not runtime.expires_at:

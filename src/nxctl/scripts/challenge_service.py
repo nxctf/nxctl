@@ -299,6 +299,14 @@ class ChallengeService:
                 "protocol": "tcp",
             }]
 
+        cursor.execute(
+            "SELECT id FROM runtime_instances WHERE challenge_id = ? AND status = 'running'",
+            (challenge_id,),
+        )
+        if cursor.fetchone():
+            logger.debug(f"Preserving active runtime ports for challenge_id={challenge_id}")
+            return
+
         cursor.execute("DELETE FROM challenge_ports WHERE challenge_id = ?", (challenge_id,))
         for index, port in enumerate(ports):
             cursor.execute("""

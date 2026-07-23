@@ -523,7 +523,7 @@ def cmd_status(args) -> int:
                             JOIN challenges c ON r.challenge_id = c.id
                             WHERE r.status = 'running'
                             AND r.expires_at IS NOT NULL
-                            AND r.expires_at < datetime('now', 'localtime')
+                            AND r.expires_at < datetime('now')
                         """)
                         expired = [row["name"] for row in cursor.fetchall()]
                     finally:
@@ -705,7 +705,22 @@ def _daemon_cycle(config, challenge_service, runtime_service, export_manager, la
                 ports = challenge_service.list_challenge_ports(name)
                 if not ports:
                     continue
-                _start_available_exports(export_manager, name, challenge, ports)
+
+                existing_exports = export_manager.list_exports(name, check_health=False, latest_only=True)
+                active_ports = {
+                    int(e.get("port") or 0)
+                    for e in existing_exports
+                    if str(e.get("status") or "running") in {"active", "running"}
+                    and e.get("provider") != "base_ip"
+                }
+
+                missing_ports = [
+                    p for p in ports
+                    if int(getattr(p, "host_port", getattr(p, "service_port", 0))) not in active_ports
+                ]
+
+                if missing_ports:
+                    _start_available_exports(export_manager, name, challenge, missing_ports)
             except Exception as heal_err:
                 print(f"{red('[daemon]')} Heal failed for {name}: {heal_err}")
 

@@ -303,7 +303,7 @@ class ExportManager:
             if export.get("provider") != EXPORT_PROVIDER_BASE_IP
             and int(export.get("pid") or 0) > 0
             and str(export.get("runtime_status") or "running") == "running"
-            and str(export.get("status") or "running") in {"active", "running"}
+            and str(export.get("status") or "running") in {"active", "running", "unhealthy"}
         ]
         keep_pids = {int(export.get("pid") or 0) for export in keep_exports}
         active_keys = {
@@ -882,36 +882,20 @@ class ExportManager:
                 )
                 runtime_id = cursor.lastrowid
 
-            # Check if already exists
-            cursor.execute(
-                "SELECT id FROM challenge_exports WHERE runtime_id = ? AND provider = ? AND target_port = ? AND status = 'active' ORDER BY id DESC",
-                (runtime_id, provider, host_port)
-            )
+            # Deactivate any existing active exports for this challenge, provider, and target port across ALL runtime instances
+            cursor.execute("""
+                UPDATE challenge_exports
+                SET status = 'inactive'
+                WHERE provider = ? AND target_port = ? AND runtime_id IN (
+                    SELECT id FROM runtime_instances WHERE challenge_id = ?
+                ) AND status = 'active'
+            """, (provider, host_port, chall_id))
 
-            existing_rows = cursor.fetchall()
-
-            if not existing_rows:
-                # Insert new export record
-                cursor.execute("""
-                    INSERT INTO challenge_exports (runtime_id, provider, export_type, protocol, target_port, public_endpoint, pid, status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (runtime_id, provider, export_type, protocol, host_port, public_endpoint, pid, 'active'))
-            else:
-                # Update existing record (e.g. if we restarted the tunnel)
-                keep_id = existing_rows[0]["id"]
-                cursor.execute("""
-                    UPDATE challenge_exports
-                    SET export_type = ?, public_endpoint = ?, pid = ?, status = 'active'
-                    WHERE id = ?
-                """, (export_type, public_endpoint, pid, keep_id))
-
-                stale_ids = [row["id"] for row in existing_rows[1:]]
-                if stale_ids:
-                    placeholders = ",".join("?" for _ in stale_ids)
-                    cursor.execute(
-                        f"UPDATE challenge_exports SET status = 'inactive' WHERE id IN ({placeholders})",
-                        stale_ids,
-                    )
+            # Insert new export record
+            cursor.execute("""
+                INSERT INTO challenge_exports (runtime_id, provider, export_type, protocol, target_port, public_endpoint, pid, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (runtime_id, provider, export_type, protocol, host_port, public_endpoint, pid, 'active'))
 
             conn.commit()
 
@@ -974,16 +958,17 @@ class ExportManager:
         cursor = conn.cursor()
         try:
             cursor.execute("""
-                SELECT id, runtime_id, provider, target_port, public_endpoint
-                FROM challenge_exports
-                WHERE status = 'active'
-                ORDER BY id DESC
+                SELECT ce.id, ri.challenge_id, ce.provider, ce.target_port
+                FROM challenge_exports ce
+                JOIN runtime_instances ri ON ce.runtime_id = ri.id
+                WHERE ce.status = 'active'
+                ORDER BY ce.id DESC
             """)
             seen: set[tuple[int, str, int]] = set()
             stale_ids: list[int] = []
             for row in cursor.fetchall():
                 key = (
-                    int(row["runtime_id"] or 0),
+                    int(row["challenge_id"] or 0),
                     str(row["provider"] or ""),
                     int(row["target_port"] or 0),
                 )

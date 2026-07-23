@@ -136,15 +136,17 @@ def _restart_policy_text(config, challenge) -> str:
 
 def cmd_sync(args) -> int:
     try:
+        from nxctl.core.utils import LifecycleLock
         config, challenge_service, runtime_service, export_manager = get_services()
-        git_repo = GitRepository(
-            repo_url=config.github_repo,
-            cache_dir=config.chall_dir,
-            branch=config.branch,
-            token=config.access_token,
-        )
+        with LifecycleLock(config, blocking=True):
+            git_repo = GitRepository(
+                repo_url=config.github_repo,
+                cache_dir=config.chall_dir,
+                branch=config.branch,
+                token=config.access_token,
+            )
 
-        print(f"{bold('Syncing challenges')}")
+            print(f"{bold('Syncing challenges')}")
         reporter = ProgressReporter(indent=2)
         reporter.ok(f"Repository: {config.github_repo}")
         reporter.ok(f"Branch: {config.branch}")
