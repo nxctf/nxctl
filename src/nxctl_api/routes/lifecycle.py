@@ -50,7 +50,7 @@ def up_challenge(
 
 
 @router.post("/up", dependencies=[Depends(verify_admin_secret)])
-def up_all_challenges(all: bool = False):
+def up_all_challenges(all: bool = False, prefix: str | None = None):
     if not all:
         raise HTTPException(
             status_code=400,
@@ -62,13 +62,21 @@ def up_all_challenges(all: bool = False):
 
     try:
         config, challenge_service, runtime_service, export_manager = get_services()
-        with LifecycleLock(config):
-            results = []
-            failures = []
+        results = []
+        failures = []
+        challenges = challenge_service.list_challenges_under(prefix)
+        if not challenges:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "ok": False,
+                    "error": "no_matching_challenges",
+                    "prefix": prefix,
+                },
+            )
 
-            for challenge in challenge_service.list_challenges():
-                if not challenge.enabled:
-                    continue
+        for challenge in challenges:
+            with LifecycleLock(config):
                 try:
                     results.append(start_challenge_payload(
                         challenge.name,
@@ -95,6 +103,17 @@ def up_all_challenges(all: bool = False):
             "failures": failures,
         }
 
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "ok": False,
+                "error": "invalid_prefix",
+                "message": str(exc),
+            },
+        )
     except Exception as exc:
         raise HTTPException(
             status_code=500,

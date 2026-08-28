@@ -393,6 +393,29 @@ class ChallengeService:
         finally:
             close_db_connection(conn)
 
+    def list_challenges_under(
+        self,
+        prefix: Optional[str] = None,
+        include_disabled: bool = False,
+    ) -> list[Challenge]:
+        """List challenges at or below a normalized repository path prefix."""
+        challenges = self.list_challenges(include_disabled=include_disabled)
+        if prefix is None:
+            return challenges
+
+        normalized = str(prefix).replace("\\", "/").strip("/")
+        if not normalized:
+            return challenges
+        if any(part in {".", ".."} for part in normalized.split("/")):
+            raise ValueError(f"Invalid challenge prefix: {prefix}")
+
+        subtree_prefix = f"{normalized}/"
+        return [
+            challenge
+            for challenge in challenges
+            if challenge.name == normalized or challenge.name.startswith(subtree_prefix)
+        ]
+
     def get_challenge(self, name: str) -> Optional[Challenge]:
         """Get a single challenge by exact name or partial match."""
         conn = get_db_connection(self.db_path)

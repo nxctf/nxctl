@@ -377,31 +377,35 @@ def cmd_up(args) -> int:
     try:
         config, challenge_service, runtime_service, export_manager = get_services()
 
-        with LifecycleLock(config):
-            if getattr(args, "all", False):
-                challenges = [challenge for challenge in challenge_service.list_challenges() if challenge.enabled]
-                if not challenges:
-                    print(f"{yellow('No enabled challenges found')}")
-                    return 0
+        if getattr(args, "all", False):
+            prefix = getattr(args, "name", None)
+            challenges = challenge_service.list_challenges_under(prefix)
+            if not challenges:
+                target = f" under prefix '{prefix}'" if prefix else ""
+                print(f"{yellow(f'No enabled challenges found{target}')}")
+                return 1 if prefix else 0
 
-                print(f"{blue(f'Starting all enabled challenges ({len(challenges)})...')}")
-                ok_count = 0
-                failed_count = 0
-                for challenge in challenges:
+            target = f" under {prefix}" if prefix else ""
+            print(f"{blue(f'Starting enabled challenges{target} ({len(challenges)})...')}")
+            ok_count = 0
+            failed_count = 0
+            for challenge in challenges:
+                with LifecycleLock(config):
                     if _cmd_up_one(challenge.name, challenge_service, runtime_service, export_manager, no_cache=getattr(args, "no_cache", False)):
                         ok_count += 1
                     else:
                         failed_count += 1
 
-                print(f"{green(OK)} Up --all complete")
-                print(f"  Started: {ok_count}")
-                print(f"  Failed:  {failed_count}")
-                return 1 if failed_count else 0
+            print(f"{green(OK)} Up --all complete")
+            print(f"  Started: {ok_count}")
+            print(f"  Failed:  {failed_count}")
+            return 1 if failed_count else 0
 
-            if not getattr(args, "name", None):
-                print(f"{red(ERR)} Please provide a challenge name or use --all")
-                return 1
+        if not getattr(args, "name", None):
+            print(f"{red(ERR)} Please provide a challenge name or use --all")
+            return 1
 
+        with LifecycleLock(config):
             return 0 if _cmd_up_one(
                 args.name,
                 challenge_service,
@@ -786,7 +790,7 @@ def cmd_daemon(args) -> int:
 
         while True:
             try:
-                with LifecycleLock(config, blocking=False):
+                with LifecycleLock(config):
                     last_endpoint_check = _daemon_cycle(
                         config,
                         challenge_service,
@@ -794,8 +798,6 @@ def cmd_daemon(args) -> int:
                         export_manager,
                         last_endpoint_check,
                     )
-            except LockUnavailable:
-                logger.info("Skipping daemon cycle because lifecycle lock is held")
             except Exception as e:
                 print(f"{red('[daemon] Error:')} {e}")
 

@@ -150,8 +150,8 @@ Examples:
     # ======== LIFECYCLE ========
     up_cmd = subparsers.add_parser("up", help="Build + start + auto-export")
     add_debug_flag(up_cmd, default=argparse.SUPPRESS)
-    up_cmd.add_argument("name", nargs="?", help="Challenge name")
-    up_cmd.add_argument("--all", action="store_true", help="Start all enabled challenges")
+    up_cmd.add_argument("name", nargs="?", help="Challenge name, or path prefix with --all")
+    up_cmd.add_argument("--all", action="store_true", help="Start enabled challenges, optionally under a path prefix")
     up_cmd.add_argument("--force", action="store_true", help="Start a disabled challenge from the CLI")
     up_cmd.add_argument("--no-cache", action="store_true", help="Build image without using docker cache")
     up_cmd.set_defaults(func=cmd_up)
