@@ -257,16 +257,16 @@ def restart_challenge_lifecycle(
     no_cache: bool = False,
     reporter: ProgressReporter | None = None,
 ) -> dict:
-    """Restart a challenge runtime/export using the shared lifecycle path."""
+    """Reset container state while preserving exports unless provider restart is requested."""
     if not force:
         runtime_service.ensure_restart_allowed(name)
         remaining = runtime_service.check_restart_cooldown(name)
         if remaining:
             raise RuntimeError(f"Restart cooldown active. Wait {remaining}s")
 
-    restart_all = not (container or provider)
-    do_container = restart_all or container
-    do_provider = restart_all or provider
+    do_container = container or not provider
+    do_provider = provider
+    restart_all = do_container and do_provider
 
     challenge = challenge_service.get_challenge(name)
     if not challenge:
@@ -276,18 +276,41 @@ def restart_challenge_lifecycle(
     exports = []
     failures = []
 
+    current_runtime = runtime_service.status(name) if do_container else None
+    preserve_runtime = bool(current_runtime and current_runtime.status == "running")
+    preserved_ports = (
+        challenge_service.list_challenge_ports(name)
+        if preserve_runtime and not do_provider
+        else []
+    )
+    preserved_expiry = current_runtime.expires_at if preserve_runtime else None
+
     if do_provider:
         stopped_exports = _stop_exports_for_challenge(name, challenge, export_manager, reporter)
 
     if do_container:
         if reporter:
-            with reporter.step("Stopping Docker runtime", "Docker runtime stopped; compose cleanup complete"):
-                runtime_service.stop(name)
-            with reporter.step("Starting Docker runtime", "Docker runtime started"):
-                runtime_service.start(name, force=start_disabled, no_cache=no_cache)
+            with reporter.step("Resetting Docker runtime", "Docker runtime and owned volumes removed"):
+                runtime_service.stop(name, remove_volumes=True)
+            with reporter.step("Starting fresh Docker runtime", "Fresh Docker runtime started"):
+                runtime_service.start(
+                    name,
+                    force=start_disabled,
+                    no_cache=no_cache,
+                    preferred_ports=preserved_ports,
+                    preserve_expires_at=preserved_expiry,
+                    reuse_runtime=preserve_runtime,
+                )
         else:
-            runtime_service.stop(name)
-            runtime_service.start(name, force=start_disabled, no_cache=no_cache)
+            runtime_service.stop(name, remove_volumes=True)
+            runtime_service.start(
+                name,
+                force=start_disabled,
+                no_cache=no_cache,
+                preferred_ports=preserved_ports,
+                preserve_expires_at=preserved_expiry,
+                reuse_runtime=preserve_runtime,
+            )
         challenge = challenge_service.get_challenge(name) or challenge
         ports = challenge_service.list_challenge_ports(name)
         if reporter:
@@ -305,7 +328,7 @@ def restart_challenge_lifecycle(
 
     return {
         "challenge": name,
-        "scope": "all" if restart_all else "container" if container else "provider",
+        "scope": "all" if restart_all else "container" if do_container else "provider",
         "force": bool(force),
         "stopped_exports": stopped_exports,
         "exports": exports,
@@ -624,7 +647,7 @@ def cmd_extend(args) -> int:
             runtime = runtime_service.extend_time(args.name)
 
         from datetime import datetime
-        remaining = runtime.expires_at - datetime.now()
+        remaining = runtime.expires_at - datetime.utcnow()
         mins = int(remaining.total_seconds() // 60)
         secs = int(remaining.total_seconds() % 60)
 

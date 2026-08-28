@@ -162,10 +162,10 @@ Examples:
     down_cmd.add_argument("--all", action="store_true", help="Stop all running challenges and tunnel processes")
     down_cmd.set_defaults(func=cmd_down)
 
-    restart_cmd = subparsers.add_parser("restart", help="Restart (down + up)")
+    restart_cmd = subparsers.add_parser("restart", help="Reset container state while preserving its tunnel")
     add_debug_flag(restart_cmd, default=argparse.SUPPRESS)
     restart_cmd.add_argument("name", help="Challenge name")
-    restart_cmd.add_argument("--container", action="store_true", help="Restart only the docker container")
+    restart_cmd.add_argument("--container", action="store_true", help="Reset only the Docker container (default)")
     restart_cmd.add_argument("--provider", action="store_true", help="Restart only the tunnel provider")
     restart_cmd.add_argument("--force", action="store_true", help="Bypass restart policy and cooldown")
     restart_cmd.set_defaults(func=cmd_restart)

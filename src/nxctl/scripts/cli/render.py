@@ -160,7 +160,7 @@ def ttl_remaining(expires_at: object) -> tuple[str, bool]:
                 return "-", True
     if not isinstance(expires_at, datetime):
         return "-", True
-    remaining = int((expires_at - datetime.now()).total_seconds())
+    remaining = int((expires_at - datetime.utcnow()).total_seconds())
     return format_duration(remaining), remaining >= 0
 
 

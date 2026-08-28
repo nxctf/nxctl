@@ -156,7 +156,7 @@ Example response shape from the API:
 | `nxctl up` | Build, start, and auto-export a challenge | `nxctl up web/sqli` |
 | `nxctl down` | Stop container and active tunnels | `nxctl down web/sqli` |
 | `nxctl down --all` | Stop all running challenges and tunnel processes | `nxctl down --all` |
-| `nxctl restart` | Restart a challenge | `nxctl restart web/sqli` |
+| `nxctl restart` | Reset container volumes while preserving its tunnel, host port, and TTL | `nxctl restart web/sqli` |
 | `nxctl extend` | Add time to a running challenge | `nxctl extend web/sqli` |
 
 ### Tunnels
@@ -212,7 +212,7 @@ admin/global operations.
 | `/status` | GET | Comprehensive status of all challenges |
 | `/up/{name}` | POST | Start a challenge |
 | `/down/{name}` | POST | Stop a challenge |
-| `/restart/{name}` | POST | Restart a challenge, with optional scope |
+| `/restart/{name}` | POST | Reset the container by default; use `provider=true` to restart its tunnel |
 | `/extend/{name}` | POST | Add more time to a running challenge |
 
 Read endpoints that can expose challenge names or tunnel endpoints (`/status`,

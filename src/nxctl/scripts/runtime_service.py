@@ -5,12 +5,13 @@ import logging
 import random
 import socket
 import subprocess
+import time
 from pathlib import Path
 from typing import Optional
 import yaml
 from datetime import datetime, timedelta
 
-from nxctl.core.models import Challenge, RuntimeInstance
+from nxctl.core.models import Challenge, ChallengePort, RuntimeInstance
 from nxctl.core.db import get_db_connection, close_db_connection
 from nxctl.core.docker import run_docker_compose_build, run_docker_compose_up, run_docker_compose_down_with_cleanup, DockerError
 from nxctl.core.utils import is_port_in_use, safe_runtime_name
@@ -347,6 +348,23 @@ class RuntimeService:
         except OSError:
             return False
 
+    def _wait_for_host_port_available(self, port: int) -> bool:
+        """Wait briefly for Docker to release a preferred restart port."""
+        attempts = max(
+            1,
+            int(getattr(self.config, "restart_port_release_attempts", 20) or 20),
+        )
+        delay = max(
+            0.0,
+            float(getattr(self.config, "restart_port_release_delay_seconds", 0.25) or 0.25),
+        )
+        for attempt in range(attempts):
+            if not is_port_in_use(port) and self._host_port_available_for_bind(port):
+                return True
+            if attempt + 1 < attempts:
+                time.sleep(delay)
+        return False
+
     def _is_port_bind_conflict(self, error: Exception) -> bool:
         message = str(error).lower()
         return any(
@@ -491,7 +509,7 @@ class RuntimeService:
         if not runtime or not runtime.last_restart:
             return None
 
-        elapsed = (datetime.now() - runtime.last_restart).total_seconds()
+        elapsed = (datetime.utcnow() - runtime.last_restart).total_seconds()
         if elapsed < cooldown_seconds:
             return int(cooldown_seconds - elapsed)
         return None
@@ -510,7 +528,7 @@ class RuntimeService:
         if not runtime or not runtime.last_activity:
             return None
 
-        elapsed = (datetime.now() - runtime.last_activity).total_seconds()
+        elapsed = (datetime.utcnow() - runtime.last_activity).total_seconds()
         if elapsed < cooldown_seconds:
             return int(cooldown_seconds - elapsed)
         return None
@@ -617,7 +635,15 @@ class RuntimeService:
         except DockerError as e:
             raise RuntimeError(f"Build failed: {str(e)}")
 
-    def start(self, challenge_name: str, force: bool = False, no_cache: bool = False) -> RuntimeInstance:
+    def start(
+        self,
+        challenge_name: str,
+        force: bool = False,
+        no_cache: bool = False,
+        preferred_ports: Optional[list[dict | ChallengePort]] = None,
+        preserve_expires_at: Optional[datetime] = None,
+        reuse_runtime: bool = False,
+    ) -> RuntimeInstance:
         """Start a challenge runtime (includes automatic build)."""
         # Get challenge from DB
         challenge = self._get_challenge_from_db(challenge_name)
@@ -683,18 +709,55 @@ class RuntimeService:
             failed_ports: set[int] = set()
             last_start_error: Exception | None = None
 
+            def preferred_port_value(port, field: str, default=None):
+                if isinstance(port, dict):
+                    return port.get(field, default)
+                return getattr(port, field, default)
+
+            preferred_host_ports = {
+                (
+                    int(preferred_port_value(port, "internal_port")),
+                    str(preferred_port_value(port, "protocol", "tcp") or "tcp"),
+                ): int(preferred_port_value(port, "host_port"))
+                for port in (preferred_ports or [])
+            }
+
             for attempt in range(1, start_attempts + 1):
                 compose_attempt = copy.deepcopy(compose_data)
                 allocated_ports = []
                 used_ports = set()
                 reserved_ports = self._running_host_ports_from_db(challenge.id) | failed_ports
                 for index, port_info in enumerate(configured_ports):
-                    desired_port = self._allocate_runtime_port(used_ports, reserved_ports)
+                    port_key = (
+                        int(port_info["internal_port"]),
+                        str(port_info.get("protocol") or "tcp"),
+                    )
+                    preferred_port = preferred_host_ports.get(port_key)
+                    if preferred_port is not None:
+                        preferred_available = (
+                            preferred_port not in used_ports
+                            and preferred_port not in reserved_ports
+                            and self._wait_for_host_port_available(preferred_port)
+                        )
+                        if not preferred_available:
+                            raise RuntimeError(
+                                f"Cannot preserve host port {preferred_port} for {challenge_name}; "
+                                "the port is no longer available"
+                            )
+                        desired_port = preferred_port
+                    else:
+                        desired_port = self._allocate_runtime_port(used_ports, reserved_ports)
                     used_ports.add(desired_port)
                     allocated = dict(port_info)
                     allocated["host_port"] = desired_port
                     allocated["is_primary"] = bool(port_info.get("is_primary")) or index == 0
                     allocated_ports.append(allocated)
+
+                if preferred_host_ports and not set(preferred_host_ports.values()).issubset(used_ports):
+                    raise RuntimeError(
+                        f"Cannot preserve the existing host-port mapping for {challenge_name}; "
+                        "restart the container and provider together to accept new ports"
+                    )
 
                 # Update ports in compose
                 if 'services' in compose_attempt:
@@ -750,7 +813,9 @@ class RuntimeService:
 
             # Set expiry
             ttl = self._effective_ttl_for_challenge(challenge)
-            expires_at = datetime.utcnow() + timedelta(minutes=ttl["default_minutes"])
+            expires_at = preserve_expires_at or (
+                datetime.utcnow() + timedelta(minutes=ttl["default_minutes"])
+            )
 
             # Save to database
             if challenge.id is None:
@@ -760,7 +825,8 @@ class RuntimeService:
                 challenge_id=challenge.id,
                 status="running",
                 container_id="",
-                expires_at=expires_at
+                expires_at=expires_at,
+                reuse_latest=reuse_runtime,
             )
 
             logger.info(f"Successfully started challenge: {challenge_name}")
@@ -943,7 +1009,14 @@ class RuntimeService:
                         raise
                     logger.warning(f"Failed to check Docker network '{net_name}': {e}")
 
-    def _save_runtime_to_db(self, challenge_id: int, status: str, container_id: str = "", expires_at: datetime = None) -> None:
+    def _save_runtime_to_db(
+        self,
+        challenge_id: int,
+        status: str,
+        container_id: str = "",
+        expires_at: datetime = None,
+        reuse_latest: bool = False,
+    ) -> None:
         """Save runtime instance to database."""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
@@ -956,11 +1029,25 @@ class RuntimeService:
                 AND status = 'running'
             """, (challenge_id,))
 
-            cursor.execute("""
-                INSERT INTO runtime_instances
-                (challenge_id, status, container_id, started_at, expires_at)
-                VALUES (?, ?, ?, datetime('now'), ?)
-            """, (challenge_id, status, container_id, expires_at.strftime('%Y-%m-%d %H:%M:%S') if expires_at else None))
+            expiry_value = expires_at.strftime('%Y-%m-%d %H:%M:%S') if expires_at else None
+            if reuse_latest:
+                cursor.execute("""
+                    UPDATE runtime_instances
+                    SET status = ?, container_id = ?, started_at = datetime('now'), expires_at = ?
+                    WHERE id = (
+                        SELECT id FROM runtime_instances
+                        WHERE challenge_id = ?
+                        ORDER BY created_at DESC, id DESC
+                        LIMIT 1
+                    )
+                """, (status, container_id, expiry_value, challenge_id))
+
+            if not reuse_latest or cursor.rowcount == 0:
+                cursor.execute("""
+                    INSERT INTO runtime_instances
+                    (challenge_id, status, container_id, started_at, expires_at)
+                    VALUES (?, ?, ?, datetime('now'), ?)
+                """, (challenge_id, status, container_id, expiry_value))
 
             conn.commit()
             logger.debug(f"Runtime instance saved for challenge_id={challenge_id}")

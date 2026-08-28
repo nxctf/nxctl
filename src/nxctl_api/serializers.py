@@ -32,7 +32,7 @@ def compute_remaining_seconds(value):
 
     if isinstance(value, datetime):
         try:
-            return max(0, int((value - datetime.now()).total_seconds()))
+            return max(0, int((value - datetime.utcnow()).total_seconds()))
         except Exception:
             return None
 
