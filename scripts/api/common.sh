@@ -462,7 +462,7 @@ api_prepare() {
     NXCTL_API_TOKEN="$API_TOKEN" \
     NXCTL_API_ADMIN_SECRET="$API_ADMIN_SECRET" \
     PYTHONPATH="${PYTHONPATH:+${PYTHONPATH}:}src" \
-      python3 -m nxctl.app api --host "$API_HOST" --port "$API_PORT" >/tmp/nxctl-api-test.log 2>&1 &
+      "${NXCTL_PYTHON:-python3}" -m nxctl.app api --host "$API_HOST" --port "$API_PORT" >/tmp/nxctl-api-test.log 2>&1 &
     API_PID="$!"
     API_URL="http://${API_HOST}:${API_PORT}"
     trap api_cleanup EXIT

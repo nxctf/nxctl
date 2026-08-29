@@ -55,7 +55,7 @@ _nxctl_get_challenges() {
         return 0
     fi
 
-    local python_bin="python3"
+    local python_bin="${NXCTL_PYTHON:-python3}"
     if [[ -f "${app_root}/src/nxctl/app.py" ]]; then
         (cd "${app_root}" && PYTHONPATH="${app_root}/src${PYTHONPATH:+:${PYTHONPATH}}" "${python_bin}" -m nxctl.app list 2>/dev/null \
             | awk 'BEGIN { seen = 0 } /^[[:space:]]*Name[[:space:]]+/ { seen = 1; next } seen && NF && $1 !~ /^-+$/ { print $1 }' \
@@ -75,7 +75,7 @@ _nxctl_completion() {
     prev="${COMP_WORDS[COMP_CWORD-1]}"
     cmd="${COMP_WORDS[1]}"
 
-    local commands="sync list inspect add remove up down restart status extend daemon api export unexport exports test ps"
+    local commands="sync list inspect add remove up down restart status logs extend daemon api export unexport exports test ps"
     local provider_names="ngrok localtunnel pinggy cloudflare bore"
 
     if [[ ${COMP_CWORD} -eq 1 ]]; then

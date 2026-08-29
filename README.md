@@ -70,11 +70,27 @@ The setup script bootstraps dependencies, registers the global `nxctl` and `nxsc
 git clone https://github.com/nxctf/nxctl
 cd nxctl
 
-sudo ./setup.sh install
+./setup.sh install
 nxscript service start
 
 source ~/.bashrc
 ```
+
+The default `--python-mode auto` first uses normal system Python installation
+when the host permits it. On PEP 668 externally-managed systems, the installer
+offers an isolated NXCTL virtual environment instead. Explicit modes are also
+available:
+
+```bash
+./setup.sh install --python-mode venv
+./setup.sh install --python-mode system
+./setup.sh install --python-mode system-break
+./setup.sh install --python-mode venv --venv-dir /custom/nxctl-venv
+```
+
+`system-break` is never selected automatically. Pinggy is optional; when its
+binary is missing or fails validation, the installer asks whether to install it
+and safely skips it when declined.
 
 For local development without installing, run commands from the repository root
 with `src` on `PYTHONPATH`:
