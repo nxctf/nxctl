@@ -14,6 +14,7 @@ from nxctl_api.serializers import (
     serialize_challenge_with_runtime,
 )
 from nxctl.core.git import GitRepository
+from nxctl.scripts.sync_service import ChallengeSyncService
 from nxctl.scripts.cli.base import get_services
 
 router = APIRouter()
@@ -80,15 +81,26 @@ def sync_challenges():
             branch=config.branch,
             token=config.access_token,
         )
-        challenges = challenge_service.sync_challenges(git_repo)
+        sync_result = ChallengeSyncService(
+            config,
+            challenge_service,
+            runtime_service,
+        ).sync(git_repo, auto_restart=True)
+        challenges = sync_result.challenges
         return {
             "ok": True,
             "synced": len(challenges),
-            "disabled_stale": getattr(
-                challenge_service,
-                "last_sync_disabled_stale_count",
-                0,
-            ),
+            "repository_changed": sync_result.repository_changed,
+            "changed_files": sync_result.changed_files,
+            "disabled_stale": sync_result.disabled_stale,
+            "runtime_updates": [
+                {
+                    "challenge": result.challenge,
+                    "status": result.status,
+                    "error": result.error or None,
+                }
+                for result in sync_result.runtime_results
+            ],
             "challenges": [
                 serialize_challenge_basic(challenge, runtime_service, config)
                 for challenge in challenges

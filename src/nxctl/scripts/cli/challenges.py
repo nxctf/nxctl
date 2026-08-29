@@ -136,97 +136,48 @@ def _restart_policy_text(config, challenge) -> str:
 
 def cmd_sync(args) -> int:
     try:
-        from nxctl.core.utils import LifecycleLock
-        config, challenge_service, runtime_service, export_manager = get_services()
-        with LifecycleLock(config, blocking=True):
-            git_repo = GitRepository(
-                repo_url=config.github_repo,
-                cache_dir=config.chall_dir,
-                branch=config.branch,
-                token=config.access_token,
-            )
+        from nxctl.scripts.sync_service import ChallengeSyncService
 
-            print(f"{bold('Syncing challenges')}")
+        config, challenge_service, runtime_service, export_manager = get_services()
+        git_repo = GitRepository(
+            repo_url=config.github_repo,
+            cache_dir=config.chall_dir,
+            branch=config.branch,
+            token=config.access_token,
+        )
+
+        print(f"{bold('Syncing challenges')}")
         reporter = ProgressReporter(indent=2)
         reporter.ok(f"Repository: {config.github_repo}")
         reporter.ok(f"Branch: {config.branch}")
 
-        # 1. Fetch old commit hash before pulling
-        old_hash = None
-        if git_repo._is_git_repository(git_repo.local_path):
-            try:
-                old_hash = git_repo.get_commit_hash()
-            except Exception:
-                pass
-
-        # 2. Pull updates and discover challenges
         with reporter.step("Fetching repository and discovering challenges"):
-            challenges = challenge_service.sync_challenges(git_repo)
+            sync_result = ChallengeSyncService(
+                config,
+                challenge_service,
+                runtime_service,
+            ).sync(git_repo, auto_restart=True)
+        challenges = sync_result.challenges
         reporter.ok(f"Synced {len(challenges)} challenges")
 
-        # 3. Fetch new commit hash
-        new_hash = None
-        try:
-            new_hash = git_repo.get_commit_hash()
-        except Exception:
-            pass
+        if sync_result.repository_changed:
+            reporter.ok(f"Repository updated: {len(sync_result.changed_files)} changed file(s)")
+        else:
+            reporter.ok("Repository already up to date; runtimes were not touched")
 
-        # 4. Determine if files changed for each challenge
-        changed_files = []
-        if old_hash and new_hash and old_hash != new_hash:
-            import subprocess
-            try:
-                res = subprocess.run(
-                    ["git", "-C", str(git_repo.local_path), "diff", "--name-only", old_hash, new_hash],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
+        if sync_result.disabled_stale:
+            reporter.warn(f"Disabled {sync_result.disabled_stale} stale challenge(s)")
+
+        sync_failed = False
+        for runtime_result in sync_result.runtime_results:
+            if runtime_result.status == "restarted":
+                reporter.ok(f"Updated running challenge: {runtime_result.challenge}")
+            else:
+                sync_failed = True
+                reporter.warn(
+                    f"Kept {runtime_result.challenge} safe ({runtime_result.status}): "
+                    f"{runtime_result.error}"
                 )
-                if res.returncode == 0:
-                    changed_files = [f.strip() for f in res.stdout.split("\n") if f.strip()]
-            except Exception as git_diff_exc:
-                logger.warning(f"Failed to get changed files from git diff: {git_diff_exc}")
-
-        stale_count = getattr(challenge_service, "last_sync_disabled_stale_count", 0)
-        if stale_count:
-            reporter.warn(f"Disabled {stale_count} stale challenge(s)")
-
-        # 5. Check if any running challenge has changed files
-        if challenges and changed_files:
-            from nxctl.scripts.cli.lifecycle import restart_challenge_lifecycle
-            from pathlib import Path
-
-            for challenge in challenges:
-                chall_path = challenge.path or ""
-                prefix = chall_path.replace("\\", "/").strip("/") + "/"
-                has_changes = False
-                if not chall_path or chall_path == ".":
-                    has_changes = len(changed_files) > 0
-                else:
-                    chall_norm = chall_path.replace("\\", "/").strip("/")
-                    for f in changed_files:
-                        f_norm = f.replace("\\", "/").strip("/")
-                        if f_norm.startswith(prefix) or f_norm == chall_norm:
-                            has_changes = True
-                            break
-
-                if has_changes:
-                    try:
-                        runtime = runtime_service.status(challenge.name)
-                        if runtime.status == "running":
-                            reporter.ok(f"Changes detected for running challenge: {challenge.name}")
-                            with reporter.step(f"Auto-restarting {challenge.name} to apply updates"):
-                                restart_challenge_lifecycle(
-                                    challenge.name,
-                                    challenge_service,
-                                    runtime_service,
-                                    export_manager,
-                                    force=True,
-                                    no_cache=True,
-                                    reporter=reporter,
-                                )
-                    except Exception as run_exc:
-                        logger.warning(f"Could not auto-restart challenge {challenge.name}: {run_exc}")
 
         if challenges:
             rows = [
@@ -234,7 +185,7 @@ def cmd_sync(args) -> int:
                 for challenge in challenges
             ]
             print(table(["Challenge", "Ports", "Path"], rows, [36, 42, 64]))
-        return 0
+        return 1 if sync_failed else 0
     except GitError as e:
         print(f"{red(ERR)} Sync failed: {str(e)}")
         return 1

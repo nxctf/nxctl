@@ -808,6 +808,83 @@ class ExportManager:
         finally:
             close_db_connection(conn)
 
+    def list_export_log_files(self, challenge_name: str) -> list[dict]:
+        """Return provider log files owned by the latest runtime of a challenge."""
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                    SELECT ce.provider, ce.target_port, ce.created_at
+                    FROM challenge_exports ce
+                    JOIN runtime_instances ri ON ri.id = ce.runtime_id
+                    JOIN challenges c ON c.id = ri.challenge_id
+                    WHERE c.name = ?
+                      AND ce.provider != ?
+                      AND ri.id = (
+                          SELECT id
+                          FROM runtime_instances
+                          WHERE challenge_id = c.id
+                          ORDER BY created_at DESC, id DESC
+                          LIMIT 1
+                      )
+                    ORDER BY ce.created_at DESC, ce.id DESC
+                """,
+                (challenge_name, EXPORT_PROVIDER_BASE_IP),
+            )
+            rows = cursor.fetchall()
+        finally:
+            close_db_connection(conn)
+
+        log_root = Path(self.config.export_logs_dir).resolve()
+        results = []
+        seen_paths = set()
+        for row in rows:
+            provider_name = str(row["provider"] or "")
+            host_port = int(row["target_port"] or 0)
+            provider = self.get_provider(provider_name)
+            if not provider or not host_port:
+                continue
+
+            log_path = None
+            try:
+                if provider_name == EXPORT_PROVIDER_PINGGY:
+                    _, state = provider._load_state(challenge_name, host_port)
+                else:
+                    _, state = provider._load_state(host_port)
+                state_log = str((state or {}).get("log_file") or "")
+                if state_log:
+                    log_path = Path(state_log)
+            except Exception:
+                pass
+
+            if log_path is None:
+                try:
+                    if provider_name == EXPORT_PROVIDER_PINGGY:
+                        log_path = provider._get_log_file(challenge_name, host_port)
+                    else:
+                        log_path = provider._get_log_file(host_port)
+                except Exception:
+                    continue
+
+            try:
+                resolved = Path(log_path).resolve()
+                resolved.relative_to(log_root)
+            except (OSError, ValueError):
+                continue
+            if resolved in seen_paths or not resolved.is_file():
+                continue
+            seen_paths.add(resolved)
+            results.append(
+                {
+                    "provider": provider_name,
+                    "port": host_port,
+                    "path": resolved,
+                    "created_at": row["created_at"],
+                }
+            )
+        return results
+
     def reconcile_exports(self) -> int:
         """Check active exports and mark dead/stopped-runtime records inactive."""
         dead_count = self.dedupe_active_exports()

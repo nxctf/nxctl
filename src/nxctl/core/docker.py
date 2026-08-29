@@ -127,6 +127,53 @@ def run_docker_compose_up(compose_path: Path, cwd: Optional[Path] = None, detach
         raise DockerError(f"Start failed: {str(e)}")
 
 
+def run_docker_compose_logs(
+    compose_path: Path,
+    cwd: Optional[Path] = None,
+    services: Optional[list[str]] = None,
+    tail: int = 100,
+    follow: bool = False,
+    since: Optional[str] = None,
+) -> str:
+    """Read or follow logs from a generated Docker Compose runtime."""
+    compose_path = Path(compose_path).resolve()
+    if not compose_path.exists():
+        raise DockerError(f"docker-compose.yml not found: {compose_path}")
+
+    cwd = Path(cwd).resolve() if cwd else compose_path.parent
+    cmd = _compose_cmd(cwd) + ["-f", str(compose_path), "logs"]
+    if follow:
+        cmd.append("--follow")
+    cmd.extend(["--tail", str(max(0, int(tail)))])
+    if since:
+        cmd.extend(["--since", str(since)])
+    cmd.extend(str(service) for service in (services or []) if service)
+
+    try:
+        if follow:
+            result = subprocess.run(cmd, cwd=str(cwd), check=False)
+            if result.returncode != 0:
+                raise DockerError(f"Logs command failed with exit code {result.returncode}")
+            return ""
+
+        result = subprocess.run(
+            cmd,
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            raise DockerError(f"Logs command failed: {result.stderr.strip()}")
+        return result.stdout
+    except subprocess.TimeoutExpired:
+        raise DockerError("Logs operation timed out")
+    except DockerError:
+        raise
+    except Exception as e:
+        raise DockerError(f"Logs failed: {str(e)}")
+
+
 def run_docker_compose_down(compose_path: Path, cwd: Optional[Path] = None) -> dict:
     """Stop containers using docker compose."""
     compose_path = Path(compose_path).resolve()

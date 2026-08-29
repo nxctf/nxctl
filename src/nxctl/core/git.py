@@ -227,6 +227,29 @@ class GitRepository:
 
         return result.stdout.strip()
 
+    def changed_files(self, old_revision: str, new_revision: str) -> list[str]:
+        """Return repository-relative files changed between two revisions."""
+        if not old_revision or not new_revision or old_revision == new_revision:
+            return []
+
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.local_path),
+                "diff",
+                "--name-only",
+                old_revision,
+                new_revision,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode != 0:
+            raise GitError(result.stderr or "Failed to determine changed files")
+        return [line.strip().replace("\\", "/") for line in result.stdout.splitlines() if line.strip()]
+
     def list_paths(self, subdirectory: str = "") -> list[str]:
         search_dir = (
             self.local_path / subdirectory

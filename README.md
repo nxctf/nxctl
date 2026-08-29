@@ -159,6 +159,7 @@ Example response shape from the API:
 | `nxctl down --all` | Stop all running challenges and tunnel processes | `nxctl down --all` |
 | `nxctl restart` | Reset container volumes while preserving its tunnel, host port, and TTL | `nxctl restart web/sqli` |
 | `nxctl extend` | Add time to a running challenge | `nxctl extend web/sqli` |
+| `nxctl logs` | Show container and tunnel logs by challenge or prefix | `nxctl logs --all NFCTF --tail 100` |
 
 ### Tunnels
 

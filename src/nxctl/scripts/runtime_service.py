@@ -13,7 +13,13 @@ from datetime import datetime, timedelta
 
 from nxctl.core.models import Challenge, ChallengePort, RuntimeInstance
 from nxctl.core.db import get_db_connection, close_db_connection
-from nxctl.core.docker import run_docker_compose_build, run_docker_compose_up, run_docker_compose_down_with_cleanup, DockerError
+from nxctl.core.docker import (
+    DockerError,
+    run_docker_compose_build,
+    run_docker_compose_down_with_cleanup,
+    run_docker_compose_logs,
+    run_docker_compose_up,
+)
 from nxctl.core.utils import is_port_in_use, safe_runtime_name
 from nxctl.core.yaml import extract_ports_from_compose
 
@@ -643,6 +649,7 @@ class RuntimeService:
         preferred_ports: Optional[list[dict | ChallengePort]] = None,
         preserve_expires_at: Optional[datetime] = None,
         reuse_runtime: bool = False,
+        skip_build: bool = False,
     ) -> RuntimeInstance:
         """Start a challenge runtime (includes automatic build)."""
         # Get challenge from DB
@@ -674,13 +681,13 @@ class RuntimeService:
         if not docker_compose.exists():
             raise RuntimeError(f"docker-compose.yml not found in {challenge_dir}")
 
-        # Auto-build before starting
-        try:
-            logger.info(f"Building image for challenge: {challenge_name}")
-            run_docker_compose_build(docker_compose, cwd=challenge_dir, no_cache=no_cache)
-            logger.info(f"Successfully built image for {challenge_name}")
-        except DockerError as e:
-            raise RuntimeError(f"Build failed: {str(e)}")
+        if not skip_build:
+            try:
+                logger.info(f"Building image for challenge: {challenge_name}")
+                run_docker_compose_build(docker_compose, cwd=challenge_dir, no_cache=no_cache)
+                logger.info(f"Successfully built image for {challenge_name}")
+            except DockerError as e:
+                raise RuntimeError(f"Build failed: {str(e)}")
 
         try:
             # Load and modify docker-compose
@@ -842,6 +849,42 @@ class RuntimeService:
             raise RuntimeError(f"Start failed: {str(e)}")
         except Exception as e:
             raise RuntimeError(f"Start failed: {str(e)}")
+
+    def logs(
+        self,
+        challenge_name: str,
+        services: Optional[list[str]] = None,
+        tail: int = 100,
+        follow: bool = False,
+        since: Optional[str] = None,
+    ) -> str:
+        """Read logs from the Compose project owned by a challenge runtime."""
+        challenge = self._get_challenge_from_db(challenge_name)
+        if not challenge:
+            raise RuntimeError(f"Challenge not found: {challenge_name}")
+
+        challenge_dir = (self.git_cache_dir / challenge.path).resolve()
+        runtime_compose = self._runtime_compose_file(challenge_name)
+        legacy_compose = self._legacy_runtime_compose_file(challenge_dir)
+        source_compose = challenge_dir / "docker-compose.yml"
+        compose_path = next(
+            (path for path in (runtime_compose, legacy_compose, source_compose) if path.exists()),
+            None,
+        )
+        if not compose_path:
+            raise RuntimeError(f"No Docker Compose file found for {challenge_name}")
+
+        try:
+            return run_docker_compose_logs(
+                compose_path,
+                cwd=challenge_dir,
+                services=services,
+                tail=tail,
+                follow=follow,
+                since=since,
+            )
+        except DockerError as e:
+            raise RuntimeError(str(e))
 
     def stop(
         self,

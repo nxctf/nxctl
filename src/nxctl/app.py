@@ -76,6 +76,7 @@ from nxctl.scripts.cli.exports import (
     cmd_test,
     cmd_ps,
 )
+from nxctl.scripts.cli.logs import cmd_logs
 
 
 def add_debug_flag(parser: argparse.ArgumentParser, *, default=False) -> None:
@@ -175,6 +176,29 @@ Examples:
     status_cmd.add_argument("name", nargs="?", help="Optional challenge name filter")
     status_cmd.add_argument("-w", "--watch", action="store_true", help="Watch status in real-time (every 15s)")
     status_cmd.set_defaults(func=cmd_status)
+
+    logs_cmd = subparsers.add_parser("logs", help="Show container and tunnel logs")
+    add_debug_flag(logs_cmd, default=argparse.SUPPRESS)
+    logs_cmd.add_argument("name", nargs="?", help="Challenge name or path prefix")
+    logs_cmd.add_argument("service", nargs="?", help="Optional Docker Compose service")
+    logs_cmd.add_argument("-a", "--all", action="store_true", help="Show all challenges, optionally under a prefix")
+    logs_cmd.add_argument("-f", "--follow", action="store_true", help="Follow container logs for one challenge")
+    logs_cmd.add_argument("--tail", type=int, default=100, help="Number of lines per log (default: 100)")
+    logs_cmd.add_argument("--since", help="Docker-compatible time filter, such as 10m or 2026-08-29T10:00:00")
+    logs_cmd.add_argument(
+        "--source",
+        choices=["all", "container", "tunnel"],
+        default="all",
+        help="Select container logs, tunnel logs, or both",
+    )
+    logs_cmd.add_argument(
+        "--tunnels",
+        dest="source",
+        action="store_const",
+        const="tunnel",
+        help="Show only tunnel provider logs",
+    )
+    logs_cmd.set_defaults(func=cmd_logs)
 
     extend_cmd = subparsers.add_parser("extend", help="Extend challenge runtime")
     add_debug_flag(extend_cmd, default=argparse.SUPPRESS)
